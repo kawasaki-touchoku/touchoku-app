@@ -1494,6 +1494,66 @@ def remote_regenerate_key(name):
     remote_rewrite("tokens", rows)
 
 
+def qr_svg(text, size_mm=38):
+    """文字列をQRコード（SVG）にする。追加の部品は不要（reportlabの機能を使う）。"""
+    from reportlab.graphics.barcode import qrencoder
+    qr = qrencoder.QRCode(None, qrencoder.QRErrorCorrectLevel.M)
+    qr.addData(text)
+    qr.make()
+    n = qr.getModuleCount()
+    quiet = 4   # 周りの余白（読み取りに必要）
+    cells = "".join(f"M{c + quiet},{r + quiet}h1v1h-1z" for r in range(n) for c in range(n) if qr.isDark(r, c))
+    total = n + quiet * 2
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {total} {total}" width="{size_mm}mm" height="{size_mm}mm" '
+            f'shape-rendering="crispEdges"><rect width="{total}" height="{total}" fill="#fff"/><path d="{cells}" fill="#000"/></svg>')
+
+
+def remote_qr_cards_html(cards):
+    """
+    先生ごとの専用URLをQRコード付きのカードにした、印刷用のHTMLを作る（A4に8人分）。
+    ブラウザで開いて印刷するので、日本語の文字化けが起きない。
+    cards: [(先生, 専用URL)]
+    """
+    import html as _html
+    items = []
+    for name, url in cards:
+        items.append(f"""
+<div class="card">
+  <div class="label">当直NG日 入力用</div>
+  <div class="name">{_html.escape(name)} 先生</div>
+  <div class="body">
+    {qr_svg(url)}
+    <div class="note">
+      スマートフォンのカメラで<br>QRコードを読み取ると、<br>当直NG日の入力ページが<br>開きます。<br><br>
+      ・このURLは毎月同じです。<br>　ブックマークすると便利です。<br>
+      ・先生専用です。他の方に<br>　渡さないでください。
+    </div>
+  </div>
+  <div class="url">{_html.escape(url)}</div>
+</div>""")
+    return f"""<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>当直NG日入力 配布用カード</title>
+<style>
+@page {{ size: A4 portrait; margin: 10mm; }}
+* {{ box-sizing: border-box; }}
+body {{ margin: 0; font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif; color: #222; }}
+.bar {{ padding: 12px 16px; background: #eef3f8; border-bottom: 1px solid #cfd8e3; font-size: 14px; }}
+.bar button {{ font-size: 15px; padding: 8px 18px; margin-right: 12px; cursor: pointer; }}
+.sheet {{ display: grid; grid-template-columns: 95mm 95mm; grid-auto-rows: 69mm; width: 190mm; margin: 10mm auto; }}
+.card {{ border: 1px dashed #999; padding: 4mm 5mm; position: relative; break-inside: avoid; page-break-inside: avoid; }}
+.label {{ font-size: 8pt; color: #5a6680; }}
+.name {{ font-size: 15pt; font-weight: 700; margin: 1mm 0 2mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+.body {{ display: flex; gap: 3mm; align-items: flex-start; }}
+.body svg {{ flex: none; }}
+.note {{ font-size: 7.5pt; line-height: 1.45; }}
+.url {{ position: absolute; left: 5mm; right: 5mm; bottom: 3mm; font-size: 5.5pt; color: #666; word-break: break-all; font-family: monospace; }}
+@media print {{ .bar {{ display: none; }} .sheet {{ margin: 0; }} }}
+</style></head><body>
+<div class="bar"><button onclick="window.print()">🖨️ 印刷する</button>
+A4・縦で印刷し、点線で切り離して各先生に渡してください（{len(cards)}名分）。印刷の設定で「倍率：100%（実際のサイズ）」を選ぶと、きれいに収まります。</div>
+<div class="sheet">{''.join(items)}</div>
+</body></html>"""
+
+
 def remote_latest_submissions(month_key):
     """その年月の、先生ごとの最新の提出 {先生: {"NG日":…, "保存日時":…}}"""
     latest = {}
@@ -1751,6 +1811,18 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
                          column_config={"専用URL": st.column_config.LinkColumn("専用URL（右上のアイコンでコピーできます）")})
             st.download_button("📥 URL一覧をCSVでダウンロード", pd.DataFrame(url_rows).to_csv(index=False).encode("utf-8-sig"),
                                file_name="NG日入力_専用URL一覧.csv", mime="text/csv", key="remote_url_csv")
+            # 紙で配る用：QRコード付きカード（A4に8人分、点線で切り離す）
+            card_targets = st.multiselect("配布用カードを作る先生（URLを作り直した先生だけ印刷する場合などは絞り込めます）",
+                                          [r["先生"] for r in url_rows], default=[r["先生"] for r in url_rows], key="remote_card_targets")
+            if card_targets:
+                url_by_name = {r["先生"]: r["専用URL"] for r in url_rows}
+                try:
+                    st.download_button(f"🖨️ 配布用カード（QRコード付き・{len(card_targets)}名分）をダウンロード",
+                                       remote_qr_cards_html([(n, url_by_name[n]) for n in card_targets]).encode("utf-8"),
+                                       file_name="NG日入力_配布用カード.html", mime="text/html", key="remote_qr_cards", type="primary")
+                    st.caption("ダウンロードしたファイルを開くとブラウザに表示されるので、「印刷する」を押してA4で印刷します。8人分ずつ並ぶので、点線で切って各先生に渡してください。先生はスマートフォンのカメラでQRコードを読み取るだけで入力ページを開けます。")
+                except ImportError:
+                    st.error("カードを作るには、requirements.txt に「reportlab」の1行を追加してください。")
             if st.checkbox("URLを作り直す（URLが漏れてしまった場合）", key="remote_regen_open"):
                 target = st.selectbox("作り直す先生", [r["先生"] for r in url_rows], key="remote_regen_target")
                 st.caption("作り直すと、古いURLは使えなくなります。新しいURLをその先生に送り直してください。")
