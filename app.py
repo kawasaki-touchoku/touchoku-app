@@ -2597,7 +2597,13 @@ if not valid_staff.empty:
 
     # 先生方のコメント（専用URLから）と、医師条件の備考。選択欄の💬マークと、カレンダーの上の表示に使う
     doctor_comments = remote_comments_safe(year, month)
-    doctor_notes = {str(r["先生の名前"]): clean_text(r.get("備考（メモ・説明など自由記入）", "")) for _, r in valid_staff.iterrows()}
+    # 備考の列名は「備考」「備考（メモ…）」「備考(メモ…)」など、CSVによって少し違うことがあるので、
+    # 「備考」で始まる列をすべて見る
+    note_columns = [c for c in valid_staff.columns if str(c).strip().startswith("備考")]
+    doctor_notes = {
+        str(r["先生の名前"]): "\n".join(clean_text(r.get(c, "")) for c in note_columns if clean_text(r.get(c, "")) and clean_text(r.get(c, "")).lower() not in ("nan", "none"))
+        for _, r in valid_staff.iterrows()
+    }
 
     def ng_doctor_label(name):
         count = sum(
