@@ -553,6 +553,19 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
     return days, rows
 
 
+def slot_label(text, newline):
+    """
+    セルに入れる枠名の改行位置を決める。「外来宿直」は「外来／宿直」で区切り、
+    同じ日に2つの当直がある場合（A日直/A宿直）は1つずつ改行する。
+    """
+    parts = []
+    for name in str(text).split("/"):
+        if name.startswith("外来") and len(name) > 2:
+            name = "外来" + newline + name[2:]
+        parts.append(name)
+    return newline.join(parts)
+
+
 def shortage_slots(days):
     """不足がある枠を、表の列と同じ順で返す。"""
     used = {x['slot'] for info in days for x in info['shortage']}
@@ -610,7 +623,7 @@ def duty_matrix_html(days, rows, year, month):
 .dm thead .nm{background:#f3f5f8;z-index:2}
 .dm .pmcol{padding:0 6px;color:#566174}
 .dm td.hol{background:#fdf1f1}
-.dm .cell{display:flex;align-items:center;justify-content:center;height:100%;min-height:26px;font-weight:700;font-size:10px;padding:1px 2px;width:38px;margin:0 auto;white-space:normal;line-height:1.15;text-align:center;word-break:break-all}
+.dm .cell{display:flex;align-items:center;justify-content:center;height:100%;min-height:26px;font-weight:700;font-size:10px;padding:1px 2px;width:38px;margin:0 auto;white-space:normal;line-height:1.15;text-align:center;word-break:keep-all}
 .dm .ng{color:#c0392b;font-size:14px}
 .dm .pm{background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)}
 .dm tr.short.first td{border-top:2px solid #c0392b}
@@ -651,7 +664,7 @@ def duty_matrix_html(days, rows, year, month):
             if cell['type'] == 'shift':
                 bg, fg = MATRIX_SHIFT_COLORS.get(cell['shift'], ('#eee', '#000'))
                 wish_css = f'box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME},inset 0 0 0 4px #ffffff;' if cell.get('wish') else ''
-                tr.append(f'<td><div class="cell" style="background:{bg};color:{fg};{wish_css}">{cell["text"].replace("/", "<br>")}</div></td>')
+                tr.append(f'<td><div class="cell" style="background:{bg};color:{fg};{wish_css}">{slot_label(cell["text"], "<br>")}</div></td>')
             elif cell['type'] == 'ng':
                 pm_class = ' pm' if cell.get('pm') else ''
                 tr.append(f'<td{td_class}><div class="cell ng{pm_class}">{cell["text"]}</div></td>')
@@ -671,7 +684,7 @@ def duty_matrix_html(days, rows, year, month):
             count = sum(x['count'] for x in info['shortage'] if x['slot'] == slot)
             if count:
                 slot_total += 1
-                label = slot if count == 1 else f'{slot}×{count}'
+                label = slot_label(slot, "<br>") + ("" if count == 1 else f"×{count}")
                 tr.append(f'<td><div class="cell" style="background:{bg};color:{fg};white-space:normal;line-height:1.15;font-size:10px">{label}</div></td>')
             else:
                 tr.append('<td></td>')
@@ -747,7 +760,7 @@ def duty_matrix_xlsx(days, rows, year, month):
                 full.append(f"【備考】{row['note']}")
             memo.comment = Comment("\n".join(full), "当直作成アプリ", width=260, height=120)
         for i, (info, cell) in enumerate(zip(days, row['cells'])):
-            c = ws.cell(row=r_idx, column=first_day_col + i, value=cell['text'].replace('/', '\n') or None)
+            c = ws.cell(row=r_idx, column=first_day_col + i, value=slot_label(cell['text'], '\n') or None)
             if cell['type'] == 'shift':
                 bg, fg = MATRIX_SHIFT_COLORS.get(cell['shift'], ('#EEEEEE', '#000000'))
                 c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#'))
@@ -776,7 +789,8 @@ def duty_matrix_xlsx(days, rows, year, month):
         for j, (key, _) in enumerate(MATRIX_COUNT_COLUMNS):
             style_count_cell(ws.cell(row=r_idx, column=sum_col + j), key, False)
         # 同じ日に2つ当直がある医師の行は、2段で表示できる高さにする
-        ws.row_dimensions[r_idx].height = 30 if any('/' in cell['text'] for cell in row['cells']) else 20
+        max_lines = max([slot_label(cell['text'], '\n').count('\n') + 1 for cell in row['cells'] if cell['type'] == 'shift'] or [1])
+        ws.row_dimensions[r_idx].height = max(20, 11 * max_lines + 6)
 
     # 当直が決まっていない枠：枠ごとに1行、その枠の色で表示
     last_row = header_row + len(rows)
@@ -792,7 +806,7 @@ def duty_matrix_xlsx(days, rows, year, month):
             c.border = Border(left=thin, right=thin, bottom=thin, top=red if k == 0 else thin)
             if count:
                 slot_total += 1
-                c.value = slot if count == 1 else f'{slot}×{count}'
+                c.value = slot_label(slot, '\n') + ('' if count == 1 else f'×{count}')
                 c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#'))
                 ws.cell(row=header_row, column=first_day_col + i).fill = fill('#FDE2E0')
             c.alignment = center
