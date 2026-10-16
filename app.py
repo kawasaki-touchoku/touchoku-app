@@ -584,7 +584,15 @@ def memo_cell_html(row):
         parts.append(f'<b>💬 コメント</b>（{html_escape(row.get("comment_at", ""))}）<br>' + html_escape(row["comment"]).replace("\n", "<br>"))
     if row.get("note"):
         parts.append('<b>📝 備考</b><br>' + html_escape(row["note"]).replace("\n", "<br>"))
-    return (f'<td class="memo"><details><summary title="押すと全文を表示">{html_escape(memo_preview(row))}</summary>'
+    # ポップアップ用の全文（カーソルを合わせると表示される）
+    tip = []
+    if row.get("comment"):
+        tip.append(f"💬 コメント（{row.get('comment_at', '')}）\n{row['comment']}")
+    if row.get("note"):
+        tip.append(f"📝 備考\n{row['note']}")
+    tip_text = html_escape("\n\n".join(tip)).replace("\n", "&#10;")
+    # パソコン：カーソルを合わせるとポップアップ。スマートフォン（カーソルがない）：タップでその場に開く
+    return (f'<td class="memo"><details><summary title="{tip_text}">{html_escape(memo_preview(row))}</summary>'
             f'<div class="full">{"<br><br>".join(parts)}</div></details></td>')
 
 
@@ -614,6 +622,7 @@ def duty_matrix_html(days, rows, year, month):
 .dm .memo details summary::-webkit-details-marker{display:none}
 .dm .memo details[open] summary{color:#1f3c74;font-weight:700}
 .dm .memo .full{white-space:normal;width:220px;padding:4px 6px;margin:2px 0 4px;background:#f6f8fb;border:1px solid #d8dde5;border-radius:4px;line-height:1.45}
+@media (hover:hover){.dm .memo details .full{display:none}.dm .memo details summary{cursor:help}}
 .dm-legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;margin:2px 0 6px;color:#243247}
 .dm-legend span{display:inline-flex;align-items:center;gap:4px}
 .dm-legend i{display:inline-block;min-width:34px;padding:1px 4px;border:1px solid #d8dde5;border-radius:3px;font-style:normal;font-weight:700;text-align:center;font-size:11px}
@@ -623,7 +632,7 @@ def duty_matrix_html(days, rows, year, month):
         legend.append(f'<span><i style="background:{bg};color:{fg}">{s}</i></span>')
     legend.append(f'<span><i style="box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME}">★</i>希望日が通った当直</span>')
     legend.append('<span><i style="color:#c0392b">×</i>当直NG（宿×＝宿直NG、日×＝日直NG）</span>')
-    legend.append('<span><i>💬📝</i>メモ欄：先生からのコメント・備考（押すと全文）</span>')
+    legend.append('<span><i>💬📝</i>メモ欄：先生からのコメント・備考（カーソルを合わせると全文）</span>')
     legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>翌日PM duty（宿直を外す日）</span>')
     legend.append('<span><i style="color:#c0392b;border-color:#c0392b">⚠️ 未決定</i>赤線の下：当直が決まっていない枠</span>')
     legend.append('</div>')
