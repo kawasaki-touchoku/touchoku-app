@@ -1362,7 +1362,7 @@ def show_schedule_notice(result, messages):
 #   ・settings    … 受付中の年月・休日設定・締め切り状態
 #   ・submissions … 先生が保存するたびに1行ずつ追記（最新の行が有効。履歴として残る）
 # ==========================================
-DEFAULT_APP_URL = "https://shift-app-unwcytc7aqvml6k9djhfup.streamlit.app"
+DEFAULT_APP_URL = "https://touchoku-app.streamlit.app"
 REMOTE_SHEETS = {
     "tokens": ["先生", "キー", "翌日PM duty", "作成日時"],
     "settings": ["項目", "値"],
