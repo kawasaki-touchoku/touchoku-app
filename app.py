@@ -1957,14 +1957,61 @@ def remote_comments_safe(year, month):
     return {name: (r.get("コメント", "").strip(), r.get("保存日時", ""))
             for name, r in latest.items() if r.get("コメント", "").strip()}
 
-def import_remote_ng(year, month, submissions):
+NG_BANDS = {"全NG": {"day", "night"}, "日NG": {"day"}, "宿NG": {"night"}}
+
+
+def merge_ng(a, b):
+    """2つのNG指定 {日: 種類} を合わせる。例：日NG＋宿NG → 全NG。"""
+    merged = {}
+    for d in set(a) | set(b):
+        bands = NG_BANDS.get(a.get(d), set()) | NG_BANDS.get(b.get(d), set())
+        if bands == {"day", "night"}:
+            merged[d] = "全NG"
+        elif bands == {"day"}:
+            merged[d] = "日NG"
+        elif bands == {"night"}:
+            merged[d] = "宿NG"
+    return merged
+
+
+def planned_import(name, year, month, submitted, mode):
+    """
+    取り込み後のNG日を計算する。
+    合わせる：管理者が入れたNG（CSV・カレンダー）と先生の提出の両方を残す。
+              前回取り込んだ分は差し替えるので、先生が提出し直してNGを減らした場合も正しく反映される。
+    置き換える：先生の提出内容だけにする。
+    戻り値：(取り込み後, 管理者側の元のNG)
+    """
+    num_days = calendar.monthrange(year, month)[1]
+    current = {d: st.session_state.get(f"ng_{name}_{year}_{month}_{d}", "OK") for d in range(1, num_days + 1)}
+    current = {d: v for d, v in current.items() if v != "OK"}
+    last = st.session_state.get(f"ng_import_last_{name}_{year}_{month}")
+    base = dict(current)
+    if last:
+        # 前回の取り込み結果から変わっていない日は、取り込み前の管理者の値に戻してから合わせ直す
+        last_result, last_base = last
+        base = {}
+        for d in set(current) | set(last_result):
+            if current.get(d) == last_result.get(d):
+                if last_base.get(d):
+                    base[d] = last_base[d]
+            elif current.get(d):
+                base[d] = current[d]
+    result = submitted if mode == "replace" else merge_ng(base, submitted)
+    return result, base
+
+
+def import_remote_ng(year, month, submissions, mode="merge"):
     """先生方の提出内容を、アプリのNGカレンダー（画面の保存値）に取り込む。"""
     num_days = calendar.monthrange(year, month)[1]
     for doctor, r in submissions.items():
-        values = parse_ng_dict(r.get("NG日", ""), year, month)
+        submitted = parse_ng_dict(r.get("NG日", ""), year, month)
+        result, base = planned_import(doctor, year, month, submitted, mode)
         for d in range(1, num_days + 1):
-            st.session_state[f"ng_{doctor}_{year}_{month}_{d}"] = values.get(d, "OK")
-    st.session_state["remote_import_message"] = f"{len(submissions)}名分のNG日を取り込みました。"
+            st.session_state[f"ng_{doctor}_{year}_{month}_{d}"] = result.get(d, "OK")
+        st.session_state[f"ng_import_last_{doctor}_{year}_{month}"] = (result, base)
+    how = "管理者の入力と合わせて" if mode == "merge" else "先生の提出内容に置き換えて"
+    st.session_state["remote_import_message"] = f"{len(submissions)}名分のNG日を、{how}取り込みました。"
 
 
 def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_special_holiday, day_is_holiday):
@@ -2091,21 +2138,24 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
             st.success(flash)
         importable = {name: r for name, r in submissions.items() if name in {n for n, _ in doctor_rows}}
         if importable:
+            mode = "replace"   # 取り込むと、その先生のNG日は提出内容に置き換わる
             changes = []
             for name, r in importable.items():
-                new = parse_ng_dict(r.get("NG日", ""), year, month)
-                old = {d: st.session_state.get(f"ng_{name}_{year}_{month}_{d}", "OK") for d in day_is_holiday}
-                old = {d: v for d, v in old.items() if v != "OK"}
-                if new != old:
+                submitted = parse_ng_dict(r.get("NG日", ""), year, month)
+                result, _ = planned_import(name, year, month, submitted, mode)
+                now = {d: st.session_state.get(f"ng_{name}_{year}_{month}_{d}", "OK") for d in day_is_holiday}
+                now = {d: v for d, v in now.items() if v != "OK"}
+                if result != now:
                     changes.append({"先生": name,
-                                    "今のNG日（アプリ）": ng_text_summary(ng_dict_to_text(old), year, month, custom_holidays) or "なし",
+                                    "今のNG日（アプリ）": ng_text_summary(ng_dict_to_text(now), year, month, custom_holidays) or "なし",
                                     "取り込むNG日（提出）": ng_text_summary(r.get("NG日", ""), year, month, custom_holidays) or "なし"})
             if changes:
                 st.markdown("**取り込むと変わる先生**")
                 st.dataframe(pd.DataFrame(changes), hide_index=True, use_container_width=True)
                 st.button(f"⬇️ 提出されたNG日を取り込む（{len(changes)}名分）", key="remote_import", type="primary",
-                          on_click=import_remote_ng, args=(year, month, {n: importable[n] for n in [c["先生"] for c in changes]}))
-                st.caption("提出していない先生のNG日は変わりません。取り込んだあとも、下のカレンダーで個別に直せます。")
+                          on_click=import_remote_ng, args=(year, month, {n: importable[n] for n in [c["先生"] for c in changes]}, mode))
+                st.caption("取り込むと、その先生のNG日は提出内容に置き換わります（CSVなどで入れていたNGは消えます）。"
+                           "提出していない先生のNG日は変わりません。取り込んだあとも、下のカレンダーで個別に直せます。")
             else:
                 st.caption("提出内容は、すべてアプリに取り込み済みです。")
         unknown = [name for name in submissions if name not in {n for n, _ in doctor_rows}]
@@ -2168,7 +2218,7 @@ NG日の欄にある「📨 先生方からのNG日入力（専用URL）」を�
 3. **先生が入力**：先生はスマートフォンのカメラでQRコードを読み取り、カレンダーでNG日を選んで保存します。管理者へのコメントも書けます。締め切りまでは何度でも直せて、最後に保存した内容が採用されます。
 4. **提出状況を確認**：管理画面の表で、提出済み・未提出・コメントを確認できます。
 5. **締め切る**：「締め切る」を押すと、先生側は編集できなくなります。
-6. **取り込む**：「提出されたNG日を取り込む」を押すと、全員分が下のNGカレンダーに入ります。取り込んだあとも個別に直せます。
+6. **取り込む**：「提出されたNG日を取り込む」を押すと、全員分が下のNGカレンダーに入ります。その先生のNG日は、提出内容に置き換わります。取り込んだあとも個別に直せます。
 
 **方法B：管理者が直接入力する**
 
