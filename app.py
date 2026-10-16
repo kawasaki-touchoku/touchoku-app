@@ -2592,12 +2592,26 @@ edited_df = st.data_editor(
         ),
         "備考（メモ・説明など自由記入）": st.column_config.TextColumn(
             "備考",
-            help="管理用メモです。ここに書いた内容は計算に反映されません。"
+            help="管理用メモです。ここに書いた内容は計算に反映されません。セルをダブルクリックすると全文を編集できます。",
+            width="large",
         )
-    }
+    },
+    # 備考を名前のすぐ右に置き、幅を広くして読みやすくする
+    column_order=[c for c in base_df.columns if str(c).startswith("備考")] + [c for c in base_df.columns if not str(c).startswith("備考")],
+
 )
 
 staff_df = edited_df.reset_index()
+
+# 備考が長くて表の中で読み切れない場合のために、全文の一覧を出す
+_note_cols = [c for c in staff_df.columns if str(c).strip().startswith("備考")]
+_notes = [(clean_text(r.get("先生の名前", "")), "　".join(clean_text(r.get(c, "")) for c in _note_cols if clean_text(r.get(c, ""))))
+          for _, r in staff_df.iterrows()]
+_notes = [(n, t) for n, t in _notes if n and t]
+if _notes:
+    with st.expander(f"📝 備考の全文を見る（{len(_notes)}名）", expanded=False):
+        # st.table は長い文章を折り返して全部表示する
+        st.table(pd.DataFrame(_notes, columns=["先生の名前", "備考"]).set_index("先生の名前"))
 staff_df, staff_input_errors = validate_staff_inputs(staff_df, year, month)
 if staff_input_errors:
     show_input_errors(staff_input_errors)
