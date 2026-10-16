@@ -1366,7 +1366,7 @@ DEFAULT_APP_URL = "https://touchoku-app.streamlit.app"
 REMOTE_SHEETS = {
     "tokens": ["先生", "キー", "翌日PM duty", "作成日時"],
     "settings": ["項目", "値"],
-    "submissions": ["年月", "先生", "NG日", "保存日時"],
+    "submissions": ["年月", "先生", "NG日", "保存日時", "コメント"],
 }
 
 
@@ -1428,6 +1428,10 @@ def remote_read(name):
     if not values:
         return []
     header = values[0]
+    expected = REMOTE_SHEETS[name]
+    # あとから列を増やした場合（例：コメント列）、古い見出しのままでも新しい列名で読む
+    if len(header) < len(expected) and header == expected[:len(header)]:
+        header = expected
     return [dict(zip(header, row + [""] * (len(header) - len(row)))) for row in values[1:] if any(c.strip() for c in row)]
 
 
@@ -1436,7 +1440,14 @@ def remote_clear_cache():
 
 
 def remote_append(name, row):
-    remote_worksheet(name).append_row([str(v) for v in row], value_input_option="RAW")
+    ws = remote_worksheet(name)
+    expected = REMOTE_SHEETS[name]
+    # 列が足りなければ増やし、見出しも新しい形にそろえる（以前作ったシートでもそのまま使える）
+    if ws.col_count < len(expected):
+        ws.add_cols(len(expected) - ws.col_count)
+    if ws.row_values(1) != expected:
+        ws.update(values=[expected], range_name="A1", value_input_option="RAW")
+    ws.append_row([str(v) for v in row], value_input_option="RAW")
     remote_clear_cache()
 
 
@@ -1733,6 +1744,8 @@ def doctor_entry_page(key):
         if latest:
             summary = ng_text_summary(saved_text, year, month, holidays) or "NG日なし"
             st.write(f"提出内容（{latest.get('保存日時', '')} 保存）：{summary}")
+            if latest.get("コメント", "").strip():
+                st.write(f"管理者へのコメント：{latest.get('コメント', '')}")
         else:
             st.write("この月のNG日は提出されていません。")
         return
@@ -1754,8 +1767,10 @@ def doctor_entry_page(key):
         if latest:
             summary = ng_text_summary(saved_text, year, month, holidays) or "NG日なし（どの日も入れます）"
             title = "✅ 保存しました" if just_saved else "✅ 提出済みです"
+            comment_line = (f"**管理者へのコメント：** {latest.get('コメント', '').strip()}\n\n"
+                            if latest.get("コメント", "").strip() else "")
             st.success(f"**{title}**（{latest.get('保存日時', '')}）\n\n"
-                       f"**現在の提出内容：** {summary}\n\n"
+                       f"**現在の提出内容：** {summary}\n\n" + comment_line +
                        "変更したい場合は、カレンダーで選び直して、もう一度保存してください。")
         else:
             st.warning("**まだ提出されていません。** 当直に入れない日を選び、保存ボタンを押してください。"
@@ -1770,6 +1785,34 @@ def doctor_entry_page(key):
 - **全NG**：日直・宿直とも入れない日。土日祝だけ選べます。
 - ⚠ の日は、翌日PMにdutyがあるため、原則として宿直を外します。
         """)
+
+    # --- 管理者へのコメント（任意）。NG日の保存と一緒に送られる ---
+    comment_key = f"remote_comment_{year}_{month}"
+    if comment_key not in st.session_state:
+        st.session_state[comment_key] = latest.get("コメント", "") if latest else ""
+    st.text_area(
+        "管理者へのコメント・要望（任意）",
+        key=comment_key, max_chars=500, height=90,
+        placeholder="例：第2週は学会のため、できれば平日の宿直を避けたいです。／ 月4回までを希望します。",
+        help="NG日を保存するときに一緒に送られます。コメントだけ変えたい場合は、下の「コメントだけ保存」を押してください。",
+    )
+    if st.button("コメントだけ保存（NG日はそのまま）", key="remote_comment_only"):
+        if not latest:
+            st.warning("まだNG日を保存していません。下のカレンダーで選んで保存ボタンを押すと、コメントも一緒に保存されます。")
+            st.stop()
+        remote_clear_cache()
+        if remote_settings().get("締め切り", "") == "True":
+            st.error("受付が締め切られたため、保存できませんでした。担当者に直接ご連絡ください。")
+            return
+        try:
+            remote_append("submissions", [f"{year}-{month}", doctor, saved_text, remote_now(),
+                                          st.session_state.get(comment_key, "").strip()])
+        except Exception:
+            st.error("保存できませんでした。通信状態を確認して、もう一度押してください。")
+            return
+        st.session_state["remote_just_saved"] = True
+        st.rerun()
+    st.caption("NG日は下のカレンダーで選び、保存ボタンを押してください。コメントも一緒に保存されます。")
 
     layout = st.radio("表示", ["月間カレンダー", "1日〜月末を横一列"], horizontal=True, key="remote_layout")
     pm_weekdays = pm_duty_weekdays(tokens[doctor].get("翌日PM duty", ""))
@@ -1803,7 +1846,8 @@ def doctor_entry_page(key):
                         merged[d] = v
             try:
                 now = remote_now()
-                remote_append("submissions", [f"{year}-{month}", doctor, ng_dict_to_text(merged), now])
+                remote_append("submissions", [f"{year}-{month}", doctor, ng_dict_to_text(merged), now,
+                                              st.session_state.get(comment_key, "").strip()])
             except Exception:
                 st.error("保存できませんでした。通信状態を確認して、もう一度保存ボタンを押してください。")
                 return
@@ -1939,9 +1983,11 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
                 "状況": "✅ 提出済み" if r else "⏳ 未提出",
                 "最終保存": r.get("保存日時", "") if r else "",
                 "NG日": (ng_text_summary(text, year, month, custom_holidays) or "NG日なし") if r else "",
+                "コメント": r.get("コメント", "") if r else "",
             })
         done = sum(1 for r in status_rows if r["状況"].startswith("✅"))
-        st.caption(f"提出済み {done} / {len(status_rows)} 名")
+        with_comment = sum(1 for r in status_rows if r["コメント"].strip())
+        st.caption(f"提出済み {done} / {len(status_rows)} 名" + (f"　💬 コメントあり {with_comment} 名（表の「コメント」列）" if with_comment else ""))
         st.dataframe(pd.DataFrame(status_rows), hide_index=True, use_container_width=True)
 
         flash = st.session_state.pop("remote_import_message", None)
@@ -1975,7 +2021,8 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
             history = [r for r in remote_read("submissions") if r.get("年月") == month_key]
             if history:
                 st.dataframe(pd.DataFrame([{"保存日時": r.get("保存日時", ""), "先生": r.get("先生", ""),
-                                            "NG日": ng_text_summary(r.get("NG日", ""), year, month, custom_holidays) or "NG日なし"}
+                                            "NG日": ng_text_summary(r.get("NG日", ""), year, month, custom_holidays) or "NG日なし",
+                                            "コメント": r.get("コメント", "")}
                                            for r in reversed(history)]), hide_index=True, use_container_width=True)
             else:
                 st.caption("まだ履歴はありません。")
