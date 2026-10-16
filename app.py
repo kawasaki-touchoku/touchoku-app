@@ -1767,11 +1767,15 @@ def doctor_entry_page(key):
         if latest:
             summary = ng_text_summary(saved_text, year, month, holidays) or "NG日なし（どの日も入れます）"
             title = "✅ 保存しました" if just_saved else "✅ 提出済みです"
-            comment_line = (f"**管理者へのコメント：** {latest.get('コメント', '').strip()}\n\n"
-                            if latest.get("コメント", "").strip() else "")
             st.success(f"**{title}**（{latest.get('保存日時', '')}）\n\n"
-                       f"**現在の提出内容：** {summary}\n\n" + comment_line +
+                       f"**現在の提出内容：** {summary}\n\n"
                        "変更したい場合は、カレンダーで選び直して、もう一度保存してください。")
+            # コメントは、アプリの案内文と混ざらないように別の枠で表示する
+            comment = latest.get("コメント", "").strip()
+            if comment:
+                with st.container(border=True):
+                    st.markdown("💬 **保存されている管理者へのコメント**")
+                    st.text(f"「{comment}」")
         else:
             st.warning("**まだ提出されていません。** 当直に入れない日を選び、保存ボタンを押してください。"
                        "NG日がない場合も、そのまま保存ボタンを押してください（「NG日なし」として提出されます）。")
