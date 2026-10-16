@@ -464,7 +464,7 @@ MATRIX_SHIFT_COLORS = {
 MATRIX_NG_COLOR = ('#ffffff', '#c0392b')          # ×（当直NG）
 MATRIX_PM_COLOR = ('#ffe9b3', '#7a4b00')          # PM（翌日PM dutyで宿直を外す日）
 MATRIX_HOLIDAY_HEAD = '#c0392b'
-MATRIX_WISH_FRAME = '#111111'   # 希望が通った当直の囲み線（黒の太線）。枠名の前に★も付ける
+MATRIX_WISH_FRAME = '#8B4A1C'   # 希望が通った当直の囲み線（茶色の太線）
 # 右端の回数の列（宿直・日直・病棟・外来・平日・休日・合計）
 MATRIX_WARD_SHIFTS = ('A日直', 'B日直', 'A宿直', 'B宿直')
 MATRIX_OUTPATIENT_SHIFTS = ('外来宿直', '外来日直')
@@ -525,7 +525,7 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
                 # 希望が通った日（日付だけの希望はどの枠でも、枠指定の希望はその枠に入ったとき）
                 wish = d in wish_days or any((d, s) in wish_specific for s in assigned)
                 text = '/'.join(assigned)
-                cells.append({'type': 'shift', 'text': ('★' + text) if wish else text, 'shift': assigned[0], 'wish': wish})
+                cells.append({'type': 'shift', 'text': text, 'shift': assigned[0], 'wish': wish})
                 continue
             kind = ng.get(d)
             pm = pm_duty_restricted(datetime.date(year, month, d), pm_days, year, month, custom_holidays, next_month_special_holiday)
@@ -610,7 +610,7 @@ def duty_matrix_html(days, rows, year, month):
 .dm thead .nm{background:#f3f5f8;z-index:2}
 .dm .pmcol{padding:0 6px;color:#566174}
 .dm td.hol{background:#fdf1f1}
-.dm .cell{display:flex;align-items:center;justify-content:center;height:100%;min-height:26px;font-weight:700;font-size:11px;padding:0 2px}
+.dm .cell{display:flex;align-items:center;justify-content:center;height:100%;min-height:26px;font-weight:700;font-size:10px;padding:1px 2px;width:38px;margin:0 auto;white-space:normal;line-height:1.15;text-align:center;word-break:break-all}
 .dm .ng{color:#c0392b;font-size:14px}
 .dm .pm{background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)}
 .dm tr.short.first td{border-top:2px solid #c0392b}
@@ -630,7 +630,7 @@ def duty_matrix_html(days, rows, year, month):
     legend = ['<div class="dm-legend">']
     for s, (bg, fg) in MATRIX_SHIFT_COLORS.items():
         legend.append(f'<span><i style="background:{bg};color:{fg}">{s}</i></span>')
-    legend.append(f'<span><i style="box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME}">★</i>希望日が通った当直</span>')
+    legend.append(f'<span><i style="box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME}">&nbsp;&nbsp;&nbsp;</i>茶色の枠：希望日が通った当直</span>')
     legend.append('<span><i style="color:#c0392b">×</i>当直NG（宿×＝宿直NG、日×＝日直NG）</span>')
     legend.append('<span><i>💬📝</i>メモ欄：先生からのコメント・備考（カーソルを合わせると全文）</span>')
     legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>翌日PM duty（宿直を外す日）</span>')
@@ -810,9 +810,9 @@ def duty_matrix_xlsx(days, rows, year, month):
         c = ws.cell(row=legend_row, column=2 + k * 2, value=label)
         c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#')); c.alignment = center; c.border = border
     ws.cell(row=legend_row + 1, column=2, value='×').font = Font(bold=True, color='C0392B')
-    wish_legend = ws.cell(row=legend_row + 4, column=2, value='★')
+    wish_legend = ws.cell(row=legend_row + 4, column=2)
     wish_legend.border = wish_border; wish_legend.alignment = center; wish_legend.font = Font(bold=True)
-    ws.cell(row=legend_row + 4, column=3, value='希望日が通った当直')
+    ws.cell(row=legend_row + 4, column=3, value='茶色の枠：希望日が通った当直')
     ws.cell(row=legend_row + 1, column=3, value='当直NG（宿×＝宿直NG、日×＝日直NG）')
     ws.cell(row=legend_row + 2, column=2).fill = PM_FILL
     ws.cell(row=legend_row + 2, column=3, value='翌日PM duty（宿直を外す日）')
@@ -2172,7 +2172,7 @@ NG日の欄にある「📨 先生方からのNG日入力（専用URL）」を�
 **🗓️ 医師別の当直一覧**（先生ごとに1行、Excelで印刷できる表）
 
 - 枠名のマス：決まった当直（色は枠の種類）
-- **★と黒い太枠**：希望日が、希望どおりに通った当直
+- **茶色の太い枠**：希望日が、希望どおりに通った当直
 - **×**：当直NGの日（宿×＝宿直NG、日×＝日直NG）
 - **黄色の斜線**：翌日PM dutyのため宿直を外す日
 - **赤線の下の「⚠️ 未決定」**：人数が足りず、担当が決まっていない枠
@@ -2922,7 +2922,7 @@ if len(staff_df) > 0:
             return [x.strip() for x in re.split(r'[、,]', str(value))]
 
         st.subheader("🗓️ 医師別の当直一覧")
-        st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。希望日が通った当直は★を付けて黒い太枠で囲みます。")
+        st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。希望日が通った当直は茶色の太い枠で囲みます。")
         matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday,
                                                      comments=remote_comments_safe(year, month))
         missing_total = sum(len(info['shortage']) for info in matrix_days)
