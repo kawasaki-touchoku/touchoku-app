@@ -1663,16 +1663,31 @@ def doctor_entry_page(key):
             st.write("この月のNG日は提出されていません。")
         return
 
-    if deadline:
-        st.info(f"締め切り：{deadline}　締め切りまでは、このページから何度でも修正できます。")
-    flash = st.session_state.pop("remote_saved_message", None)
-    if flash:
-        st.success(flash)
-    elif latest:
-        summary = ng_text_summary(saved_text, year, month, holidays) or "NG日なし"
-        st.success(f"✅ 提出済み（{latest.get('保存日時', '')}）：{summary}")
-    else:
-        st.info("まだ提出されていません。当直に入れない日を選び、下の保存ボタンを押してください。NG日がない場合も、そのまま保存ボタンを押してください。")
+    st.info(
+        (f"締め切り：{deadline}\n\n" if deadline else "")
+        + "締め切りまでは、何度でも保存し直せます。**最後に保存した内容が採用されます**"
+        "（前に保存した内容は、新しい内容に置き換わります）。"
+    )
+    just_saved = st.session_state.pop("remote_just_saved", False)
+    if just_saved:
+        try:
+            st.toast("保存しました", icon="✅")   # 画面の隅に短く表示（古いStreamlitでは出ないだけ）
+        except Exception:
+            pass
+
+    def saved_status_box():
+        """保存済みの内容を、はっきり分かる形で表示する（カレンダーの上と下の両方に出す）。"""
+        if latest:
+            summary = ng_text_summary(saved_text, year, month, holidays) or "NG日なし（どの日も入れます）"
+            title = "✅ 保存しました" if just_saved else "✅ 提出済みです"
+            st.success(f"**{title}**（{latest.get('保存日時', '')}）\n\n"
+                       f"**現在の提出内容：** {summary}\n\n"
+                       "変更したい場合は、カレンダーで選び直して、もう一度保存してください。")
+        else:
+            st.warning("**まだ提出されていません。** 当直に入れない日を選び、保存ボタンを押してください。"
+                       "NG日がない場合も、そのまま保存ボタンを押してください（「NG日なし」として提出されます）。")
+
+    saved_status_box()
 
     with st.expander("NGの種類について", expanded=False):
         st.markdown("""
@@ -1718,9 +1733,10 @@ def doctor_entry_page(key):
             except Exception:
                 st.error("保存できませんでした。通信状態を確認して、もう一度保存ボタンを押してください。")
                 return
-            summary = ng_text_summary(ng_dict_to_text(merged), year, month, holidays) or "NG日なし"
-            st.session_state["remote_saved_message"] = f"✅ 保存しました（{now}）：{summary}"
+            st.session_state["remote_just_saved"] = True
             st.rerun()
+    # 保存ボタンのすぐ下にも、保存状態を表示する（画面を上に戻さなくても確認できるように）
+    saved_status_box()
     st.caption("このページのURLは、先生専用です。ほかの方には共有しないでください。")
 
 
