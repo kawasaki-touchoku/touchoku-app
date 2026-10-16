@@ -480,7 +480,7 @@ MATRIX_COUNT_GROUP_STARTS = ('night', 'ward', 'weekday', 'total')  # セット�
 MATRIX_SATURDAY_HEAD = '#1f6fbf'
 
 
-def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday=False):
+def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday=False, comments=None):
     """
     医師ごと・日ごとのマスの内容を作る。
     優先順：決まった当直 ＞ ×（当直NG）＞ PM（翌日PM duty）。
@@ -499,6 +499,8 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
                 shortage.append({'slot': s, 'count': int(m.group(1))})
         days.append({'day': d, 'weekday': WEEKDAYS_JA[dt.weekday()], 'holiday': hol, 'kind': kind, 'shortage': shortage})
 
+    # 備考は「備考」で始まる列から読む（列名の書き方の違いに対応）
+    note_columns = [c for c in staff_df.columns if str(c).strip().startswith("備考")]
     rows = []
     for _, staff in staff_df.iterrows():
         name = str(staff['先生の名前'])
@@ -541,6 +543,9 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
         rows.append({
             'name': name,
             'pm_duty': '・'.join(WEEKDAYS_JA[i] for i in pm_days),
+            'note': "\n".join(v for v in (clean_text(staff.get(c, "")) for c in note_columns) if v and v.lower() not in ("nan", "none")),
+            'comment': (comments or {}).get(name, ("", ""))[0],
+            'comment_at': (comments or {}).get(name, ("", ""))[1],
             'cells': cells,
             'night': night_count, 'day': day_count, 'ward': ward_count, 'outpatient': outpatient_count,
             'weekday': weekday_count, 'holiday': holiday_count, 'total': weekday_count + holiday_count,
@@ -560,6 +565,27 @@ def count_cell_css(key, is_head):
     if key in MATRIX_COUNT_GROUP_STARTS:
         css += "border-left:2px solid #7b8698;"
     return css
+
+
+def memo_preview(row, length=7):
+    """メモ欄の見出し：アイコン（💬コメント・📝備考）と、最初の数文字だけ。"""
+    icons = ("💬" if row.get("comment") else "") + ("📝" if row.get("note") else "")
+    text = (row.get("comment") or row.get("note") or "").replace("\n", " ")
+    short = text if len(text) <= length else text[:length] + "…"
+    return f"{icons} {short}".strip()
+
+
+def memo_cell_html(row):
+    """メモ欄：ふだんは短く表示し、押すと全文が開く（スマートフォンでも使える）。"""
+    if not row.get("comment") and not row.get("note"):
+        return '<td class="memo"></td>'
+    parts = []
+    if row.get("comment"):
+        parts.append(f'<b>💬 コメント</b>（{html_escape(row.get("comment_at", ""))}）<br>' + html_escape(row["comment"]).replace("\n", "<br>"))
+    if row.get("note"):
+        parts.append('<b>📝 備考</b><br>' + html_escape(row["note"]).replace("\n", "<br>"))
+    return (f'<td class="memo"><details><summary title="押すと全文を表示">{html_escape(memo_preview(row))}</summary>'
+            f'<div class="full">{"<br><br>".join(parts)}</div></details></td>')
 
 
 def duty_matrix_html(days, rows, year, month):
@@ -583,6 +609,11 @@ def duty_matrix_html(days, rows, year, month):
 .dm tr.short td.nm{color:#c0392b}
 .dm th.miss{background:#fde2e0}
 .dm .sum{padding:0 6px;font-weight:700;min-width:34px}
+.dm .memo{min-width:56px;text-align:left;padding:0 4px;font-size:11px;vertical-align:top}
+.dm .memo details summary{cursor:pointer;list-style:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:116px;color:#425268}
+.dm .memo details summary::-webkit-details-marker{display:none}
+.dm .memo details[open] summary{color:#1f3c74;font-weight:700}
+.dm .memo .full{white-space:normal;width:220px;padding:4px 6px;margin:2px 0 4px;background:#f6f8fb;border:1px solid #d8dde5;border-radius:4px;line-height:1.45}
 .dm-legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;margin:2px 0 6px;color:#243247}
 .dm-legend span{display:inline-flex;align-items:center;gap:4px}
 .dm-legend i{display:inline-block;min-width:34px;padding:1px 4px;border:1px solid #d8dde5;border-radius:3px;font-style:normal;font-weight:700;text-align:center;font-size:11px}
@@ -592,11 +623,12 @@ def duty_matrix_html(days, rows, year, month):
         legend.append(f'<span><i style="background:{bg};color:{fg}">{s}</i></span>')
     legend.append(f'<span><i style="box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME}">★</i>希望日が通った当直</span>')
     legend.append('<span><i style="color:#c0392b">×</i>当直NG（宿×＝宿直NG、日×＝日直NG）</span>')
+    legend.append('<span><i>💬📝</i>メモ欄：先生からのコメント・備考（押すと全文）</span>')
     legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>翌日PM duty（宿直を外す日）</span>')
     legend.append('<span><i style="color:#c0392b;border-color:#c0392b">⚠️ 未決定</i>赤線の下：当直が決まっていない枠</span>')
     legend.append('</div>')
 
-    head = ['<tr><th class="nm">名前</th><th class="pmcol">翌日PM duty</th>']
+    head = ['<tr><th class="nm">名前</th><th class="pmcol">翌日PM duty</th><th class="memo">メモ</th>']
     for info in days:
         miss_class = ' class="miss"' if info['shortage'] else ''
         head.append(f'<th{miss_class} style="color:{head_color(info)}">{info["day"]}<br>{info["weekday"]}</th>')
@@ -604,7 +636,7 @@ def duty_matrix_html(days, rows, year, month):
 
     body = []
     for row in rows:
-        tr = [f'<tr><td class="nm">{html_escape(row["name"])}</td><td class="pmcol">{html_escape(row["pm_duty"])}</td>']
+        tr = [f'<tr><td class="nm">{html_escape(row["name"])}</td><td class="pmcol">{html_escape(row["pm_duty"])}</td>{memo_cell_html(row)}']
         for info, cell in zip(days, row['cells']):
             td_class = ' class="hol"' if info['holiday'] else ''
             if cell['type'] == 'shift':
@@ -623,7 +655,7 @@ def duty_matrix_html(days, rows, year, month):
     # 当直が決まっていない枠：枠ごとに1行、その枠の色で表示
     for k, slot in enumerate(shortage_slots(days)):
         first = ' first' if k == 0 else ''
-        tr = [f'<tr class="short{first}"><td class="nm">⚠️ 未決定</td><td></td>']
+        tr = [f'<tr class="short{first}"><td class="nm">⚠️ 未決定</td><td></td><td></td>']
         bg, fg = MATRIX_SHIFT_COLORS[slot]
         slot_total = 0
         for info in days:
@@ -648,6 +680,7 @@ def duty_matrix_xlsx(days, rows, year, month):
     """一覧表をExcelファイル（印刷向けの書式付き）にする。"""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.comments import Comment
     from openpyxl.utils import get_column_letter
 
     wb = Workbook()
@@ -661,9 +694,10 @@ def duty_matrix_xlsx(days, rows, year, month):
     PM_FILL = PatternFill('lightUp', fgColor='E0A800', bgColor='FFF5D9')
 
     ws.cell(row=1, column=1, value=f"{year}年{month}月分 当直表").font = Font(bold=True, size=14)
-    header_row, first_day_col = 3, 3
+    header_row, first_day_col = 3, 4
     ws.cell(row=header_row, column=1, value='名前')
     ws.cell(row=header_row, column=2, value='翌日PM duty')
+    ws.cell(row=header_row, column=3, value='メモ')
     for i, info in enumerate(days):
         c = ws.cell(row=header_row, column=first_day_col + i, value=f"{info['day']}\n{info['weekday']}")
         color = MATRIX_HOLIDAY_HEAD if info['kind'] == 'holiday' else (MATRIX_SATURDAY_HEAD if info['kind'] == 'saturday' else '#243247')
@@ -693,6 +727,16 @@ def duty_matrix_xlsx(days, rows, year, month):
     for r_idx, row in enumerate(rows, header_row + 1):
         ws.cell(row=r_idx, column=1, value=row['name']).font = Font(bold=True)
         ws.cell(row=r_idx, column=2, value=row['pm_duty'])
+        if row.get('comment') or row.get('note'):
+            # セルには短く表示し、全文はセルのコメント（マウスを乗せると表示）と「メモ全文」シートに入れる
+            memo = ws.cell(row=r_idx, column=3, value=memo_preview(row, length=4))
+            memo.font = Font(size=8)
+            full = []
+            if row.get('comment'):
+                full.append(f"【コメント】{row['comment']}")
+            if row.get('note'):
+                full.append(f"【備考】{row['note']}")
+            memo.comment = Comment("\n".join(full), "当直作成アプリ", width=260, height=120)
         for i, (info, cell) in enumerate(zip(days, row['cells'])):
             c = ws.cell(row=r_idx, column=first_day_col + i, value=cell['text'].replace('/', '\n') or None)
             if cell['type'] == 'shift':
@@ -714,6 +758,8 @@ def duty_matrix_xlsx(days, rows, year, month):
             c = ws.cell(row=r_idx, column=col)
             c.border = border
             c.alignment = center if col > 1 else Alignment(vertical='center')
+        # メモ欄は1行で表示（折り返すと行が高くなるため、はみ出す分は縮小）
+        ws.cell(row=r_idx, column=3).alignment = Alignment(horizontal='left', vertical='center', shrink_to_fit=True)
         # 希望日が通った当直をオレンジの太線で囲む
         for i, cell in enumerate(row['cells']):
             if cell.get('wish'):
@@ -766,6 +812,7 @@ def duty_matrix_xlsx(days, rows, year, month):
 
     ws.column_dimensions['A'].width = 14
     ws.column_dimensions['B'].width = 12
+    ws.column_dimensions['C'].width = 11
     for i in range(len(days)):
         ws.column_dimensions[get_column_letter(first_day_col + i)].width = 5.2
     for j in range(n_counts):
@@ -778,6 +825,26 @@ def duty_matrix_xlsx(days, rows, year, month):
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 1
     ws.sheet_properties.pageSetUpPr.fitToPage = True
+
+    # 2枚目のシート：コメント・備考の全文（印刷して確認する用）
+    memo_rows = [r for r in rows if r.get('comment') or r.get('note')]
+    if memo_rows:
+        ws2 = wb.create_sheet("メモ全文")
+        ws2.cell(row=1, column=1, value=f"{year}年{month}月 先生からのコメント・備考").font = Font(bold=True, size=13)
+        for j, label in enumerate(["名前", "先生からのコメント", "コメントの保存日時", "医師条件の備考"], 1):
+            c = ws2.cell(row=3, column=j, value=label)
+            c.font = Font(bold=True); c.fill = fill('#E6EBF2'); c.border = border
+        for i, r in enumerate(memo_rows, 4):
+            for j, v in enumerate([r['name'], r.get('comment', ''), r.get('comment_at', ''), r.get('note', '')], 1):
+                c = ws2.cell(row=i, column=j, value=v or None)
+                c.border = border; c.alignment = Alignment(vertical='top', wrap_text=True)
+        for col, w in zip("ABCD", [14, 60, 20, 40]):
+            ws2.column_dimensions[col].width = w
+        ws2.page_setup.orientation = 'landscape'
+        ws2.page_setup.paperSize = ws2.PAPERSIZE_A4
+        ws2.sheet_properties.pageSetUpPr.fitToPage = True
+        ws2.page_setup.fitToWidth = 1
+        ws2.page_setup.fitToHeight = 0
 
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -2832,7 +2899,8 @@ if len(staff_df) > 0:
 
         st.subheader("🗓️ 医師別の当直一覧")
         st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。希望日が通った当直は★を付けて黒い太枠で囲みます。")
-        matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday)
+        matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday,
+                                                     comments=remote_comments_safe(year, month))
         missing_total = sum(len(info['shortage']) for info in matrix_days)
         if missing_total:
             st.warning(f"当直が決まっていない枠が{missing_total}枠あります。表の一番下（赤線の下）で確認できます。")
