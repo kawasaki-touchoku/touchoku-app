@@ -2503,6 +2503,7 @@ with st.expander("希望優先度：通常の希望と、100以上の特別な�
 
 template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
+    "備考（メモ・説明など自由記入）": ["学会のため休み多め", "15日は午後休", "", "当直明け休み希望", ""],
     "翌日PM duty": ["水,木", "", "土,日", "", ""],
     NG_COLUMN: ["", "15:宿NG", "10:宿NG", "", ""],
     REQUEST_COLUMN: ["10:A宿直, 15", "", "8", "20", ""],
@@ -2517,7 +2518,6 @@ template_data = {
     "A日直上限": [2, 2, 2, 2, 2],
     "B日直上限": [2, 2, 2, 2, 2],
     "外来日直上限": [2, 2, 2, 2, 2],
-    "備考（メモ・説明など自由記入）": ["学会のため休み多め", "15日は午後休", "", "当直明け休み希望", ""]
 }
 df_template = pd.DataFrame(template_data)
 # 保存用CSVと同じUTF-8（BOM付き）に統一。Excelでもそのまま開ける。
@@ -2801,7 +2801,9 @@ st.markdown("### 📂 医師条件をCSVで保存（次回も使う場合）")
 st.write("医師名・回数・勤務間隔・希望日・保存済みのNG日・備考を保存します。次回は「医師条件」のアップロード欄から読み込んでください。")
 st.caption("保存前に、各医師の「NG日を保存する」を押してください。対象年月・特別休日・増員設定・確定済み当直・生成結果・色分けとそのメモは、このCSVには含まれません。")
 
-current_csv = staff_df.to_csv(index=False).encode('utf-8-sig')
+# 保存するCSVも、画面と同じく「先生の名前 → 備考 → その他」の順にそろえる（読み込みは列名で行うので、古い並びのCSVもそのまま使える）
+_first = ["先生の名前"] + [c for c in staff_df.columns if str(c).startswith("備考")]
+current_csv = staff_df[_first + [c for c in staff_df.columns if c not in _first]].to_csv(index=False).encode('utf-8-sig')
 st.download_button(
     label="📥 医師条件をCSVで保存",
     data=current_csv,
