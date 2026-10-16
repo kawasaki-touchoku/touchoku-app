@@ -5,3 +5,4 @@ jpholiday
 openpyxl
 gspread
 google-auth
+reportlab
