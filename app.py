@@ -332,7 +332,7 @@ function paint(cell,value){
 window.addEventListener('message',(event)=>{
   if(!event.data||event.data.type!=='streamlit:render')return;
   let a=event.data.args;
-  document.getElementById('apply').textContent=a.doctor+'先生のNG日を保存する';
+  document.getElementById('apply').textContent=a.button_label||(a.doctor+'先生のNG日を保存する');
   if(a.version!==version){
     version=a.version;mode=a.mode||'row';days=a.days;draft=days.map(d=>d.value);
     let strip=document.getElementById('strip');
@@ -1762,7 +1762,7 @@ def doctor_entry_page(key):
         except Exception:
             pass
 
-    def saved_status_box():
+    def saved_status_box(show_comment=True):
         """保存済みの内容を、はっきり分かる形で表示する（カレンダーの上と下の両方に出す）。"""
         if latest:
             summary = ng_text_summary(saved_text, year, month, holidays) or "NG日なし（どの日も入れます）"
@@ -1772,7 +1772,7 @@ def doctor_entry_page(key):
                        "変更したい場合は、カレンダーで選び直して、もう一度保存してください。")
             # コメントは、アプリの案内文と混ざらないように別の枠で表示する
             comment = latest.get("コメント", "").strip()
-            if comment:
+            if comment and show_comment:
                 with st.container(border=True):
                     st.markdown("💬 **保存されている管理者へのコメント**")
                     st.text(f"「{comment}」")
@@ -1798,25 +1798,10 @@ def doctor_entry_page(key):
         "管理者へのコメント・要望（任意）",
         key=comment_key, max_chars=500, height=90,
         placeholder="例：第2週は学会のため、できれば平日の宿直を避けたいです。／ 月4回までを希望します。",
-        help="NG日を保存するときに一緒に送られます。コメントだけ変えたい場合は、下の「コメントだけ保存」を押してください。",
+        help="カレンダーの下の保存ボタンを押すと、NG日と一緒に保存されます。",
     )
-    if st.button("コメントだけ保存（NG日はそのまま）", key="remote_comment_only"):
-        if not latest:
-            st.warning("まだNG日を保存していません。下のカレンダーで選んで保存ボタンを押すと、コメントも一緒に保存されます。")
-            st.stop()
-        remote_clear_cache()
-        if remote_settings().get("締め切り", "") == "True":
-            st.error("受付が締め切られたため、保存できませんでした。担当者に直接ご連絡ください。")
-            return
-        try:
-            remote_append("submissions", [f"{year}-{month}", doctor, saved_text, remote_now(),
-                                          st.session_state.get(comment_key, "").strip()])
-        except Exception:
-            st.error("保存できませんでした。通信状態を確認して、もう一度押してください。")
-            return
-        st.session_state["remote_just_saved"] = True
-        st.rerun()
-    st.caption("NG日は下のカレンダーで選び、保存ボタンを押してください。コメントも一緒に保存されます。")
+    st.caption("NG日を下のカレンダーで選び、カレンダーの下の「保存する」ボタンを押してください。コメントも一緒に保存されます。"
+               "コメントだけを直したいときも、同じボタンを押してください（NG日はそのまま）。")
 
     layout = st.radio("表示", ["月間カレンダー", "1日〜月末を横一列"], horizontal=True, key="remote_layout")
     pm_weekdays = pm_duty_weekdays(tokens[doctor].get("翌日PM duty", ""))
@@ -1827,6 +1812,7 @@ def doctor_entry_page(key):
     response = horizontal_ng_component(HORIZONTAL_NG_HTML)(
         days=days, mode="row" if layout != "月間カレンダー" else "month",
         offset=datetime.date(year, month, 1).weekday(), doctor=doctor,
+        button_label="NG日とコメントを保存する",
         version=revision, key=component_key, default=None,
     )
     seen_key = component_key + "_last_token"
@@ -1858,7 +1844,7 @@ def doctor_entry_page(key):
             st.session_state["remote_just_saved"] = True
             st.rerun()
     # 保存ボタンのすぐ下にも、保存状態を表示する（画面を上に戻さなくても確認できるように）
-    saved_status_box()
+    saved_status_box(show_comment=False)
     if latest:
         with st.expander("📷 提出内容を画像で保存する（控えとして）", expanded=just_saved):
             st.caption("保存済みの内容をカレンダーの画像にします。保存し直した場合は、画像も新しい内容になります。")
