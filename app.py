@@ -1853,6 +1853,20 @@ def doctor_entry_page(key):
     st.caption("このページのURLは、先生専用です。ほかの方には共有しないでください。")
 
 
+def remote_comments_safe(year, month):
+    """
+    その年月に先生方が専用URLから書いたコメント {先生: (コメント, 保存日時)}。
+    接続設定がない・読み込めない場合は空にする（NG入力の画面を止めないため）。
+    """
+    if not remote_is_configured():
+        return {}
+    try:
+        latest = remote_latest_submissions(f"{year}-{month}")
+    except Exception:
+        return {}
+    return {name: (r.get("コメント", "").strip(), r.get("保存日時", ""))
+            for name, r in latest.items() if r.get("コメント", "").strip()}
+
 def import_remote_ng(year, month, submissions):
     """先生方の提出内容を、アプリのNGカレンダー（画面の保存値）に取り込む。"""
     num_days = calendar.monthrange(year, month)[1]
@@ -2581,12 +2595,17 @@ if not valid_staff.empty:
     if st.session_state.get("ng_selected_doctor") not in doctor_names:
         st.session_state["ng_selected_doctor"] = doctor_names[0]
 
+    # 先生方のコメント（専用URLから）と、医師条件の備考。選択欄の💬マークと、カレンダーの上の表示に使う
+    doctor_comments = remote_comments_safe(year, month)
+    doctor_notes = {str(r["先生の名前"]): clean_text(r.get("備考（メモ・説明など自由記入）", "")) for _, r in valid_staff.iterrows()}
+
     def ng_doctor_label(name):
         count = sum(
             1 for d in range(1, num_days + 1)
             if effective_ng(st.session_state.get(f"ng_{name}_{year}_{month}_{d}", "OK"), day_is_holiday[d]) != "OK"
         )
-        return f"{name}（NG {count}日）" if count else f"{name}（NGなし）"
+        mark = "　💬" if name in doctor_comments or doctor_notes.get(name) else ""
+        return (f"{name}（NG {count}日）" if count else f"{name}（NGなし）") + mark
 
     def move_ng_doctor(step):
         i = doctor_names.index(st.session_state["ng_selected_doctor"])
@@ -2615,6 +2634,16 @@ if not valid_staff.empty:
         if doc_name == selected_doc:
             with st.container(border=True):
                 st.markdown(f"#### 🩺 {doc_name} 先生のNG日")
+                note = doctor_notes.get(doc_name, "")
+                comment, comment_at = doctor_comments.get(doc_name, ("", ""))
+                if note or comment:
+                    with st.container(border=True):
+                        if comment:
+                            st.markdown(f"💬 **先生からのコメント**（専用URLから・{comment_at}）")
+                            st.text(comment)
+                        if note:
+                            st.markdown("📝 **医師条件の備考**")
+                            st.text(note)
                 # 保存値は書き換えず、その日に実際に効く内容だけを表示する
                 shown = {d: effective_ng(st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"], day_is_holiday[d]) for d in range(1, num_days + 1)}
 
