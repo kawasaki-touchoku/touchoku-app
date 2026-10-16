@@ -1622,6 +1622,80 @@ def parse_holiday_list(text):
     return sorted({int(x) for x in re.findall(r"\d+", str(text))})
 
 
+def ng_receipt_image(doctor, year, month, saved_at, values_by_day, holidays):
+    """
+    提出内容（保存済みのNG日）をカレンダー画像にして表示する。
+    画像はブラウザの中で描くので、スマートフォンでも日本語が正しく出る。
+    スマートフォンは画像を長押しして保存、パソコンはボタンでダウンロードできる。
+    """
+    import streamlit.components.v1 as components
+    days = []
+    for d in range(1, calendar.monthrange(year, month)[1] + 1):
+        dt = datetime.date(year, month, d)
+        hol = is_holiday_date(dt, year, month, holidays)
+        days.append({
+            "d": d, "hol": hol,
+            "sat": dt.weekday() == 5 and not jpholiday.is_holiday(dt) and d not in holidays,
+            "ng": effective_ng(values_by_day.get(d, "OK"), hol),
+        })
+    data = {"doctor": doctor, "year": year, "month": month, "saved": saved_at,
+            "offset": datetime.date(year, month, 1).weekday(), "days": days}
+    weeks = (data["offset"] + len(days) + 6) // 7
+    html_src = """
+<div style="font-family:system-ui,sans-serif">
+<img id="img" alt="提出内容の画像" style="width:100%;max-width:540px;border:1px solid #d6dce5;border-radius:8px;display:block">
+<a id="dl" style="display:inline-block;margin-top:8px;padding:8px 14px;background:#ff4b4b;color:#fff;border-radius:6px;text-decoration:none;font-size:14px">画像をダウンロード</a>
+<div style="font-size:12px;color:#566174;margin-top:6px">スマートフォンの場合は、画像を長押しして「写真に保存」（または「画像を保存」）を選んでください。</div>
+</div>
+<script>
+const D = __DATA__;
+(function(){
+const W = 1080, topY = 230, cellH = 150, rows = __WEEKS__, H = topY + 60 + rows * cellH + 110;
+const c = document.createElement('canvas'); c.width = W; c.height = H;
+const g = c.getContext('2d');
+const F = (s, w) => `${w||400} ${s}px "Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic","Meiryo","Noto Sans JP",sans-serif`;
+g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+g.fillStyle = '#243247'; g.font = F(46, 700); g.fillText(`${D.year}年${D.month}月　当直NG日（提出控え）`, 50, 80);
+g.font = F(40, 700); g.fillText(`${D.doctor} 先生`, 50, 145);
+g.fillStyle = '#566174'; g.font = F(26); g.fillText(`保存日時：${D.saved}`, 50, 195);
+const cw = (W - 100) / 7, x0 = 50, y0 = topY;
+['月','火','水','木','金','土','日'].forEach((w, i) => {
+  g.fillStyle = i === 6 ? '#c92336' : i === 5 ? '#1670c5' : '#243247';
+  g.font = F(28, 700); g.textAlign = 'center'; g.fillText(w, x0 + cw * i + cw / 2, y0 + 40);
+});
+g.textAlign = 'left';
+const colors = {'全NG': ['#b42332', '全日NG'], '日NG': ['#9a4700', '日直NG'], '宿NG': ['#1856a4', '宿直NG']};
+let count = 0;
+D.days.forEach((day, i) => {
+  const p = D.offset + i, col = p % 7, row = Math.floor(p / 7);
+  const x = x0 + col * cw, y = y0 + 60 + row * cellH;
+  g.fillStyle = day.hol ? '#fdf1f1' : '#ffffff'; g.fillRect(x, y, cw, cellH);
+  g.strokeStyle = '#cbd2dc'; g.lineWidth = 2; g.strokeRect(x, y, cw, cellH);
+  g.fillStyle = day.sat ? '#1670c5' : day.hol ? '#c92336' : '#243247';
+  g.font = F(30, 700); g.fillText(String(day.d), x + 12, y + 40);
+  const info = colors[day.ng];
+  if (info) {
+    count++;
+    const color = (day.hol && day.ng !== 'OK') ? '#b42332' : info[0];
+    g.fillStyle = color; g.fillRect(x + 8, y + 62, cw - 16, 60);
+    g.fillStyle = '#fff'; g.font = F(26, 700); g.textAlign = 'center';
+    g.fillText(info[1], x + cw / 2, y + 102); g.textAlign = 'left';
+  }
+});
+g.fillStyle = '#243247'; g.font = F(26);
+const fy = y0 + 60 + rows * cellH + 50;
+g.fillText(count ? `NG日：${count}日` : 'NG日なし（どの日も入れます）', 50, fy);
+g.fillStyle = '#566174'; g.font = F(22);
+g.fillText('締め切りまでは保存し直せます。最後に保存した内容が採用されます。', 50, fy + 40);
+const url = c.toDataURL('image/png');
+document.getElementById('img').src = url;
+const a = document.getElementById('dl'); a.href = url; a.download = `NG日_${D.year}年${D.month}月_${D.doctor}.png`;
+})();
+</script>
+""".replace("__DATA__", json.dumps(data, ensure_ascii=False)).replace("__WEEKS__", str(weeks))
+    components.html(html_src, height=int(540 * (230 + 60 + weeks * 150 + 110) / 1080) + 100)
+
+
 def doctor_entry_page(key):
     """専用URLで開いた先生用の画面。その先生のNG日だけを入力・保存できる。"""
     st.markdown("<style>[data-testid='stSidebar']{display:none}</style>", unsafe_allow_html=True)
@@ -1737,6 +1811,10 @@ def doctor_entry_page(key):
             st.rerun()
     # 保存ボタンのすぐ下にも、保存状態を表示する（画面を上に戻さなくても確認できるように）
     saved_status_box()
+    if latest:
+        with st.expander("📷 提出内容を画像で保存する（控えとして）", expanded=just_saved):
+            st.caption("保存済みの内容をカレンダーの画像にします。保存し直した場合は、画像も新しい内容になります。")
+            ng_receipt_image(doctor, year, month, latest.get("保存日時", ""), parse_ng_dict(saved_text, year, month), holidays)
     st.caption("このページのURLは、先生専用です。ほかの方には共有しないでください。")
 
 
