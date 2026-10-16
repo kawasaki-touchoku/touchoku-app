@@ -1843,8 +1843,9 @@ def doctor_entry_page(key):
                 return
             st.session_state["remote_just_saved"] = True
             st.rerun()
-    # 保存ボタンのすぐ下にも、保存状態を表示する（画面を上に戻さなくても確認できるように）
-    saved_status_box(show_comment=False)
+    # 保存した直後だけ、保存ボタンのすぐ下にも表示する（スマートフォンで画面を上に戻さなくても確認できるように）
+    if just_saved:
+        saved_status_box(show_comment=False)
     if latest:
         with st.expander("📷 提出内容を画像で保存する（控えとして）", expanded=just_saved):
             st.caption("保存済みの内容をカレンダーの画像にします。保存し直した場合は、画像も新しい内容になります。")
