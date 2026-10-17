@@ -301,7 +301,8 @@ body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI"
 .half.day.ng{background:var(--day)}.half.night.ng{background:var(--night)}
 .half.none{cursor:default;color:#c4cad3;font-weight:500;background:repeating-linear-gradient(135deg,#fafbfc 0 6px,#f3f5f8 6px 7px)}
 .half.none:hover{background:repeating-linear-gradient(135deg,#fafbfc 0 6px,#f3f5f8 6px 7px)}
-.st .m,.none .m{display:none}
+.st .m{display:none}
+.slot{height:34px;flex:none}
 #note{margin:8px 2px;font-size:12px;color:var(--sub);min-height:16px}
 #apply{background:#ff4b4b;color:#fff;border:0;border-radius:8px;padding:11px 18px;font:700 14px system-ui,sans-serif;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08)}
 @media(max-width:600px){
@@ -313,6 +314,7 @@ body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI"
  .month .pm{font-size:11px;padding:0 2px;gap:1px;line-height:14px}
  .month .pm small{font-size:7.5px;white-space:normal;max-width:30px;overflow-wrap:anywhere}
  .month .seg{border-radius:6px}
+ .month .slot{height:30px}
  .month .half{height:30px;font-size:10px;gap:0;flex-direction:column;line-height:1.1}
  .month .half .st{font-size:9.5px}
  .month .st .w,.month .none .w{display:none}.month .st .m,.month .none .m{display:inline}
@@ -369,9 +371,11 @@ window.addEventListener('message',(event)=>{
         h.onclick=()=>toggle(which);h.onkeydown=(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle(which)}};return h};
       let seg=document.createElement('div');seg.className='seg';
       if(holiday)seg.append(half('day','日直'));
-      else{let n=document.createElement('div');n.className='half day none';n.innerHTML='<span class="w">日直なし</span><span class="m">—</span>';seg.append(n)}   // 平日は日直がない
       seg.append(half('night','宿直'));
-      cell.append(date,flag,seg);paint(cell,d.value);strip.append(cell);
+      cell.append(date,flag);
+      // 平日は日直がないので上段を空け、宿直ボタンの位置を休日とそろえる
+      if(!holiday){let sp=document.createElement('div');sp.className='slot';cell.append(sp)}
+      cell.append(seg);paint(cell,d.value);strip.append(cell);
     });
     if(mode==='month'){let blanks=(7-(a.offset+days.length)%7)%7;for(let i=0;i<blanks;i++){let el=document.createElement('div');el.className='blank';strip.append(el)}}
     document.getElementById('note').textContent=mode==='month'?'':'左右へスクロールして選べます。';
