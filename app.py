@@ -1680,8 +1680,7 @@ def qr_svg(text, size_mm=38):
 def remote_qr_cards_html(cards):
     """
     先生ごとの専用URLを、A4・1人1枚の三つ折り用紙にした印刷用HTMLを作る。
-    片面印刷のまま、下1/3を内側に折り（谷折り）、上1/3を裏側に折る（山折り）と、
-    宛名だけが外に出て、QRコードと説明は内側に隠れる。左右をホチキスで留めて配る。
+    片面印刷のまま点線で三つ折りにすると、宛名だけが外に出て、QRコードと説明は内側に隠れる。封筒に入れて配る。
     cards: [(先生, 専用URL)]
     """
     import html as _html
@@ -1691,11 +1690,10 @@ def remote_qr_cards_html(cards):
         pages.append(f"""
 <section class="sheet">
   <div class="panel cover">
-    <div class="cover-title">当直NG日 入力用カード</div>
+    <div class="cover-title">当直NG日入力用URL</div>
     <div class="cover-name">{n} 先生</div>
-    <div class="staple left"><svg class="staple-svg" viewBox="0 0 20 60" xmlns="http://www.w3.org/2000/svg" aria-label="ホチキス止めの位置"><path d="M15 6 H6 Q4 6 4 8 V52 Q4 54 6 54 H15" fill="none" stroke="#d6dbe2" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.2 10 V50" stroke="#d5dae1" stroke-width="1" stroke-linecap="round"/></svg></div><div class="stapler left"><svg class="stapler-svg" viewBox="0 0 130 84" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="#dde1e7" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M30 6 L104 34 A20 20 0 0 1 104 74 L14 74 Q8 74 8 68 L8 64 Q8 58 14 58 L74 58"/><path d="M30 6 Q24 4 22 10 L16 30 L80 52"/><path d="M16 30 L14 38 L30 44 L32 37"/><circle cx="98" cy="54" r="8"/></svg></div><div class="staple right"><svg class="staple-svg" viewBox="0 0 20 60" xmlns="http://www.w3.org/2000/svg" aria-label="ホチキス止めの位置"><path d="M15 6 H6 Q4 6 4 8 V52 Q4 54 6 54 H15" fill="none" stroke="#d6dbe2" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.2 10 V50" stroke="#d5dae1" stroke-width="1" stroke-linecap="round"/></svg></div><div class="stapler right"><svg class="stapler-svg" viewBox="0 0 130 84" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="#dde1e7" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M30 6 L104 34 A20 20 0 0 1 104 74 L14 74 Q8 74 8 68 L8 64 Q8 58 14 58 L74 58"/><path d="M30 6 Q24 4 22 10 L16 30 L80 52"/><path d="M16 30 L14 38 L30 44 L32 37"/><circle cx="98" cy="54" r="8"/></svg></div>
   </div>
-  <div class="fold"><span>② ここを山折り（上の部分を裏側へ）</span></div>
+  <div class="fold"></div>
   <div class="panel qr">
     <div class="qr-name">{n} 先生 専用</div>
     <div class="qr-body">
@@ -1708,7 +1706,7 @@ def remote_qr_cards_html(cards):
     </div>
     <div class="url">{_html.escape(url)}</div>
   </div>
-  <div class="fold"><span>① ここを谷折り（下の部分を内側へ）</span></div>
+  <div class="fold"></div>
   <div class="panel howto">
     <div class="howto-title">入力のしかた</div>
     <ol>
@@ -1721,7 +1719,7 @@ def remote_qr_cards_html(cards):
     <ul>
       <li><b>このURLは毎月同じです。</b>ブックマークしておくと便利です。</li>
       <li>締め切りまでは何度でも修正でき、<b>最後に保存した内容</b>が採用されます。</li>
-      <li>このカードは<b>先生専用</b>です。他の方に渡さないでください。なくした場合は担当者へご連絡ください。</li>
+      <li>このURLは<b>先生専用</b>です。他の方に渡さないでください。なくした場合は担当者へご連絡ください。</li>
     </ul>
   </div>
 </section>""")
@@ -1742,17 +1740,6 @@ body {{ margin: 0; font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiry
 .cover-title {{ margin-top: 6mm; font-size: 14pt; color: #4a5568; }}
 .cover-name {{ margin-top: 3mm; font-size: 30pt; font-weight: 700; }}
 .cover-note {{ margin-top: 4mm; font-size: 11pt; color: #b42332; }}
-/* ホチキスは左右の端・高さの真ん中に縦向きで留める。
-   折りたたむと、内側のQRコード・URL・説明文のどれにも重ならない位置（端から約5〜9mm。印刷できない端の余白も避ける） */
-.staple {{ position: absolute; top: 50%; transform: translateY(-50%); width: 3.5mm; height: 12.6mm; }}
-.staple.right svg {{ transform: scaleX(-1); }}
-/* ホチキスの絵（印のすぐ内側。口が印の方を向く）。宛名面だけに印刷されるので、内側の内容には重ならない */
-.stapler {{ position: absolute; top: 50%; transform: translateY(-50%); width: 4.5mm; height: 3mm; }}
-.stapler svg {{ width: 100%; height: 100%; display: block; }}
-.stapler.left {{ left: 9.5mm; }} .stapler.right {{ right: 9.5mm; }}
-.stapler.right svg {{ transform: scaleX(-1); }}
-.staple-svg {{ width: 100%; height: 100%; display: block; }}
-.staple.left {{ left: 5mm; }} .staple.right {{ right: 5mm; }}
 .qr-name {{ font-size: 15pt; font-weight: 700; margin-bottom: 4mm; text-align: center; }}
 .qr-body {{ display: flex; align-items: center; justify-content: center; gap: 7mm; }}
 .qr-side {{ max-width: 92mm; }}
@@ -1768,8 +1755,7 @@ body {{ margin: 0; font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiry
 @media print {{ body {{ background: #fff; }} .bar {{ display: none; }} .sheet {{ margin: 0; box-shadow: none; }} }}
 </style></head><body>
 <div class="bar"><button onclick="window.print()">🖨️ 印刷する</button>
-A4・縦・<b>片面</b>で印刷してください（{len(cards)}名分・1人1枚）。印刷の設定で「倍率：100%（実際のサイズ）」「余白：なし」を選ぶと、折り線の位置が正しくなります。<br>
-折り方：① 下の1/3を内側に折る（谷折り）→ ② 上の1/3（宛名）を裏側に折る（山折り）→ 宛名が表に出たら、左右の端の印の位置（2か所）をホチキスで留めます。</div>
+A4・縦・<b>片面</b>で印刷してください（{len(cards)}名分・1人1枚）。印刷の設定で「倍率：100%（実際のサイズ）」「余白：なし」を選ぶと、折り線の位置が正しくなります。</div>
 {''.join(pages)}
 </body></html>"""
 
@@ -2396,7 +2382,7 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
                                        remote_qr_cards_html([(n, url_by_name[n]) for n in card_targets]).encode("utf-8"),
                                        file_name="NG日入力_配布用カード.html", mime="text/html", key="remote_qr_cards", type="primary")
                     st.caption("ダウンロードしたファイルを開くとブラウザに表示されるので、「印刷する」を押してA4・片面で印刷します（1人1枚）。"
-                               "三つ折りにすると宛名だけが外に出て、QRコードは内側に隠れます。左右をホチキスで留めて各先生に渡してください。")
+                               "点線で三つ折りにすると宛名だけが外に出て、QRコードは内側に隠れます。封筒に入れて各先生に渡してください。")
                 except ImportError:
                     st.error("カードを作るには、requirements.txt に「reportlab」の1行を追加してください。")
             if st.checkbox("URLを作り直す（URLが漏れてしまった場合）", key="remote_regen_open"):
