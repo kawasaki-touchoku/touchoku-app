@@ -286,6 +286,8 @@ HORIZONTAL_NG_HTML = r"""<!doctype html><html lang="ja"><meta charset="utf-8"><m
 .band.tap:hover{filter:brightness(.95)}
 .band.tap:focus-visible{outline:3px solid #4789ff;outline-offset:-3px}
 .band .mark{font-size:12px;font-weight:900}
+/* 「可」の段は緑で目立たせる（休日に日直の指定を忘れていないか一目で分かるように） */
+.band.ok{background:#e3f5e9 !important;color:#12692f !important;font-weight:800;box-shadow:inset 0 0 0 1px #8fd0a5}
 .cell[data-state="全NG"] .band{background:#b42332;color:#fff}
 .cell[data-state="日NG"] .day-band{background:#9a4700;color:#fff}
 .cell[data-state="宿NG"] .night-band{background:#1856a4;color:#fff}
@@ -336,9 +338,9 @@ function paint(cell,value){
   let holiday=cell.dataset.holiday==='true';
   let dayNg=value==='全NG'||value==='日NG', nightNg=value==='全NG'||value==='宿NG';
   let db=cell.querySelector('.day-band'), nb=cell.querySelector('.night-band');
-  if(holiday){db.innerHTML=dayNg?'<span class="mark">✕</span>日直NG':'日直 可';db.setAttribute('aria-pressed',String(dayNg));}
-  else{db.textContent='日直なし';}
-  nb.innerHTML=nightNg?'<span class="mark">✕</span>宿直NG':'宿直 可';nb.setAttribute('aria-pressed',String(nightNg));
+  if(holiday){db.innerHTML=dayNg?'<span class="mark">✕</span>日直NG':'<span class="mark">○</span>日直 可';db.setAttribute('aria-pressed',String(dayNg));db.classList.toggle('ok',!dayNg);}
+  else{db.textContent='日直なし';db.classList.remove('ok');}
+  nb.innerHTML=nightNg?'<span class="mark">✕</span>宿直NG':'<span class="mark">○</span>宿直 可';nb.setAttribute('aria-pressed',String(nightNg));nb.classList.toggle('ok',!nightNg);
 }
 function combine(dayNg,nightNg){return dayNg&&nightNg?'全NG':dayNg?'日NG':nightNg?'宿NG':'OK'}
 window.addEventListener('message',(event)=>{
