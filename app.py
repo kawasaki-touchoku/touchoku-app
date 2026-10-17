@@ -1991,6 +1991,10 @@ def work_save_floating():
                 WORK_SAVE_SLOT.markdown("<span class='work-save-note busy'>保存しています…</span>", unsafe_allow_html=True)
             elif msg and msg[0] == "success":
                 WORK_SAVE_SLOT.markdown("<span class='work-save-note'>✅ 前回の作業を読み込みました</span>", unsafe_allow_html=True)
+            elif st.session_state.get("work_save_note"):
+                WORK_SAVE_SLOT.markdown(f"<span class='work-save-note'>✅ {st.session_state['work_save_note']} 途中保存しました</span>", unsafe_allow_html=True)
+            if st.session_state.pop("work_save_toast", False):
+                st.toast("途中保存しました。次回は画面右上の「📂 前回の作業の続きから始める」から読み込めます。", icon="💾")
         else:
             # パスワード未入力のときは、押すと入力欄が開くボタンにする
             box = st.popover("💾 作業を途中保存する") if has_popover \
@@ -3180,11 +3184,16 @@ if work_save_request:
     _slot = WORK_SAVE_SLOT or st.empty()
     try:
         work_state_save(work_snapshot)
-        _slot.markdown(f"<span class='work-save-note'>✅ {remote_now()[-8:-3]} 途中保存しました</span>", unsafe_allow_html=True)
-        st.toast("途中保存しました。次回は画面右上の「📂 前回の作業の続きから始める」から読み込めます。", icon="💾")
+        st.session_state["work_save_note"] = remote_now()[-8:-3]
+        st.session_state["work_save_toast"] = True
+        _saved_ok = True
     except Exception as e:
+        _saved_ok = False
         _slot.markdown("<span class='work-save-note bad'>⚠ 途中保存できませんでした</span>", unsafe_allow_html=True)
         st.error(f"途中保存できませんでした。通信状態を確認して、もう一度押してください。詳細：{e}")
+    if _saved_ok:
+        # 画面右上の「前回の作業の続きから始める」に新しい保存日時が出るよう、画面を作り直す
+        st.rerun()
 
 create_button_container = st.container(key="create_duty_action")
 st.header("3. 当直案の作成・確認")
