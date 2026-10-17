@@ -305,6 +305,12 @@ body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI"
 .slot{height:34px;flex:none}
 #note{margin:8px 2px;font-size:12px;color:var(--sub);min-height:16px}
 #apply{background:#ff4b4b;color:#fff;border:0;border-radius:8px;padding:11px 18px;font:700 14px system-ui,sans-serif;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+/* 反映していない変更があるときは、ボタンを目立たせる */
+#apply.dirty{background:#e8590c;box-shadow:0 0 0 3px #ffd8a8;animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 3px #ffd8a8}50%{box-shadow:0 0 0 7px #ffe8cc}}
+/* 管理者画面で変更がないときは、押す必要がないことが分かる見た目にする */
+#apply.clean{background:#eef1f5;color:#7a8494;box-shadow:none;cursor:default}
+#note.dirty{color:#c2410c;font-weight:800;font-size:13px}
 @media(max-width:600px){
  .strip.month{gap:3px}
  .month .cell{padding:5px 2px 3px;border-radius:8px}
@@ -340,9 +346,9 @@ function paint(cell,value){
 window.addEventListener('message',(event)=>{
   if(!event.data||event.data.type!=='streamlit:render')return;
   let a=event.data.args;
-  document.getElementById('apply').textContent=a.button_label||(a.doctor+'先生のNG日を反映する');
+  reportDirty=!!a.report_dirty;baseLabel=a.button_label||(a.doctor+'先生のNG日を反映する');
   if(a.version!==version){
-    version=a.version;mode=a.mode||'row';days=a.days;draft=days.map(d=>d.value);
+    version=a.version;mode=a.mode||'row';days=a.days;draft=days.map(d=>d.value);sentDirty=false;
     let strip=document.getElementById('strip');
     strip.replaceChildren();
     strip.className='strip '+(mode==='month'?'month':'');
@@ -363,8 +369,7 @@ window.addEventListener('message',(event)=>{
         let v=draft[i];let dayNg=v==='全NG'||v==='日NG',nightNg=v==='全NG'||v==='宿NG';
         if(which==='day')dayNg=!dayNg;else nightNg=!nightNg;
         let nv=combine(dayNg,nightNg);if(!d.options.includes(nv))return;
-        draft[i]=nv;paint(cell,nv);
-        document.getElementById('note').textContent='まだ反映していない変更があります。選び終わったら下のボタンを押してください。';
+        draft[i]=nv;paint(cell,nv);updateDirty();
       };
       const half=(which,label)=>{let h=document.createElement('div');h.className='half '+which;h.tabIndex=0;h.setAttribute('role','button');
         h.setAttribute('aria-label',d.day+'日の'+label);h.innerHTML='<span class="lb">'+label+'</span><span class="st"></span>';
@@ -379,10 +384,31 @@ window.addEventListener('message',(event)=>{
     });
     if(mode==='month'){let blanks=(7-(a.offset+days.length)%7)%7;for(let i=0;i<blanks;i++){let el=document.createElement('div');el.className='blank';strip.append(el)}}
     document.getElementById('note').textContent=mode==='month'?'':'左右へスクロールして選べます。';
+    updateDirty(true);
   }
   resize();
 });
-document.getElementById('apply').onclick=()=>{send('streamlit:setComponentValue',{value:{version,values:draft,token:Date.now().toString()+'-'+Math.random()},dataType:'json'});document.getElementById('note').textContent='処理しています…';};
+// 反映していない変更（日数）を数えて、ボタンと案内の見た目を切り替える。
+// 管理者画面（report_dirty）では、変更の有無をアプリにも知らせる（先生を切り替えるときの注意に使う）
+let sentDirty=false,reportDirty=false,baseLabel='';
+function updateDirty(initial){
+  const n=draft.filter((v,i)=>v!==days[i].value).length;
+  const btn=document.getElementById('apply'),note=document.getElementById('note');
+  btn.classList.toggle('dirty',n>0);
+  btn.classList.toggle('clean',n===0&&reportDirty);
+  btn.textContent=n>0?baseLabel+'（未反映 '+n+'日）':(reportDirty?'✓ 反映済み（変更はありません）':baseLabel);
+  note.classList.toggle('dirty',n>0);
+  if(n>0)note.textContent='⚠ まだ反映していない変更が '+n+'日分あります。選び終わったら下のボタンを押してください。';
+  else if(!initial&&note.classList)note.textContent='';
+  if(reportDirty&&!initial&&(n>0)!==sentDirty){
+    sentDirty=n>0;
+    send('streamlit:setComponentValue',{value:{kind:'dirty',dirty:sentDirty,version,token:Date.now().toString()+'-'+Math.random()},dataType:'json'});
+  }
+}
+document.getElementById('apply').onclick=()=>{
+  if(reportDirty&&!draft.some((v,i)=>v!==days[i].value))return;   // 変更がなければ何もしない
+  send('streamlit:setComponentValue',{value:{kind:'apply',version,values:draft,token:Date.now().toString()+'-'+Math.random()},dataType:'json'});
+  document.getElementById('note').textContent='処理しています…';};
 new ResizeObserver(resize).observe(document.body);send('streamlit:componentReady',{apiVersion:1});resize();
 </script></body></html>"""
 
@@ -1999,6 +2025,10 @@ def work_save_floating():
                 WORK_SAVE_SLOT.markdown(f"<span class='work-save-note'>✅ {st.session_state['work_save_note']} 途中保存しました</span>", unsafe_allow_html=True)
             if st.session_state.pop("work_save_toast", False):
                 st.toast("途中保存しました。次回は画面右上の「📂 前回の作業の続きから始める」から読み込めます。", icon="💾")
+            _dirty = st.session_state.pop("work_save_dirty", None)
+            if _dirty:
+                st.toast(f"{'・'.join(_dirty)}先生のカレンダーに、反映していない変更があります。"
+                         "この変更は途中保存に含まれていません。「反映する」を押してから、もう一度途中保存してください。", icon="⚠️")
         else:
             # パスワード未入力のときは、押すと入力欄が開くボタンにする
             box = st.popover("💾 作業を途中保存する") if has_popover \
@@ -3009,22 +3039,54 @@ if not valid_staff.empty:
         mark = "　💬" if name in doctor_comments or doctor_notes.get(name) else ""
         return (f"{name}（NG {count}日）" if count else f"{name}（NGなし）") + mark
 
+    # --- 反映していない変更があるまま先生を切り替えようとしたときの注意 ---
+    # カレンダーで押しただけの変更は、別の先生に切り替えると消えてしまう。
+    # 1回目の切り替えは止めて注意を出し、もう一度切り替えたら（変更を取り消して）移る。
+    def ng_is_dirty(name):
+        rev = st.session_state.get(f"ng_rev::{name}")
+        return rev is not None and st.session_state.get(f"ng_dirty::{name}") == rev
+
+    def ng_leave_allowed(current):
+        if current and ng_is_dirty(current) and st.session_state.get("ng_leave_ack") != current:
+            st.session_state["ng_leave_ack"] = current
+            st.session_state["ng_leave_warning"] = current
+            return False
+        if current:
+            st.session_state.pop(f"ng_dirty::{current}", None)   # 反映せずに移る＝変更は取り消し
+        st.session_state.pop("ng_leave_ack", None)
+        st.session_state.pop("ng_leave_warning", None)
+        return True
+
     def move_ng_doctor(step, names):
         # 名前の一覧は押したときの画面のものを受け取る。
         # 選択中の医師が一覧にない場合（名前を書き換えた・CSVを読み込み直した直後など）は先頭の医師にする
         if not names:
             return
         current = st.session_state.get("ng_selected_doctor")
+        if not ng_leave_allowed(current):
+            return
         i = names.index(current) if current in names else -step
         st.session_state["ng_selected_doctor"] = names[(i + step) % len(names)]
 
+    def on_ng_doctor_select():
+        prev = st.session_state.get("ng_shown_doctor")
+        new = st.session_state.get("ng_selected_doctor")
+        if prev and prev != new and not ng_leave_allowed(prev):
+            st.session_state["ng_selected_doctor"] = prev   # 切り替えを取りやめて、元の先生に戻す
+
     sel_col, prev_col, next_col = st.columns([6, 1.2, 1.2])
-    selected_doc = sel_col.selectbox("NG日を入力する医師", doctor_names, key="ng_selected_doctor", format_func=ng_doctor_label)
+    selected_doc = sel_col.selectbox("NG日を入力する医師", doctor_names, key="ng_selected_doctor", format_func=ng_doctor_label,
+                                     on_change=on_ng_doctor_select)
+    st.session_state["ng_shown_doctor"] = selected_doc
     # ボタンの高さを選択欄にそろえるための余白
     prev_col.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
     next_col.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
     prev_col.button("◀ 前の医師", key="ng_prev_doctor", on_click=move_ng_doctor, args=(-1, list(doctor_names)), use_container_width=True)
     next_col.button("次の医師 ▶", key="ng_next_doctor", on_click=move_ng_doctor, args=(1, list(doctor_names)), use_container_width=True)
+    if st.session_state.get("ng_leave_warning") == selected_doc and ng_is_dirty(selected_doc):
+        st.warning(f"**{selected_doc}先生のカレンダーに、まだ反映していない変更があります。** "
+                   "カレンダーの下の「反映する」ボタンを押してください。"
+                   "反映せずにほかの先生へ移る場合は、もう一度切り替えてください（変更は取り消されます）。")
 
     for t_idx, doc_name in enumerate(doctor_names):
         original_idx = valid_staff.index[t_idx]
@@ -3081,11 +3143,27 @@ if not valid_staff.empty:
                 response = horizontal_ng_component(HORIZONTAL_NG_HTML)(
                     days=component_days, mode="row" if ng_horizontal else "month",
                     offset=datetime.date(year, month, 1).weekday(), doctor=doc_name,
-                    version=revision, key=component_key, default=None,
+                    version=revision, key=component_key, default=None, report_dirty=True,
                 )
+                st.session_state[f"ng_rev::{doc_name}"] = revision
                 seen_key = component_key + "_last_token"
                 if isinstance(response, dict) and response.get("token") != st.session_state.get(seen_key):
                     st.session_state[seen_key] = response.get("token")
+                    if response.get("kind") == "dirty":
+                        # カレンダーで押したが、まだ反映していない変更があるかどうか
+                        if response.get("dirty") and response.get("version") == revision:
+                            st.session_state[f"ng_dirty::{doc_name}"] = revision
+                        else:
+                            st.session_state.pop(f"ng_dirty::{doc_name}", None)
+                            st.session_state.pop("ng_leave_warning", None)
+                            st.session_state.pop("ng_leave_ack", None)
+                        response = None
+                if isinstance(response, dict) and response.get("kind") != "dirty" and response.get("token") == st.session_state.get(seen_key) \
+                        and st.session_state.get(seen_key + "_applied") != response.get("token"):
+                    st.session_state[seen_key + "_applied"] = response.get("token")
+                    st.session_state.pop(f"ng_dirty::{doc_name}", None)
+                    st.session_state.pop("ng_leave_warning", None)
+                    st.session_state.pop("ng_leave_ack", None)
                     values = response.get("values")
                     if response.get("version") == revision and isinstance(values, list) and len(values) == num_days:
                         if all(v in item["options"] for v, item in zip(values, component_days)):
@@ -3190,6 +3268,10 @@ if work_save_request:
         work_state_save(work_snapshot)
         st.session_state["work_save_note"] = remote_now()[-8:-3]
         st.session_state["work_save_toast"] = True
+        # カレンダーで押したまま反映していない変更は、途中保存に入らないので知らせる
+        st.session_state["work_save_dirty"] = [
+            k.split("::", 1)[1] for k in list(st.session_state.keys())
+            if k.startswith("ng_dirty::") and st.session_state[k] == st.session_state.get("ng_rev::" + k.split("::", 1)[1])]
         _saved_ok = True
     except Exception as e:
         _saved_ok = False
