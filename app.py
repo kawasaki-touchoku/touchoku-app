@@ -269,8 +269,8 @@ def horizontal_ng_component(html_source):
 
 HORIZONTAL_NG_HTML = r"""<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
 /* NGカレンダー。各日の上段＝日直、下段＝宿直。押すとその勤務だけ 可⇔NG が切り替わる。
-   色：日直NG＝テラコッタ、宿直NG＝インディゴ。休日はマスを淡いローズにする。 */
-:root{--ink:#243041;--sub:#7a8494;--line:#e3e7ed;--seg:#d8dee6;--day:#cf6a35;--night:#2e3f6e;--ok:#2f8a5b;
+   色：日直NG・宿直NGとも同じテラコッタ。休日はマスを淡いローズにする。 */
+:root{--ink:#243041;--sub:#7a8494;--line:#e3e7ed;--seg:#d8dee6;--day:#cf6a35;--night:#cf6a35;--ok:#2f8a5b;
       --hol:#fff6f5;--holline:#f0dcdc;--sun:#c8414a;--sat:#2f68b3}
 *{box-sizing:border-box}
 body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;color:var(--ink);background:#fff;font-size:14px;-webkit-font-smoothing:antialiased}
@@ -1872,7 +1872,7 @@ const cw = (W - 100) / 7, x0 = 50, y0 = topY;
   g.font = F(28, 700); g.textAlign = 'center'; g.fillText(w, x0 + cw * i + cw / 2, y0 + 40);
 });
 g.textAlign = 'left';
-const DAY_NG = '#cf6a35', NIGHT_NG = '#2e3f6e';   // 日直NGはオレンジ、宿直NGは濃紺
+const DAY_NG = '#cf6a35', NIGHT_NG = '#cf6a35';   // 日直NG・宿直NGとも同じ色
 let count = 0;
 D.days.forEach((day, i) => {
   const p = D.offset + i, col = p % 7, row = Math.floor(p / 7);
@@ -2142,7 +2142,7 @@ def doctor_entry_page(key):
  <div style="font-weight:800;font-size:1.05rem;color:#22345a">⚠ 休日は「日直」と「宿直」を別々に指定します</div>
  <div style="margin-top:4px;font-size:.95rem;color:#243247">終日入れない日は、<b>両方</b>押してください。</div>
  <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:.82rem;font-weight:700">
-  <div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">日直<span>NG</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#2e3f6e;color:#fff">宿直<span>NG</span></div></div></div><div style="margin-top:4px;color:#243247">終日NG</div></div><div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#fff;color:#243041;">日直<span style="color:#2f8a5b">可</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#2e3f6e;color:#fff">宿直<span>NG</span></div></div></div><div style="margin-top:4px;color:#243247">宿直だけNG<br><span style="color:#566174">日直は入れる</span></div></div><div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">日直<span>NG</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#fff;color:#243041;border-top:1px solid #e3e7ed;">宿直<span style="color:#2f8a5b">可</span></div></div></div><div style="margin-top:4px;color:#243247">日直だけNG<br><span style="color:#566174">宿直は入れる</span></div></div>
+  <div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">日直<span>NG</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">宿直<span>NG</span></div></div></div><div style="margin-top:4px;color:#243247">終日NG</div></div><div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#fff;color:#243041;">日直<span style="color:#2f8a5b">可</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">宿直<span>NG</span></div></div></div><div style="margin-top:4px;color:#243247">宿直だけNG<br><span style="color:#566174">日直は入れる</span></div></div><div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">日直<span>NG</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#fff;color:#243041;border-top:1px solid #e3e7ed;">宿直<span style="color:#2f8a5b">可</span></div></div></div><div style="margin-top:4px;color:#243247">日直だけNG<br><span style="color:#566174">宿直は入れる</span></div></div>
  </div>
 </div>""", unsafe_allow_html=True)
 
