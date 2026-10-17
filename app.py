@@ -2476,8 +2476,8 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 3. **医師条件を読み込む**：途中保存から続ける場合は不要です。初めての場合や、手元の「医師条件CSV」を使う場合はアップロードします。
 4. **NG日を集める**：先生方に専用URLから入力してもらい、管理画面で取り込みます（「NG日の集め方」のタブを参照）。
 5. **不足時の優先順位を確認（任意）**：人数が足りない月に、どの枠から埋めるかを決めます。
-6. **「この条件で当直案を作成する」を押す**：押すたびに違うパターンの案ができます。気に入った案が出るまで押し直して構いません。
-   画面右下の「🚀 当直案を作成」ボタンは、どこまでスクロールしていても押せます。結果（未決定の枠の数）もそこに出るので、条件を直しては作り直す作業が、その場でくり返せます。
+6. **画面右下の「🚀 当直案を作成」を押す**：どこまでスクロールしていても押せます。押すたびに違うパターンの案ができるので、気に入った案が出るまで押し直して構いません。
+   結果（未決定の枠の数）もボタンの下に出るので、条件を直しては作り直す作業が、その場でくり返せます。
 7. **結果を確認してダウンロード**：「医師別の当直一覧」をExcelで、「作成した当直案」をCSVでダウンロードできます。
 
 **途中で中断するとき**は、画面右上の「💾 作業を途中保存する」を押してください。スクロールしても右上に付いてくるので、いつでも押せます（管理用パスワードが必要です）。
@@ -3359,6 +3359,8 @@ st.download_button(
 # ==========================================
 st.markdown("""
 <style>
+.create-guide{border:2px dashed #ff4b4b;background:#fff5f5;color:#9b1c1c;border-radius:10px;padding:14px 16px;font-size:1.05rem;text-align:center}
+.create-guide span{display:block;font-size:.85rem;color:#7a4a4a;margin-top:2px}
 .st-key-create_duty_action button {
     width: 100%;
     min-height: 60px;
@@ -3446,7 +3448,11 @@ if st.session_state.get('result_needs_refresh'):
 
 if len(staff_df) > 0:
     with create_button_container:
-        create_clicked = st.button("🚀 この条件で当直案を作成する", type="primary", use_container_width=True) or create_bar_request
+        # 作成ボタンは画面の端の「🚀 当直案を作成」1つだけにする（同じ働きのボタンが2つあると迷うため）
+        create_clicked = create_bar_request
+        _side = "左下" if st.session_state.get("create_bar_left") else "右下"
+        st.markdown(f"<div class='create-guide'>🚀 当直案は、画面{_side}の<b>「当直案を作成」</b>ボタンで作ります"
+                    "<span>（どこまでスクロールしていても押せます）</span></div>", unsafe_allow_html=True)
         st.caption("※ 押すたびに、同じ条件でも違うパターンの当直表を作ります。気に入った案は、下のボタンからダウンロードしてください（作成した当直案は途中保存には含まれません）。")
     if create_clicked:
         with st.spinner("当直案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
