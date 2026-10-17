@@ -268,80 +268,67 @@ def horizontal_ng_component(html_source):
 
 
 HORIZONTAL_NG_HTML = r"""<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;color:#243247;background:white;font-size:14px}.strip{display:flex;gap:8px;overflow-x:auto;width:100%;padding:6px 2px 16px;align-items:stretch;scrollbar-width:auto}.cell{flex:0 0 112px;width:112px;min-width:112px;border:2px solid #dfe3ea;border-radius:9px;padding:6px;background:#f8fafc}.head{height:78px;display:flex;flex-direction:column;justify-content:center;align-items:center;border-radius:5px;gap:5px;font-weight:750;white-space:nowrap}.day{font-size:16px}.state{font-size:14px}.day.holiday{color:#c92336}.day.saturday{color:#1670c5}select{width:100%;height:36px;margin-top:6px;font-size:14px;font-weight:650;border:1px solid #8b95a5;border-radius:5px;background:white;color:#243247;padding:2px}button{background:#ff4b4b;color:white;border:0;border-radius:7px;padding:12px 18px;font:600 14px system-ui;cursor:pointer}button:focus-visible,select:focus-visible{outline:3px solid #4789ff;outline-offset:2px}.note{margin:8px 0;font-size:13px;color:#566174;min-height:20px}
-
-.strip.month{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;overflow:visible;padding-bottom:8px}
-.month .cell{width:auto;min-width:0;padding:5px;flex:none}
-.month .head{height:72px}.weekday{text-align:center;font-weight:700;padding:4px}.blank{min-height:126px;background:#f5f6f8;border-radius:9px}
-@media(max-width:600px){.strip.month{gap:3px}.month .cell{padding:2px;border-width:1px}.month .day{font-size:12px}.month .state{font-size:11px}.month select{font-size:11px;padding:0;height:30px}.month .head{height:66px}.month .blank{min-height:108px}.weekday{font-size:12px}}
-
-/* 上段が日直、下段が宿直。不可の勤務帯だけ塗る。 */
-.cell,.month .cell{background:#fff;border-color:#cbd2dc}
-.head,.month .head{height:124px;gap:4px;justify-content:flex-start;padding-top:2px;color:#243247;background:transparent}
-.state{width:100%;display:grid;grid-template-rows:repeat(2,36px);gap:0;border:1px solid #d6dce5;border-radius:5px;overflow:hidden;order:3}
-.band{display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:750;background:#fff;color:#425268;white-space:nowrap}
-.band + .band{border-top:1px solid #d6dce5}.band.off{background:#fcfcfd;color:#d8dde5;font-weight:400}
-/* 日直・宿直の段そのものを押して、可⇔NG を切り替える */
-.band.tap{cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;gap:3px}
-.band.tap:hover{filter:brightness(.95)}
-.band.tap:focus-visible{outline:3px solid #4789ff;outline-offset:-3px}
-.band .mark{font-size:12px;font-weight:900}
-/* 「可」の段は緑で目立たせる（休日に日直の指定を忘れていないか一目で分かるように） */
-.band.ok{background:#e9f3ec !important;color:#2c5e3d !important;font-weight:800;box-shadow:inset 0 0 0 1px #b5d3bf}
-/* 日直NGはオレンジ、宿直NGは濃紺（休日・平日とも同じ） */
-.cell[data-state="全NG"] .day-band,.cell[data-state="日NG"] .day-band{background:#c8601a;color:#fff}
-.cell[data-state="全NG"] .night-band,.cell[data-state="宿NG"] .night-band{background:#22345a;color:#fff}
-.warning-slot{height:22px;min-height:22px;display:flex;align-items:center;justify-content:center}
-.weekday-warning{color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:4px;padding:0 4px;font-size:14px;font-weight:900;line-height:20px}
-.blank{min-height:176px}
-@media(max-width:600px){.month .head{height:120px}.month .band{font-size:10px}.month .weekday-warning{font-size:15px;padding:0 3px}.month .blank{min-height:160px}}
-
-.weekday-warning{display:inline-flex;align-items:center;justify-content:center;gap:3px;max-width:100%}
-.duty-label{font-size:9px;font-weight:650;line-height:1.15;white-space:nowrap}
-@media(max-width:600px){.month .weekday-warning{gap:1px;padding:0 1px;font-size:12px}.month .duty-label{font-size:8px;white-space:normal;max-width:30px;overflow-wrap:anywhere}}
-
-/* 日付の文字・休日色・警告の有無によらず各段の位置を固定する。 */
-.head,.month .head{
- display:grid;
- grid-template-columns:minmax(0,1fr);
- grid-template-rows:26px 30px 74px;
- justify-content:stretch;
- width:100%;
- min-width:0;
- align-content:end;
- align-items:center;
- justify-items:center;
- gap:4px;
- padding-top:0;
- padding-bottom:0;
-}
-.head > .day{line-height:24px;margin:0;align-self:center}
-.head > .warning-slot{height:30px;min-height:30px;width:100%;margin:0}
-.head > .state{height:74px;min-height:74px;margin:0;align-self:end}
-.head,.month .head{height:142px}
-.cell{padding-bottom:6px}.blank{min-height:158px !important}
-@media(max-width:600px){.month .head{height:138px}.month .band{font-size:10px;letter-spacing:-.02em}.month .band .mark{display:none}}
+/* NGカレンダー。各日の「日直」「宿直」ボタンを押すと 可⇔NG が切り替わる。
+   色：日直NG＝オレンジ、宿直NG＝濃紺。休日はマスを薄いピンクにする。 */
+:root{--ink:#1f2b3d;--sub:#6b7686;--line:#e1e6ed;--day:#c8601a;--night:#22345a;--ok:#2f7d4f;--hol:#fdf1f2;--holline:#efd3d7}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI",sans-serif;color:var(--ink);background:#fff;font-size:14px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:12.5px;color:var(--sub);margin:2px 2px 10px}
+.legend i{display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:5px}
+.strip{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 14px}
+.strip.month{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;overflow:visible;padding-bottom:6px}
+.wk{text-align:center;font-size:12.5px;font-weight:700;color:var(--sub);padding:2px 0 4px}
+.blank{min-height:1px}
+.cell{flex:0 0 108px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:7px 6px 6px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.month .cell{flex:none}
+.cell[data-holiday="true"]{background:var(--hol);border-color:var(--holline)}
+.top{display:flex;align-items:center;justify-content:space-between;height:22px;padding:0 2px}
+.date{font-size:16px;font-weight:800;line-height:1;white-space:nowrap}
+.date small{font-size:11px;font-weight:600;color:var(--sub);margin-left:2px}
+.date.holiday{color:#c92336}.date.saturday{color:#1d63b8}
+.pm{font-size:10.5px;font-weight:800;color:#9a5b00;background:#fff3cd;border:1px solid #f0c36d;border-radius:999px;padding:1px 6px;white-space:nowrap}
+.slot{height:34px}
+.btn{width:100%;height:34px;display:flex;align-items:center;justify-content:space-between;gap:4px;padding:0 9px;border-radius:7px;
+     border:1px solid #cdd5df;background:#fff;color:var(--ink);font:700 13px system-ui,sans-serif;cursor:pointer;
+     -webkit-tap-highlight-color:transparent;user-select:none;transition:background .12s,border-color .12s}
+.btn .st{font-size:12.5px;font-weight:800;color:var(--ok)}
+.btn:hover{border-color:#9aa6b6}
+.btn:focus-visible{outline:3px solid #4789ff;outline-offset:1px}
+.btn.ng{color:#fff;border-color:transparent}
+.btn.ng .st{color:#fff}
+.btn.day.ng{background:var(--day)}
+.btn.night.ng{background:var(--night)}
+.st .w{display:inline}.st .m{display:none}
+#note{margin:6px 2px 8px;font-size:12.5px;color:var(--sub);min-height:18px}
+#apply{background:#ff4b4b;color:#fff;border:0;border-radius:8px;padding:11px 18px;font:700 14px system-ui,sans-serif;cursor:pointer}
 @media(max-width:600px){
- .month .head{grid-template-rows:22px 30px 74px}
- .month .blank{min-height:146px !important}
+ .strip.month{gap:3px}
+ .month .cell{padding:4px 2px 3px;gap:3px;border-radius:7px}
+ .month .top{height:18px;padding:0 1px}
+ .month .date{font-size:13px}
+ .month .pm{font-size:8.5px;padding:0 3px}
+ .month .slot,.month .btn{height:30px}
+ .month .btn{padding:0;justify-content:center;flex-direction:column;gap:0;font-size:10.5px;border-radius:5px;line-height:1.1}
+ .month .btn .st{font-size:10px}
+ .month .st .w{display:none}.month .st .m{display:inline}
 }
-/* 休日（土日祝・特別休日）はマスの背景をピンクにして、平日とはっきり分ける */
-.cell[data-holiday="true"],.month .cell[data-holiday="true"]{background:#fcf1f2 !important;border-color:#e6c3c8 !important}
-.cell[data-holiday="true"] .state{border-color:#e6c3c8}
-</style><body><div id="strip" class="strip" aria-label="NG日カレンダー"></div><div id="note" class="note">左右へスクロールして選択できます。</div><button id="apply" type="button">NG日を反映する</button><script>
+</style><body>
+<div class="legend"><span><i style="background:var(--day)"></i>日直NG</span><span><i style="background:var(--night)"></i>宿直NG</span><span><i style="background:var(--hol);border:1px solid var(--holline)"></i>休日</span><span><b class="pm" style="font-size:10px">PM</b> 翌日PM duty</span><span>ボタンを押すと「可」⇔「NG」が切り替わります</span></div>
+<div id="strip" class="strip" aria-label="NG日カレンダー"></div><div id="note"></div><button id="apply" type="button">NG日を反映する</button><script>
 let version=null,days=[],draft=[];let mode='row';let frameHeight=0;
 function send(type,data={}){window.parent.postMessage({isStreamlitMessage:true,type,...data},'*')}
 function resize(){let h=document.body.scrollHeight+10;if(h!==frameHeight){frameHeight=h;send('streamlit:setFrameHeight',{height:h})}}
+function combine(dayNg,nightNg){return dayNg&&nightNg?'全NG':dayNg?'日NG':nightNg?'宿NG':'OK'}
+function paintBtn(btn,ng){
+  btn.classList.toggle('ng',ng);btn.setAttribute('aria-pressed',String(ng));
+  btn.querySelector('.st').innerHTML=ng?'<span class="w">NG</span><span class="m">✕</span>':'<span class="w">可</span><span class="m">○</span>';
+}
 function paint(cell,value){
   cell.dataset.state=value;
-  let holiday=cell.dataset.holiday==='true';
-  let dayNg=value==='全NG'||value==='日NG', nightNg=value==='全NG'||value==='宿NG';
-  let db=cell.querySelector('.day-band'), nb=cell.querySelector('.night-band');
-  if(holiday){db.innerHTML=dayNg?'<span class="mark">✕</span>日直NG':'<span class="mark">○</span>日直 可';db.setAttribute('aria-pressed',String(dayNg));db.classList.toggle('ok',!dayNg);}
-  else{db.textContent='日直なし';db.classList.remove('ok');}
-  nb.innerHTML=nightNg?'<span class="mark">✕</span>宿直NG':'<span class="mark">○</span>宿直 可';nb.setAttribute('aria-pressed',String(nightNg));nb.classList.toggle('ok',!nightNg);
+  let db=cell.querySelector('.btn.day'),nb=cell.querySelector('.btn.night');
+  if(db)paintBtn(db,value==='全NG'||value==='日NG');
+  paintBtn(nb,value==='全NG'||value==='宿NG');
 }
-function combine(dayNg,nightNg){return dayNg&&nightNg?'全NG':dayNg?'日NG':nightNg?'宿NG':'OK'}
 window.addEventListener('message',(event)=>{
   if(!event.data||event.data.type!=='streamlit:render')return;
   let a=event.data.args;
@@ -352,42 +339,36 @@ window.addEventListener('message',(event)=>{
     strip.replaceChildren();
     strip.className='strip '+(mode==='month'?'month':'');
     if(mode==='month'){
-      ['月','火','水','木','金','土','日'].forEach((w,i)=>{let el=document.createElement('div');el.className='weekday';el.textContent=w;el.style.color=i===6?'#c92336':i===5?'#1670c5':'#243247';strip.append(el)});
+      ['月','火','水','木','金','土','日'].forEach((w,i)=>{let el=document.createElement('div');el.className='wk';el.textContent=w;if(i===6)el.style.color='#c92336';if(i===5)el.style.color='#1d63b8';strip.append(el)});
       for(let i=0;i<a.offset;i++){let el=document.createElement('div');el.className='blank';strip.append(el)}
     }
     days.forEach((d,i)=>{
-      let cell=document.createElement('div');cell.className='cell';cell.dataset.holiday=String(d.options.includes('日NG'));
-      let head=document.createElement('div');head.className='head';
-      let day=document.createElement('div');day.className='day '+d.kind;day.textContent=mode==='month'?d.day+'日':d.day+'日（'+d.weekday+'）';
-      let state=document.createElement('div');state.className='state';
-      let dayBand=document.createElement('div');dayBand.className='band day-band'+(d.options.includes('日NG')?'':' off');
-      let nightBand=document.createElement('div');nightBand.className='band night-band';
-      state.append(dayBand,nightBand);
-      let warningSlot=document.createElement('div');warningSlot.className='warning-slot';
-      if(d.warning){
-        let warning=document.createElement('span');warning.className='weekday-warning';warning.textContent='⚠︎';
-        let duty=document.createElement('small');duty.className='duty-label';duty.textContent='翌日PM duty';
-        warning.append(duty);warning.title='翌日PM duty（翌日は平日）';warning.setAttribute('aria-label',warning.title);
-        warningSlot.append(warning);
-      }
-      head.append(day,warningSlot,state);
-      // 日直・宿直の段を押すと、その勤務だけ 可⇔NG が切り替わる（休日は両方を別々に指定できる）
+      const holiday=d.options.includes('日NG');
+      let cell=document.createElement('div');cell.className='cell';cell.dataset.holiday=String(holiday);
+      let top=document.createElement('div');top.className='top';
+      let date=document.createElement('div');date.className='date '+d.kind;
+      date.innerHTML=d.day+(mode==='month'?'':'<small>（'+d.weekday+'）</small>');
+      top.append(date);
+      if(d.warning){let pm=document.createElement('span');pm.className='pm';pm.textContent='PM';
+        pm.title='翌日PM duty（翌日は平日）。原則としてこの日の宿直は外れます。';top.append(pm)}
+      cell.append(top);
+      // 日直・宿直のボタン。押すとその勤務だけ 可⇔NG が切り替わる（休日は両方を別々に指定できる）
       const toggle=(which)=>{
         let v=draft[i];let dayNg=v==='全NG'||v==='日NG',nightNg=v==='全NG'||v==='宿NG';
         if(which==='day')dayNg=!dayNg;else nightNg=!nightNg;
         let nv=combine(dayNg,nightNg);if(!d.options.includes(nv))return;
         draft[i]=nv;paint(cell,nv);
-        document.getElementById('note').textContent=a.dirty_note||'まだ反映していない変更があります。選び終わったら下のボタンを押してください。';
+        document.getElementById('note').textContent='まだ反映していない変更があります。選び終わったら下のボタンを押してください。';
       };
-      const tappable=(el,which,label)=>{el.classList.add('tap');el.tabIndex=0;el.setAttribute('role','button');
-        el.setAttribute('aria-label',d.day+'日の'+label);el.onclick=()=>toggle(which);
-        el.onkeydown=(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle(which)}}};
-      if(d.options.includes('日NG'))tappable(dayBand,'day','日直');
-      tappable(nightBand,'night','宿直');
-      cell.append(head);paint(cell,d.value);strip.append(cell);
+      const makeBtn=(which,label)=>{let b=document.createElement('button');b.type='button';b.className='btn '+which;
+        b.setAttribute('aria-label',d.day+'日の'+label);b.innerHTML='<span class="lb">'+label+'</span><span class="st"></span>';
+        b.onclick=()=>toggle(which);return b};
+      if(holiday){cell.append(makeBtn('day','日直'))}
+      else{let sp=document.createElement('div');sp.className='slot';cell.append(sp)}   // 平日は日直がないので空けておく
+      cell.append(makeBtn('night','宿直'));
+      paint(cell,d.value);strip.append(cell);
     });
-    if(mode==='month'){let blanks=(7-(a.offset+days.length)%7)%7;for(let i=0;i<blanks;i++){let el=document.createElement('div');el.className='blank';strip.append(el)}}
-    document.getElementById('note').textContent='「日直」「宿直」の欄を押すと、可⇔NGが切り替わります（休日は日直と宿直を別々に指定します）。選び終わったら下のボタンを押してください。';
+    document.getElementById('note').textContent=mode==='month'?'':'左右へスクロールして選べます。';
   }
   resize();
 });
@@ -1668,7 +1649,7 @@ def remote_qr_cards_html(cards):
     <div class="howto-title">入力のしかた</div>
     <ol>
       <li>QRコードを読み取り、入力ページを開く</li>
-      <li>入れない日の「日直」「宿直」の欄を押して、NGにする</li>
+      <li>入れない日の「日直」「宿直」のボタンを押して、NGにする</li>
       <li>「NG日とコメントを保存する」を押す</li>
       <li>「✅ 保存しました」が出れば完了</li>
     </ol>
@@ -2101,7 +2082,7 @@ def doctor_entry_page(key):
         placeholder="例：第2週は学会のため、できれば平日の宿直を避けたいです。／ 月4回までを希望します。",
         help="カレンダーの下の保存ボタンを押すと、NG日と一緒に保存されます。",
     )
-    st.caption("下のカレンダーで「日直」「宿直」の欄を押してNGにし（休日は日直と宿直が別々です）、カレンダーの下の「保存する」ボタンを押してください。コメントも一緒に保存されます。"
+    st.caption("下のカレンダーで「日直」「宿直」のボタンを押してNGにし（休日は日直と宿直が別々です）、カレンダーの下の「保存する」ボタンを押してください。コメントも一緒に保存されます。"
                "コメントだけを直したいときも、同じボタンを押してください（NG日はそのまま）。")
 
     # 以前の紙の用紙（休日は日直・宿直まとめて×）から変わった点を、カレンダーのすぐ上で強調する
@@ -2109,22 +2090,8 @@ def doctor_entry_page(key):
 <div style="border:2px solid #8a94a6;background:#f4f6f9;border-radius:10px;padding:12px 14px;margin:6px 0 10px">
  <div style="font-weight:800;font-size:1.05rem;color:#22345a">⚠ 休日は「日直」と「宿直」を別々に指定します</div>
  <div style="margin-top:4px;font-size:.95rem;color:#243247">終日入れない日は、<b>両方</b>押してください。</div>
- <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:.85rem;font-weight:700">
-  <div style="text-align:center;width:100px">
-   <div style="width:96px;border:1px solid #d6dce5;border-radius:5px;overflow:hidden">
-    <div style="background:#c8601a;color:#fff;padding:5px 0">✕ 日直NG</div>
-    <div style="background:#22345a;color:#fff;padding:5px 0">✕ 宿直NG</div></div>
-   <div style="margin-top:4px;color:#243247">終日NG</div></div>
-  <div style="text-align:center;width:100px">
-   <div style="width:96px;border:1px solid #d6dce5;border-radius:5px;overflow:hidden">
-    <div style="background:#e9f3ec;color:#2c5e3d;padding:5px 0">○ 日直 可</div>
-    <div style="background:#22345a;color:#fff;padding:5px 0">✕ 宿直NG</div></div>
-   <div style="margin-top:4px;color:#243247">宿直だけNG<br><span style="color:#566174">日直は入れる</span></div></div>
-  <div style="text-align:center;width:100px">
-   <div style="width:96px;border:1px solid #d6dce5;border-radius:5px;overflow:hidden">
-    <div style="background:#c8601a;color:#fff;padding:5px 0">✕ 日直NG</div>
-    <div style="background:#e9f3ec;color:#2c5e3d;padding:5px 0">○ 宿直 可</div></div>
-   <div style="margin-top:4px;color:#243247">日直だけNG<br><span style="color:#566174">宿直は入れる</span></div></div>
+ <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:.82rem;font-weight:700">
+  <div style="width:104px;text-align:center"><div style="background:#fdf1f2;border:1px solid #efd3d7;border-radius:8px;padding:2px 5px 5px;text-align:left"><div style="display:flex;justify-content:space-between;padding:4px 7px;border-radius:6px;background:#c8601a;color:#fff;margin-top:3px">日直<span>NG</span></div><div style="display:flex;justify-content:space-between;padding:4px 7px;border-radius:6px;background:#22345a;color:#fff;margin-top:3px">宿直<span>NG</span></div></div><div style="margin-top:4px;color:#243247">終日NG</div></div><div style="width:104px;text-align:center"><div style="background:#fdf1f2;border:1px solid #efd3d7;border-radius:8px;padding:2px 5px 5px;text-align:left"><div style="display:flex;justify-content:space-between;padding:3px 6px;border-radius:6px;background:#fff;border:1px solid #cdd5df;color:#1f2b3d;margin-top:3px">日直<span style="color:#2f7d4f">可</span></div><div style="display:flex;justify-content:space-between;padding:4px 7px;border-radius:6px;background:#22345a;color:#fff;margin-top:3px">宿直<span>NG</span></div></div><div style="margin-top:4px;color:#243247">宿直だけNG<br><span style="color:#566174">日直は入れる</span></div></div><div style="width:104px;text-align:center"><div style="background:#fdf1f2;border:1px solid #efd3d7;border-radius:8px;padding:2px 5px 5px;text-align:left"><div style="display:flex;justify-content:space-between;padding:4px 7px;border-radius:6px;background:#c8601a;color:#fff;margin-top:3px">日直<span>NG</span></div><div style="display:flex;justify-content:space-between;padding:3px 6px;border-radius:6px;background:#fff;border:1px solid #cdd5df;color:#1f2b3d;margin-top:3px">宿直<span style="color:#2f7d4f">可</span></div></div><div style="margin-top:4px;color:#243247">日直だけNG<br><span style="color:#566174">宿直は入れる</span></div></div>
  </div>
 </div>""", unsafe_allow_html=True)
 
@@ -2463,13 +2430,13 @@ NG日の欄にある「📨 先生方からのNG日入力（専用URL）」を�
 
 「NG日を入力する医師」で先生を選び、カレンダーでNG日を選んで「NG日を反映する」を押します。紙やメールで集めた場合はこちらを使います。
 
-カレンダーの「日直」「宿直」の欄を押すと、その勤務だけNGになります（もう一度押すと可に戻ります）。
+カレンダーの「日直」「宿直」のボタンを押すと、その勤務だけNGになります（もう一度押すと可に戻ります）。
 
 | NGの種類 | 意味 |
 | --- | --- |
-| 宿NG | 宿直（夜）に入れない。「宿直」の欄だけ押した状態 |
-| 日NG | 日直（日中）に入れない。休日だけ。「日直」の欄だけ押した状態 |
-| 全NG | 日直・宿直とも入れない。休日だけ。両方の欄を押した状態 |
+| 宿NG | 宿直（夜）に入れない。「宿直」のボタンだけ押した状態 |
+| 日NG | 日直（日中）に入れない。休日だけ。「日直」のボタンだけ押した状態 |
+| 全NG | 日直・宿直とも入れない。休日だけ。両方のボタンを押した状態 |
 | ⚠ | 翌日PMにdutyがあるため、原則その日の宿直を外す日 |
         """)
     with tab_result:
@@ -2961,10 +2928,10 @@ st.divider()
 
 st.markdown("### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
 st.info("先生方に専用URLから入力してもらう場合は、下の「📨 先生方からのNG日入力（専用URL）」を使います。"
-        "管理者が直接入力する場合は、医師を選んでカレンダーの「日直」「宿直」の欄を押してNGにし、最後に「NG日を反映する」を押してください。")
+        "管理者が直接入力する場合は、医師を選んでカレンダーの「日直」「宿直」のボタンを押してNGにし、最後に「NG日を反映する」を押してください。")
 with st.expander("NGの種類・一括操作について", expanded=False):
     st.markdown("""
-カレンダーの各日の「日直」「宿直」の欄を押すと、その勤務だけ「可」⇔「NG」が切り替わります。
+カレンダーの各日の「日直」「宿直」のボタンを押すと、その勤務だけ「可」⇔「NG」が切り替わります。
 
 | 表示 | 意味 |
 | --- | --- |
@@ -2973,7 +2940,7 @@ with st.expander("NGの種類・一括操作について", expanded=False):
 | 日直NGのみ | 日直に勤務できません。宿直は候補になります（日NG）。休日だけです。 |
 | 宿直NGのみ | 宿直に勤務できません。休日なら日直は候補になります（宿NG）。 |
 
-平日は日直がないので、「宿直」の欄だけ押せます。
+平日は日直がないので、「宿直」のボタンだけあります。
 「全日NGにする」は平日を宿NG、休日を全NGにし、「すべてOKに戻す」はNG指定を解除します。
 一括操作は押すとすぐ反映されます。確定済み当直・優先度100以上の希望は、NGより優先されます。
 
