@@ -2582,6 +2582,10 @@ st.markdown("""
 .sec-banner .s{font-size:.88rem;opacity:.9;margin-top:2px}
 .sec-banner .tag{margin-left:auto;font-size:.8rem;font-weight:800;padding:3px 12px;border-radius:999px;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.45);white-space:nowrap}
 .sec-banner.first{margin-top:.6rem}
+/* 画面上部の帯（ボタンの並ぶ所）：下の画面との境目が分かるよう、細い線とごく薄い影を付ける。
+   すりガラス風にして、下を流れる内容が透けて重ならないようにする */
+[data-testid="stHeader"]{background:rgba(255,255,255,.94) !important;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+  border-bottom:1px solid #e3e7ed;box-shadow:0 2px 10px rgba(16,24,40,.06)}
 /* 右下のリンクで移動したとき、画面上部の帯（ボタンの並ぶ所）に見出しが隠れないよう、少し上に余白を取って止める */
 #sec-staff,#sec-ng,#sec-create,#sec-result{scroll-margin-top:5.5rem}
 /* 折りたたみ式の項目（確定当直）も、同じ帯の見た目にする */
