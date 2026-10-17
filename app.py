@@ -2636,6 +2636,9 @@ st.markdown("""
 .st-key-create_bar button{width:100% !important;min-height:2.6rem;font-weight:800}
 .st-key-create_bar p{margin:0}
 .cb-box{display:flex;flex-direction:column;gap:6px}
+.st-key-create_bar .st-key-create_bar_swap button{min-height:1.5rem !important;padding:0 6px !important;font-size:.75rem !important;font-weight:600 !important;
+  background:transparent !important;border:0 !important;color:#7a8494 !important;box-shadow:none !important}
+.st-key-create_bar .st-key-create_bar_swap button:hover{color:#2f4a6d !important;text-decoration:underline}
 /* Streamlit の文章部品は下に負の余白（-1rem）が付くため、パネルの外にはみ出す。ここでは打ち消す */
 .st-key-create_bar [data-testid="stMarkdownContainer"],.st-key-create_bar [data-testid="stMarkdown"],
 .st-key-create_bar [data-testid="stElementContainer"]{margin:0 !important}
@@ -2659,6 +2662,14 @@ def create_bar_show(result_html=""):
         unsafe_allow_html=True)
 
 
+def _toggle_create_bar_side():
+    st.session_state["create_bar_left"] = not st.session_state.get("create_bar_left", False)
+
+
+if st.session_state.get("create_bar_left"):
+    # 「⇄」で左下に移したとき
+    st.markdown("<style>.st-key-create_bar{left:1.2rem !important;right:auto !important}"
+                "@media (max-width:600px){.st-key-create_bar{left:.5rem !important}}</style>", unsafe_allow_html=True)
 with st.container(key="create_bar"):
     if st.button("🚀 当直案を作成", key="create_bar_button", type="primary"):
         create_bar_request = True
@@ -2672,6 +2683,8 @@ with st.container(key="create_bar"):
         create_bar_show(_last)
     else:
         create_bar_show()
+    st.button("⇄ 左右の位置を入れ替える" if not st.session_state.get("create_bar_left") else "⇄ 右下に戻す",
+              key="create_bar_swap", on_click=_toggle_create_bar_side)
 
 if "sel_year" not in st.session_state:
     st.session_state["sel_year"] = default_year
