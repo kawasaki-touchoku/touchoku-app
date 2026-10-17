@@ -2271,7 +2271,24 @@ def import_remote_ng(year, month, submissions, mode="merge"):
 
 def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_special_holiday, day_is_holiday):
     """管理者用：受付の開始・締め切り、専用URL、提出状況、取り込み。"""
-    with st.expander("📨 先生方からのNG日入力（専用URL）", expanded=False):
+    # 管理用パスワードが必要な欄であることが一目で分かるように、紺色の枠で囲み、上に印を付ける
+    st.markdown("""
+<style>
+.st-key-remote_admin_box{border:2px solid #3b5b92;background:#f3f6fb;border-radius:12px;padding:10px 12px 6px}
+.st-key-remote_admin_box [data-testid="stExpander"] details{background:#fff}
+.admin-badge{display:inline-flex;align-items:center;gap:6px;font-size:.85rem;font-weight:800;color:#fff;background:#3b5b92;border-radius:999px;padding:2px 12px}
+.admin-badge.on{background:#2f8a5b}
+.admin-note{font-size:.85rem;color:#3b4a63;margin-left:8px}
+</style>""", unsafe_allow_html=True)
+    logged_in = bool(st.session_state.get("remote_admin_ok"))
+    box = st.container(key="remote_admin_box")
+    with box:
+        if logged_in:
+            st.markdown("<span class='admin-badge on'>🔓 管理者専用（ログイン中）</span>", unsafe_allow_html=True)
+        else:
+            st.markdown("<span class='admin-badge'>🔒 管理者専用</span><span class='admin-note'>管理用パスワードを入力すると使えます</span>",
+                        unsafe_allow_html=True)
+    with box, st.expander("📨 先生方からのNG日入力（専用URL）", expanded=False):
         if not remote_is_configured():
             st.info("この機能を使うには、最初に保存用のGoogleスプレッドシートとの接続設定が必要です。設定方法は担当者向けの手順書を参照してください。")
             return
@@ -2280,6 +2297,8 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
             st.error("管理用パスワード（admin_password）が設定されていません。Secretsに追加してください。")
             return
         if not st.session_state.get("remote_admin_ok"):
+            st.info("🔒 この欄は**管理者専用**です。受付の開始・締め切り、専用URLや配布用カードの作成、提出されたNG日の取り込みができます。"
+                    "使うには、管理用パスワードを入力してください。")
             pw = st.text_input("管理用パスワード", type="password", key="remote_admin_pw")
             if pw:
                 if pw == str(admin_password):
@@ -2752,10 +2771,21 @@ st.divider()
 # ==========================================
 # 3. メイン画面：データの読み込み＆画面入力
 # ==========================================
-st.header("1. 先月今月来月の確定当直を入力（任意）")
-st.info("先月・今月・来月の、担当者が決まっている当直を入力してください。先月末の勤務は、月初の勤務間隔の確認に使います。入力がなければ、この項目は飛ばせます。")
-with st.expander("確定済み当直の入力例と扱い", expanded=False):
-    st.markdown("""
+# あまり使わない項目なので、ふだんは折りたたんでおく（途中保存から読み込んだ確定当直があるときは開く）
+def _fixed_csv_has_entries(text):
+    """途中保存の確定当直に、空でない入力が1つでもあるか。"""
+    try:
+        df = parse_fixed_csv(text.encode("utf-8"))
+    except Exception:
+        return False
+    return any(str(v).strip() not in ("", "nan", "None") for v in df.drop(columns=["平日/休日"], errors="ignore").values.ravel())
+
+
+_has_fixed = bool(restored_state and restored_state.get("fixed_csv") and _fixed_csv_has_entries(restored_state["fixed_csv"]))
+with st.expander("📅 1. 先月今月来月の確定当直を入力（任意）", expanded=_has_fixed):
+    st.info("先月・今月・来月の、担当者が決まっている当直を入力してください。先月末の勤務は、月初の勤務間隔の確認に使います。入力がなければ、この項目は飛ばせます。")
+    with (st.popover("確定済み当直の入力例と扱い") if hasattr(st, "popover") else st.container()):
+        st.markdown("""
 - CSVのアップロードと、下の表への直接入力のどちらでも入力できます。
 - 日付は `2026/10/1` または `10/1` の形式で入力します。
 - 担当する枠の欄に、医師条件と同じ名前を入力します。複数人の場合は `佐藤、鈴木` のように「、」で区切ります。
@@ -2767,43 +2797,42 @@ with st.expander("確定済み当直の入力例と扱い", expanded=False):
 **今月の同じ日・同じ枠を指定した場合、確定当直表への入力と「希望優先度100以上」での指定は、どちらも固定され、計算上の扱いは基本的に同じです。両方に入力する必要はありません。**
     """)
 
-fixed_columns = ["日付", "平日/休日"] + ALL_SHIFT_TYPES
-fixed_template_df = pd.DataFrame(columns=fixed_columns)
-fixed_csv_template = fixed_template_df.to_csv(index=False).encode('utf-8-sig')
+    fixed_columns = ["日付", "平日/休日"] + ALL_SHIFT_TYPES
+    fixed_template_df = pd.DataFrame(columns=fixed_columns)
+    fixed_csv_template = fixed_template_df.to_csv(index=False).encode('utf-8-sig')
 
-col_dl_fixed, col_ul_fixed = st.columns(2)
-with col_dl_fixed:
-    st.write("▼ Excelで一括入力したい場合")
-    st.download_button(
-        label="📥 ひな形（CSV）をダウンロード",
-        data=fixed_csv_template,
-        file_name="確定当直_ひな形.csv",
-        mime="text/csv",
-    )
-with col_ul_fixed:
-    fixed_file = st.file_uploader("決定済み当直表（CSV）をアップロード", type="csv", key=f"fixed_csv_{st.session_state.get('uploader_gen', 0)}")
+    col_dl_fixed, col_ul_fixed = st.columns(2)
+    with col_dl_fixed:
+        st.write("▼ Excelで一括入力したい場合")
+        st.download_button(
+            label="📥 ひな形（CSV）をダウンロード",
+            data=fixed_csv_template,
+            file_name="確定当直_ひな形.csv",
+            mime="text/csv",
+        )
+    with col_ul_fixed:
+        fixed_file = st.file_uploader("決定済み当直表（CSV）をアップロード", type="csv", key=f"fixed_csv_{st.session_state.get('uploader_gen', 0)}")
 
-if fixed_file is not None:
-    try:
-        base_fixed_df = parse_fixed_csv(fixed_file.getvalue())
-    except Exception as e:
-        st.error(f"確定当直ファイルの読み込みに失敗しました。詳細: {e}")
+    if fixed_file is not None:
+        try:
+            base_fixed_df = parse_fixed_csv(fixed_file.getvalue())
+        except Exception as e:
+            st.error(f"確定当直ファイルの読み込みに失敗しました。詳細: {e}")
+            st.stop()
+    elif restored_state and restored_state.get("fixed_csv"):
+        base_fixed_df = parse_fixed_csv(restored_state["fixed_csv"].encode("utf-8"))
+    else:
+        base_fixed_df = pd.DataFrame(columns=fixed_columns)
+        base_fixed_df.loc[0] = ["" for _ in range(len(fixed_columns))]
+
+    if "日付" not in base_fixed_df.columns:
+        st.error("確定当直CSVに「日付」の列がありません。ひな形の列名を確認してください。")
         st.stop()
-elif restored_state and restored_state.get("fixed_csv"):
-    base_fixed_df = parse_fixed_csv(restored_state["fixed_csv"].encode("utf-8"))
-else:
-    base_fixed_df = pd.DataFrame(columns=fixed_columns)
-    base_fixed_df.loc[0] = ["" for _ in range(len(fixed_columns))]
+    base_fixed_df = base_fixed_df.set_index("日付")
 
-if "日付" not in base_fixed_df.columns:
-    st.error("確定当直CSVに「日付」の列がありません。ひな形の列名を確認してください。")
-    st.stop()
-base_fixed_df = base_fixed_df.set_index("日付")
-
-st.markdown("### 📅 先月今月来月の確定当直")
-st.write("表のセルをクリックして、日付と担当医師名を入力・編集できます。")
-edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
-edited_fixed_df = edited_fixed_df_raw.reset_index()
+    st.write("表のセルをクリックして、日付と担当医師名を入力・編集できます。")
+    edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
+    edited_fixed_df = edited_fixed_df_raw.reset_index()
 
 st.divider()
 
