@@ -2571,10 +2571,38 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# 大きな区切り（セクション）の見出し。紺色の帯で、どこからどこまでが1つの項目かを分かりやすくする
+st.markdown("""
+<style>
+.sec-banner{display:flex;align-items:center;gap:14px;margin:2.6rem 0 .9rem;padding:14px 18px;border-radius:12px;
+  background:linear-gradient(90deg,#2f4a6d 0%,#47749b 100%);color:#fff;box-shadow:0 2px 6px rgba(31,52,82,.18)}
+.sec-banner .ic{font-size:1.6rem;line-height:1}
+.sec-banner .t{font-size:1.35rem;font-weight:800;letter-spacing:.02em;line-height:1.3}
+.sec-banner .s{font-size:.88rem;opacity:.9;margin-top:2px}
+.sec-banner .tag{margin-left:auto;font-size:.8rem;font-weight:800;padding:3px 12px;border-radius:999px;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.45);white-space:nowrap}
+.sec-banner.first{margin-top:.6rem}
+/* 折りたたみ式の項目（確定当直）も、同じ帯の見た目にする */
+.st-key-fixed_section{margin:2.6rem 0 .4rem}
+.st-key-fixed_section [data-testid="stExpander"] details{border:0;border-radius:12px;overflow:hidden;box-shadow:0 2px 6px rgba(31,52,82,.18)}
+.st-key-fixed_section [data-testid="stExpander"] details > summary{background:linear-gradient(90deg,#2f4a6d 0%,#47749b 100%);color:#fff;padding:14px 18px}
+.st-key-fixed_section [data-testid="stExpander"] details > summary p{color:#fff;font-size:1.35rem;font-weight:800}
+.st-key-fixed_section [data-testid="stExpander"] details > summary svg{color:#fff;fill:#fff}
+.st-key-fixed_section [data-testid="stExpanderDetails"]{padding-top:1rem}
+@media (max-width:600px){.sec-banner{padding:11px 13px;gap:10px}.sec-banner .t,.st-key-fixed_section summary p{font-size:1.12rem !important}.sec-banner .s{display:none}}
+</style>""", unsafe_allow_html=True)
+
+
+def section_banner(icon, title, sub="", tag="", first=False):
+    tag_html = f'<span class="tag">{tag}</span>' if tag else ""
+    sub_html = f'<div class="s">{sub}</div>' if sub else ""
+    st.markdown(f'<div class="sec-banner{" first" if first else ""}"><span class="ic">{icon}</span>'
+                f'<div><div class="t">{title}</div>{sub_html}</div>{tag_html}</div>', unsafe_allow_html=True)
+
+
 # ==========================================
 # 1. 上部ダッシュボード：年月と休日の設定
 # ==========================================
-st.header("📅 年月・休日・必要人数の設定")
+section_banner("📅", "年月・休日・必要人数の設定", "作る月・平日に日直を置く日・1枠の人数を決めます", "必須", first=True)
 st.info("作成する年月を選んでください。土日祝日は自動で休日扱いになります。平日にも日直を設けたい場合は、その日の「休日にする」にチェックを入れます。")
 
 today = datetime.date.today()
@@ -2766,8 +2794,6 @@ for d in range(1, num_days + 1):
 total_slots = sum(shift_counts.values())
 holiday_total_placeholder.metric("🏥 必要な総当直枠数", f"{total_slots} 枠")
 
-st.divider()
-
 # ==========================================
 # 3. メイン画面：データの読み込み＆画面入力
 # ==========================================
@@ -2782,7 +2808,7 @@ def _fixed_csv_has_entries(text):
 
 
 _has_fixed = bool(restored_state and restored_state.get("fixed_csv") and _fixed_csv_has_entries(restored_state["fixed_csv"]))
-with st.expander("📅 1. 先月今月来月の確定当直を入力（任意）", expanded=_has_fixed):
+with st.container(key="fixed_section"), st.expander("📅 先月今月来月の確定当直（押すと開きます）", expanded=_has_fixed):
     st.info("先月・今月・来月の、担当者が決まっている当直を入力してください。先月末の勤務は、月初の勤務間隔の確認に使います。入力がなければ、この項目は飛ばせます。")
     with (st.popover("確定済み当直の入力例と扱い") if hasattr(st, "popover") else st.container()):
         st.markdown("""
@@ -2834,9 +2860,7 @@ with st.expander("📅 1. 先月今月来月の確定当直を入力（任意）
     edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
     edited_fixed_df = edited_fixed_df_raw.reset_index()
 
-st.divider()
-
-st.header("2. 医師条件の読み込み・入力（必須）")
+section_banner("👩‍⚕️", "医師条件の読み込み・入力", "先生ごとの回数・間隔・希望日とNG日を入力します", "必須")
 st.info("下の表に医師ごとの条件を入力してください。CSVを使う場合は、ひな形をダウンロードして編集し、アップロードします。NG日は、この後の医師別カレンダーで設定します。")
 st.caption("最初に表示される5名は入力例です。実際の医師名・条件に置き換えてください。希望優先度は通常「1」を使用します。")
 with st.expander("入力例：曜日・希望日・備考", expanded=False):
@@ -3260,7 +3284,6 @@ st.download_button(
 # ==========================================
 # 4. 実行ボタンと結果表示
 # ==========================================
-st.divider()
 st.markdown("""
 <style>
 .st-key-create_duty_action button {
@@ -3273,6 +3296,7 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+section_banner("🎯", "当直案の作成・確認", "不足時の優先順位を確認して、当直案を作ります")
 st.subheader("🎯 人数が足りないときに優先して埋める枠（任意）")
 st.info("全員の条件を満たす当直表が作れない場合に、どの枠から優先して埋めるかを決めます。数字が小さいほど優先し、同じ数字の枠は同順位として扱います。")
 st.caption("人数が足りている月は、この設定は結果に影響しません。初期設定は、A宿直・B宿直・A日直・B日直が1、外来宿直が2、外来日直が3です。")
@@ -3325,7 +3349,6 @@ if work_save_request:
         st.rerun()
 
 create_button_container = st.container(key="create_duty_action")
-st.header("3. 当直案の作成・確認")
 result_notice_container = st.container()
 
 staff_df = staff_df[staff_df['先生の名前'].astype(str).str.strip() != '']
