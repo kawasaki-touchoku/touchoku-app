@@ -2389,7 +2389,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 
 **途中で中断するとき**は、画面右上の「💾 作業を途中保存する」を押してください。スクロールしても右上に付いてくるので、いつでも押せます（管理用パスワードが必要です）。
 年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位がまとめて途中保存され、
-次回は画面右上の「📂 前回の作業の続きから始める」で元に戻せます。当直案を作成したときも自動で途中保存されます。
+次回は画面右上の「📂 前回の作業の続きから始める」で元に戻せます。途中保存は、ボタンを押したときだけ行われます（当直案の作成では保存されません）。
 
 ※「保存」はアプリの保存先（スプレッドシート）に残すこと、「ダウンロード」はパソコンなどにファイルとして取り出すことです。
 「医師条件をCSVでダウンロード」は、医師条件だけをファイルとして手元に残したいときに使います。
@@ -3136,9 +3136,6 @@ work_snapshot = {
     "staff_csv": staff_df.to_csv(index=False),
     "priority": {k: int(v) for k, v in shortage_priority.items()},
 }
-if remote_is_configured():
-    st.caption("💾 途中保存では、年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位をまとめて保存します。"
-               "保存先は1つだけで、途中保存し直すと前の内容は置き換わります。「当直案を作成する」を押したときも自動で途中保存されます（管理用パスワード入力済みの場合）。")
 # 右上の途中保存ボタンが押されていたら、ここで（全部の入力を読み終えてから）保存する
 if work_save_request:
     _slot = WORK_SAVE_SLOT or st.empty()
@@ -3174,12 +3171,6 @@ if len(staff_df) > 0:
         create_clicked = st.button("🚀 この条件で当直案を作成する", type="primary", use_container_width=True)
         st.caption("※ 押すたびに、同じ条件でも違うパターンの当直表を作ります。気に入った案は、下のボタンからダウンロードしてください（作成した当直案は途中保存には含まれません）。")
     if create_clicked:
-        # 管理者としてログインしていれば、作成のたびに入力内容を自動で途中保存する
-        if remote_is_configured() and st.session_state.get("remote_admin_ok"):
-            try:
-                work_state_save(work_snapshot)
-            except Exception:
-                pass
         with st.spinner("当直案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
             try:
                 df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority)
