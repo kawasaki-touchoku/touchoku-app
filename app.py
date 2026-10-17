@@ -2630,6 +2630,10 @@ st.markdown("""
 .st-key-create_bar button{width:100% !important;min-height:2.6rem;font-weight:800}
 .st-key-create_bar p{margin:0}
 .cb-box{display:flex;flex-direction:column;gap:6px}
+/* Streamlit の文章部品は下に負の余白（-1rem）が付くため、パネルの外にはみ出す。ここでは打ち消す */
+.st-key-create_bar [data-testid="stMarkdownContainer"],.st-key-create_bar [data-testid="stMarkdown"],
+.st-key-create_bar [data-testid="stElementContainer"]{margin:0 !important}
+.st-key-create_bar{height:auto !important;min-height:0 !important;overflow:visible !important;padding-bottom:12px !important}
 .cb-res{font-size:.85rem;font-weight:700;line-height:1.4}
 .cb-res.ok{color:#2f8a5b}.cb-res.bad{color:#c2410c}.cb-res.wait{color:#566174}
 .cb-nav{display:flex;gap:6px;flex-wrap:wrap;font-size:.8rem}
