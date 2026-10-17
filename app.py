@@ -1931,7 +1931,7 @@ WORK_SAVE_FLOAT_CSS = """
 <style>
 /* 画面いちばん上の帯（右上に Fork・⋮ がある白い帯）の空いている所に置く。表や入力欄には重ならない */
 .st-key-work_save_float {
-    position: fixed; top: 0.45rem; right: 8.5rem; z-index: 1000002;
+    position: fixed; top: 0.45rem; right: 15rem; z-index: 1000002;
     width: auto !important; max-width: 60vw;
     display: flex !important; flex-direction: row !important; align-items: center; gap: 10px;
     background: transparent;
@@ -1940,10 +1940,12 @@ WORK_SAVE_FLOAT_CSS = """
 .st-key-work_save_float button { min-height: 2.2rem; padding: 0.2rem 0.9rem; font-weight: 700; white-space: nowrap; }
 .st-key-work_save_float p { margin: 0; white-space: nowrap; }
 .work-save-note { font-size: 0.85rem; color: #1b7f3b; font-weight: 600; }
+/* 保存済みの表示はボタンの左に置く（右側には、Streamlit の「実行中」の表示が出るため） */
+.st-key-work_save_float > div:has(.work-save-note) { order: -1; }
 .work-save-note.busy { color: #566174; }
 .work-save-note.bad { color: #c92336; }
 @media (max-width: 640px) {
-    .st-key-work_save_float { right: 5.5rem; top: 0.5rem; max-width: 75vw; }
+    .st-key-work_save_float { right: 8rem; top: 0.5rem; max-width: 70vw; }
     .st-key-work_save_float button { padding: 0.15rem 0.6rem; font-size: 0.8rem; }
     .work-save-note { display: none; }
 }
@@ -1987,9 +1989,7 @@ def work_save_floating():
             if st.button("💾 作業を途中保存する", key="work_save_button", type="primary"):
                 work_save_request = True
             WORK_SAVE_SLOT = st.empty()
-            if work_save_request:
-                WORK_SAVE_SLOT.markdown("<span class='work-save-note busy'>保存しています…</span>", unsafe_allow_html=True)
-            elif msg and msg[0] == "success":
+            if msg and msg[0] == "success":
                 WORK_SAVE_SLOT.markdown("<span class='work-save-note'>✅ 前回の作業を読み込みました</span>", unsafe_allow_html=True)
             elif st.session_state.get("work_save_note"):
                 WORK_SAVE_SLOT.markdown(f"<span class='work-save-note'>✅ {st.session_state['work_save_note']} 途中保存しました</span>", unsafe_allow_html=True)
