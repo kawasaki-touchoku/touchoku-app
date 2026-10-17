@@ -322,7 +322,7 @@ HORIZONTAL_NG_HTML = r"""<!doctype html><html lang="ja"><meta charset="utf-8"><m
 let version=null,days=[],draft=[];let mode='row';let frameHeight=0;
 function send(type,data={}){window.parent.postMessage({isStreamlitMessage:true,type,...data},'*')}
 function resize(){let h=document.body.scrollHeight+10;if(h!==frameHeight){frameHeight=h;send('streamlit:setFrameHeight',{height:h})}}
-const labels={OK:'OK','全NG':'✕ 全NG','日NG':'☀ 日NG','宿NG':'☾ 宿NG'};
+const labels={OK:'OK','全NG':'全NG','日NG':'日NG','宿NG':'宿NG'};  // 記号は幅がそろわないので付けない（色の帯で区別できる）
 function paint(cell,value){
   cell.dataset.state=value;
   let holiday=cell.dataset.holiday==='true';
