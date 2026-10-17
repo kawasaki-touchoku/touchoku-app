@@ -1626,7 +1626,7 @@ def remote_qr_cards_html(cards):
   <div class="panel cover">
     <div class="cover-title">当直NG日 入力用カード</div>
     <div class="cover-name">{n} 先生</div>
-    <div class="staple left">ホチキス</div><div class="staple right">ホチキス</div>
+    <div class="staple left"><svg class="staple-svg" viewBox="0 0 60 20" xmlns="http://www.w3.org/2000/svg" aria-label="ホチキス止めの位置"><path d="M6 15 V6 Q6 4 8 4 H52 Q54 4 54 6 V15" fill="none" stroke="#6b7380" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 5.2 H50" stroke="#d5dae1" stroke-width="1" stroke-linecap="round"/></svg></div><div class="staple right"><svg class="staple-svg" viewBox="0 0 60 20" xmlns="http://www.w3.org/2000/svg" aria-label="ホチキス止めの位置"><path d="M6 15 V6 Q6 4 8 4 H52 Q54 4 54 6 V15" fill="none" stroke="#6b7380" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 5.2 H50" stroke="#d5dae1" stroke-width="1" stroke-linecap="round"/></svg></div>
   </div>
   <div class="fold"><span>② ここを山折り（上の部分を裏側へ）</span></div>
   <div class="panel qr">
@@ -1676,8 +1676,8 @@ body {{ margin: 0; font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiry
 .cover-title {{ margin-top: 6mm; font-size: 14pt; color: #4a5568; }}
 .cover-name {{ margin-top: 3mm; font-size: 30pt; font-weight: 700; }}
 .cover-note {{ margin-top: 4mm; font-size: 11pt; color: #b42332; }}
-.staple {{ position: absolute; bottom: 8mm; width: 22mm; height: 9mm; border: 1px dashed #b0b8c4; border-radius: 1.5mm;
-          font-size: 8pt; color: #9aa3b0; display: flex; align-items: center; justify-content: center; }}
+.staple {{ position: absolute; bottom: 9mm; width: 16mm; height: 6mm; }}
+.staple-svg {{ width: 100%; height: 100%; display: block; }}
 .staple.left {{ left: 14mm; }} .staple.right {{ right: 14mm; }}
 .qr-name {{ font-size: 15pt; font-weight: 700; margin-bottom: 4mm; }}
 .qr-body {{ display: flex; align-items: center; gap: 10mm; }}
