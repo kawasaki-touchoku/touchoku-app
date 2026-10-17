@@ -2623,32 +2623,45 @@ work_save_floating()
 # 結果（未決定の枠の数）もここに出し、各項目へすぐ移動できるリンクも置く。
 st.markdown("""
 <style>
-.st-key-create_bar{position:fixed;right:1.2rem;bottom:3.6rem;z-index:1000001;width:auto !important;max-width:300px;
-  background:#fff;border:1px solid #cfd6e0;border-radius:14px;padding:10px 12px 8px;box-shadow:0 8px 24px rgba(16,24,40,.18);gap:6px !important}
-.st-key-create_bar button{width:100%;min-height:2.6rem;font-weight:800}
+.st-key-create_bar{position:fixed;right:1.2rem;bottom:3.6rem;z-index:1000001;width:250px !important;
+  background:#fff;border:1px solid #cfd6e0;border-radius:14px;padding:10px 12px;box-shadow:0 8px 24px rgba(16,24,40,.18);gap:8px !important}
+.st-key-create_bar > div,.st-key-create_bar [data-testid="stElementContainer"],.st-key-create_bar .stButton,
+.st-key-create_bar [data-testid="stMarkdownContainer"],.st-key-create_bar [data-testid="stMarkdown"]{width:100% !important;max-width:100% !important;height:auto !important}
+.st-key-create_bar button{width:100% !important;min-height:2.6rem;font-weight:800}
 .st-key-create_bar p{margin:0}
+.cb-box{display:flex;flex-direction:column;gap:6px}
 .cb-res{font-size:.85rem;font-weight:700;line-height:1.4}
 .cb-res.ok{color:#2f8a5b}.cb-res.bad{color:#c2410c}.cb-res.wait{color:#566174}
 .cb-nav{display:flex;gap:6px;flex-wrap:wrap;font-size:.8rem}
 .cb-nav a{flex:1;text-align:center;text-decoration:none;color:#2f4a6d !important;background:#eef3f8;border-radius:6px;padding:3px 6px;white-space:nowrap}
 .cb-nav a:hover{background:#dde7f2}
-@media (max-width:600px){.st-key-create_bar{right:.5rem;bottom:3.2rem;max-width:210px;padding:7px 8px}.cb-nav{font-size:.72rem}}
+@media (max-width:600px){.st-key-create_bar{right:.5rem;bottom:3.2rem;width:200px !important;padding:7px 8px}.cb-nav{font-size:.72rem}}
 </style>""", unsafe_allow_html=True)
 create_bar_request = False
+
+
+def create_bar_show(result_html=""):
+    """右下のパネルの、結果の1行と移動リンクをまとめて表示する（1つの部品にして、表示のずれを防ぐ）。"""
+    res_anchor = "#sec-result" if "generated_df" in st.session_state else "#sec-create"
+    CREATE_BAR_SLOT.markdown(
+        f"<div class='cb-box'>{result_html}<div class='cb-nav'><a href='#sec-staff' target='_self'>医師条件</a>"
+        f"<a href='#sec-ng' target='_self'>NG日</a><a href='{res_anchor}' target='_self'>結果</a></div></div>",
+        unsafe_allow_html=True)
+
+
 with st.container(key="create_bar"):
     if st.button("🚀 当直案を作成", key="create_bar_button", type="primary"):
         create_bar_request = True
     CREATE_BAR_SLOT = st.empty()
     _last = st.session_state.get("create_bar_summary")
     if create_bar_request:
-        CREATE_BAR_SLOT.markdown("<div class='cb-res wait'>計算しています…（最大75秒）</div>", unsafe_allow_html=True)
+        create_bar_show("<div class='cb-res wait'>計算しています…（最大75秒）</div>")
     elif st.session_state.get("result_needs_refresh"):
-        CREATE_BAR_SLOT.markdown("<div class='cb-res wait'>条件が変わりました。もう一度作成してください。</div>", unsafe_allow_html=True)
+        create_bar_show("<div class='cb-res wait'>条件が変わりました。もう一度作成してください。</div>")
     elif _last:
-        CREATE_BAR_SLOT.markdown(_last, unsafe_allow_html=True)
-    _res_anchor = "#sec-result" if "generated_df" in st.session_state else "#sec-create"
-    st.markdown("<div class='cb-nav'><a href='#sec-staff' target='_self'>医師条件</a><a href='#sec-ng' target='_self'>NG日</a>"
-                f"<a href='{_res_anchor}' target='_self'>結果</a></div>", unsafe_allow_html=True)
+        create_bar_show(_last)
+    else:
+        create_bar_show()
 
 if "sel_year" not in st.session_state:
     st.session_state["sel_year"] = default_year
@@ -3050,7 +3063,7 @@ staff_df, staff_input_errors = validate_staff_inputs(staff_df, year, month)
 if staff_input_errors:
     show_input_errors(staff_input_errors)
     if create_bar_request:
-        CREATE_BAR_SLOT.markdown("<div class='cb-res bad'>⚠ 医師条件の入力に誤りがあります。赤い表示を確認してください。</div>", unsafe_allow_html=True)
+        create_bar_show("<div class='cb-res bad'>⚠ 医師条件の入力に誤りがあります。赤い表示を確認してください。</div>")
     st.stop()
 
 st.markdown("### ⚖️ 必要枠数と担当可能回数の目安")
@@ -3395,7 +3408,7 @@ fixed_df, fixed_input_errors = validate_fixed_inputs(edited_fixed_df, staff_df['
 if fixed_input_errors:
     show_input_errors(fixed_input_errors)
     if create_bar_request:
-        CREATE_BAR_SLOT.markdown("<div class='cb-res bad'>⚠ 確定当直の入力に誤りがあります。赤い表示を確認してください。</div>", unsafe_allow_html=True)
+        create_bar_show("<div class='cb-res bad'>⚠ 確定当直の入力に誤りがあります。赤い表示を確認してください。</div>")
     st.stop()
 current_signature = input_signature(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority)
 if 'generated_df' in st.session_state and st.session_state.get('generated_signature') != current_signature:
@@ -3404,7 +3417,7 @@ if 'generated_df' in st.session_state and st.session_state.get('generated_signat
     st.session_state['result_needs_refresh'] = True
     st.session_state.pop("create_bar_summary", None)
     if not create_bar_request:
-        CREATE_BAR_SLOT.markdown("<div class='cb-res wait'>条件が変わりました。もう一度作成してください。</div>", unsafe_allow_html=True)
+        create_bar_show("<div class='cb-res wait'>条件が変わりました。もう一度作成してください。</div>")
 if st.session_state.get('result_needs_refresh'):
     st.warning("条件が変更されています。再作成してください。前回の結果表示とダウンロードを停止しました。")
 
@@ -3437,7 +3450,7 @@ if len(staff_df) > 0:
                     show_schedule_notice(None, [f"当直計算中にエラーが発生しました。詳細: {e}"])
         if 'generated_df' not in st.session_state:
             st.session_state.pop("create_bar_summary", None)
-            CREATE_BAR_SLOT.markdown("<div class='cb-res bad'>⚠ 当直案を作れませんでした。「結果」で理由を確認してください。</div>", unsafe_allow_html=True)
+            create_bar_show("<div class='cb-res bad'>⚠ 当直案を作れませんでした。「結果」で理由を確認してください。</div>")
 
     if 'generated_df' in st.session_state:
         year = st.session_state['generated_year']
@@ -3466,7 +3479,7 @@ if len(staff_df) > 0:
                     else f"<div class='cb-res ok'>✅ {_t} 作成：全枠決定</div>")
         if create_clicked or not st.session_state.get("create_bar_summary"):
             st.session_state["create_bar_summary"] = _summary
-        CREATE_BAR_SLOT.markdown(st.session_state["create_bar_summary"], unsafe_allow_html=True)
+        create_bar_show(st.session_state["create_bar_summary"])
         if missing_total:
             st.warning(f"当直が決まっていない枠が{missing_total}枠あります。表の一番下（赤線の下）で確認できます。")
         st.markdown(duty_matrix_html(matrix_days, matrix_rows, year, month), unsafe_allow_html=True)
