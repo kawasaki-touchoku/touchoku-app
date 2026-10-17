@@ -268,66 +268,71 @@ def horizontal_ng_component(html_source):
 
 
 HORIZONTAL_NG_HTML = r"""<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-/* NGカレンダー。各日の「日直」「宿直」ボタンを押すと 可⇔NG が切り替わる。
-   色：日直NG＝オレンジ、宿直NG＝濃紺。休日はマスを薄いピンクにする。 */
-:root{--ink:#1f2b3d;--sub:#6b7686;--line:#e1e6ed;--day:#c8601a;--night:#22345a;--ok:#2f7d4f;--hol:#fdf1f2;--holline:#efd3d7}
+/* NGカレンダー。各日の上段＝日直、下段＝宿直。押すとその勤務だけ 可⇔NG が切り替わる。
+   色：日直NG＝テラコッタ、宿直NG＝インディゴ。休日はマスを淡いローズにする。 */
+:root{--ink:#243041;--sub:#7a8494;--line:#e3e7ed;--seg:#d8dee6;--day:#cf6a35;--night:#2e3f6e;--ok:#2f8a5b;
+      --hol:#fff6f5;--holline:#f0dcdc;--sun:#c8414a;--sat:#2f68b3}
 *{box-sizing:border-box}
-body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI",sans-serif;color:var(--ink);background:#fff;font-size:14px}
-.legend{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:12.5px;color:var(--sub);margin:2px 2px 10px}
-.legend i{display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:5px}
+body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;color:var(--ink);background:#fff;font-size:14px;-webkit-font-smoothing:antialiased}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;font-size:12px;color:var(--sub);margin:0 2px 12px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:5px}
 .strip{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 14px}
 .strip.month{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;overflow:visible;padding-bottom:6px}
-.wk{text-align:center;font-size:12.5px;font-weight:700;color:var(--sub);padding:2px 0 4px}
-.blank{min-height:1px}
-.cell{flex:0 0 108px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:7px 6px 6px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.wk{text-align:center;font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--sub);padding:0 0 4px}
+.blank{border-radius:12px;background:#fafbfc}
+.cell{flex:0 0 112px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 7px 7px;
+      box-shadow:0 1px 2px rgba(16,24,40,.04);display:flex;flex-direction:column;align-items:stretch;min-width:0}
 .month .cell{flex:none}
 .cell[data-holiday="true"]{background:var(--hol);border-color:var(--holline)}
-.top{display:flex;align-items:center;justify-content:space-between;height:22px;padding:0 2px}
-.date{font-size:16px;font-weight:800;line-height:1;white-space:nowrap}
-.date small{font-size:11px;font-weight:600;color:var(--sub);margin-left:2px}
-.date.holiday{color:#c92336}.date.saturday{color:#1d63b8}
-.pm{font-size:10.5px;font-weight:800;color:#9a5b00;background:#fff3cd;border:1px solid #f0c36d;border-radius:999px;padding:1px 6px;white-space:nowrap}
-.slot{height:34px}
-.btn{width:100%;height:34px;display:flex;align-items:center;justify-content:space-between;gap:4px;padding:0 9px;border-radius:7px;
-     border:1px solid #cdd5df;background:#fff;color:var(--ink);font:700 13px system-ui,sans-serif;cursor:pointer;
-     -webkit-tap-highlight-color:transparent;user-select:none;transition:background .12s,border-color .12s}
-.btn .st{font-size:12.5px;font-weight:800;color:var(--ok)}
-.btn:hover{border-color:#9aa6b6}
-.btn:focus-visible{outline:3px solid #4789ff;outline-offset:1px}
-.btn.ng{color:#fff;border-color:transparent}
-.btn.ng .st{color:#fff}
-.btn.day.ng{background:var(--day)}
-.btn.night.ng{background:var(--night)}
-.st .w{display:inline}.st .m{display:none}
-#note{margin:6px 2px 8px;font-size:12.5px;color:var(--sub);min-height:18px}
-#apply{background:#ff4b4b;color:#fff;border:0;border-radius:8px;padding:11px 18px;font:700 14px system-ui,sans-serif;cursor:pointer}
+.date{text-align:center;font-size:15px;font-weight:800;line-height:20px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.date small{font-size:11px;font-weight:600;margin-left:1px}
+.date.holiday{color:var(--sun)}.date.saturday{color:var(--sat)}
+.flag{height:26px;display:flex;align-items:center;justify-content:center}
+.pm{display:inline-flex;align-items:center;gap:3px;color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:4px;padding:0 5px;font-size:13px;font-weight:900;line-height:18px;white-space:nowrap}
+.pm small{font-size:9.5px;font-weight:700;line-height:1.15}
+.seg{border:1px solid var(--seg);border-radius:8px;overflow:hidden;background:#fff}
+.half{height:34px;display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px;font-weight:700;color:var(--ink);background:#fff;
+      cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;transition:background .15s,color .15s}
+.half + .half{border-top:1px solid var(--line)}
+.half .st{font-size:11.5px;font-weight:800;color:var(--ok)}
+.half:hover{background:#f5f7fa}
+.half:focus-visible{outline:2px solid #4c8dff;outline-offset:-2px}
+.half.ng{color:#fff}.half.ng .st{color:rgba(255,255,255,.92)}
+.half.day.ng{background:var(--day)}.half.night.ng{background:var(--night)}
+.half.none{cursor:default;color:#c4cad3;font-weight:500;background:repeating-linear-gradient(135deg,#fafbfc 0 6px,#f3f5f8 6px 7px)}
+.half.none:hover{background:repeating-linear-gradient(135deg,#fafbfc 0 6px,#f3f5f8 6px 7px)}
+.st .m,.none .m{display:none}
+#note{margin:8px 2px;font-size:12px;color:var(--sub);min-height:16px}
+#apply{background:#ff4b4b;color:#fff;border:0;border-radius:8px;padding:11px 18px;font:700 14px system-ui,sans-serif;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08)}
 @media(max-width:600px){
  .strip.month{gap:3px}
- .month .cell{padding:4px 2px 3px;gap:3px;border-radius:7px}
- .month .top{height:18px;padding:0 1px}
- .month .date{font-size:13px}
- .month .pm{font-size:8.5px;padding:0 3px}
- .month .slot,.month .btn{height:30px}
- .month .btn{padding:0;justify-content:center;flex-direction:column;gap:0;font-size:10.5px;border-radius:5px;line-height:1.1}
- .month .btn .st{font-size:10px}
- .month .st .w{display:none}.month .st .m{display:inline}
+ .month .cell{padding:5px 2px 3px;border-radius:8px}
+ .month .date{font-size:13px;line-height:16px}
+ .month .flag{height:28px}
+ .month .pm{font-size:11px;padding:0 2px;gap:1px;line-height:14px}
+ .month .pm small{font-size:7.5px;white-space:normal;max-width:30px;overflow-wrap:anywhere}
+ .month .seg{border-radius:6px}
+ .month .half{height:30px;font-size:10px;gap:0;flex-direction:column;line-height:1.1}
+ .month .half .st{font-size:9.5px}
+ .month .st .w,.month .none .w{display:none}.month .st .m,.month .none .m{display:inline}
+ .month .blank{border-radius:8px}
 }
 </style><body>
-<div class="legend"><span><i style="background:var(--day)"></i>日直NG</span><span><i style="background:var(--night)"></i>宿直NG</span><span><i style="background:var(--hol);border:1px solid var(--holline)"></i>休日</span><span><b class="pm" style="font-size:10px">PM</b> 翌日PM duty</span><span>ボタンを押すと「可」⇔「NG」が切り替わります</span></div>
+<div class="legend"><span><i style="background:var(--day)"></i>日直NG</span><span><i style="background:var(--night)"></i>宿直NG</span><span><i style="background:var(--hol);border:1px solid var(--holline)"></i>休日</span><span><b class="pm" style="font-size:11px">⚠︎<small>翌日PM duty</small></b></span><span>押すと「可」⇔「NG」が切り替わります</span></div>
 <div id="strip" class="strip" aria-label="NG日カレンダー"></div><div id="note"></div><button id="apply" type="button">NG日を反映する</button><script>
 let version=null,days=[],draft=[];let mode='row';let frameHeight=0;
 function send(type,data={}){window.parent.postMessage({isStreamlitMessage:true,type,...data},'*')}
 function resize(){let h=document.body.scrollHeight+10;if(h!==frameHeight){frameHeight=h;send('streamlit:setFrameHeight',{height:h})}}
 function combine(dayNg,nightNg){return dayNg&&nightNg?'全NG':dayNg?'日NG':nightNg?'宿NG':'OK'}
-function paintBtn(btn,ng){
-  btn.classList.toggle('ng',ng);btn.setAttribute('aria-pressed',String(ng));
-  btn.querySelector('.st').innerHTML=ng?'<span class="w">NG</span><span class="m">✕</span>':'<span class="w">可</span><span class="m">○</span>';
+function paintHalf(el,ng){
+  el.classList.toggle('ng',ng);el.setAttribute('aria-pressed',String(ng));
+  el.querySelector('.st').innerHTML=ng?'<span class="w">NG</span><span class="m">✕</span>':'<span class="w">可</span><span class="m">○</span>';
 }
 function paint(cell,value){
   cell.dataset.state=value;
-  let db=cell.querySelector('.btn.day'),nb=cell.querySelector('.btn.night');
-  if(db)paintBtn(db,value==='全NG'||value==='日NG');
-  paintBtn(nb,value==='全NG'||value==='宿NG');
+  let db=cell.querySelector('.half.day:not(.none)'),nb=cell.querySelector('.half.night');
+  if(db)paintHalf(db,value==='全NG'||value==='日NG');
+  paintHalf(nb,value==='全NG'||value==='宿NG');
 }
 window.addEventListener('message',(event)=>{
   if(!event.data||event.data.type!=='streamlit:render')return;
@@ -339,20 +344,18 @@ window.addEventListener('message',(event)=>{
     strip.replaceChildren();
     strip.className='strip '+(mode==='month'?'month':'');
     if(mode==='month'){
-      ['月','火','水','木','金','土','日'].forEach((w,i)=>{let el=document.createElement('div');el.className='wk';el.textContent=w;if(i===6)el.style.color='#c92336';if(i===5)el.style.color='#1d63b8';strip.append(el)});
+      ['月','火','水','木','金','土','日'].forEach((w,i)=>{let el=document.createElement('div');el.className='wk';el.textContent=w;if(i===6)el.style.color='var(--sun)';if(i===5)el.style.color='var(--sat)';strip.append(el)});
       for(let i=0;i<a.offset;i++){let el=document.createElement('div');el.className='blank';strip.append(el)}
     }
     days.forEach((d,i)=>{
       const holiday=d.options.includes('日NG');
       let cell=document.createElement('div');cell.className='cell';cell.dataset.holiday=String(holiday);
-      let top=document.createElement('div');top.className='top';
       let date=document.createElement('div');date.className='date '+d.kind;
       date.innerHTML=d.day+(mode==='month'?'':'<small>（'+d.weekday+'）</small>');
-      top.append(date);
-      if(d.warning){let pm=document.createElement('span');pm.className='pm';pm.textContent='PM';
-        pm.title='翌日PM duty（翌日は平日）。原則としてこの日の宿直は外れます。';top.append(pm)}
-      cell.append(top);
-      // 日直・宿直のボタン。押すとその勤務だけ 可⇔NG が切り替わる（休日は両方を別々に指定できる）
+      let flag=document.createElement('div');flag.className='flag';
+      if(d.warning){let pm=document.createElement('span');pm.className='pm';pm.innerHTML='⚠︎<small>翌日PM duty</small>';
+        pm.title='翌日PM duty（翌日は平日）。原則としてこの日の宿直は外れます。';flag.append(pm)}
+      // 日直・宿直を押すと、その勤務だけ 可⇔NG が切り替わる（休日は両方を別々に指定できる）
       const toggle=(which)=>{
         let v=draft[i];let dayNg=v==='全NG'||v==='日NG',nightNg=v==='全NG'||v==='宿NG';
         if(which==='day')dayNg=!dayNg;else nightNg=!nightNg;
@@ -360,14 +363,16 @@ window.addEventListener('message',(event)=>{
         draft[i]=nv;paint(cell,nv);
         document.getElementById('note').textContent='まだ反映していない変更があります。選び終わったら下のボタンを押してください。';
       };
-      const makeBtn=(which,label)=>{let b=document.createElement('button');b.type='button';b.className='btn '+which;
-        b.setAttribute('aria-label',d.day+'日の'+label);b.innerHTML='<span class="lb">'+label+'</span><span class="st"></span>';
-        b.onclick=()=>toggle(which);return b};
-      if(holiday){cell.append(makeBtn('day','日直'))}
-      else{let sp=document.createElement('div');sp.className='slot';cell.append(sp)}   // 平日は日直がないので空けておく
-      cell.append(makeBtn('night','宿直'));
-      paint(cell,d.value);strip.append(cell);
+      const half=(which,label)=>{let h=document.createElement('div');h.className='half '+which;h.tabIndex=0;h.setAttribute('role','button');
+        h.setAttribute('aria-label',d.day+'日の'+label);h.innerHTML='<span class="lb">'+label+'</span><span class="st"></span>';
+        h.onclick=()=>toggle(which);h.onkeydown=(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle(which)}};return h};
+      let seg=document.createElement('div');seg.className='seg';
+      if(holiday)seg.append(half('day','日直'));
+      else{let n=document.createElement('div');n.className='half day none';n.innerHTML='<span class="w">日直なし</span><span class="m">—</span>';seg.append(n)}   // 平日は日直がない
+      seg.append(half('night','宿直'));
+      cell.append(date,flag,seg);paint(cell,d.value);strip.append(cell);
     });
+    if(mode==='month'){let blanks=(7-(a.offset+days.length)%7)%7;for(let i=0;i<blanks;i++){let el=document.createElement('div');el.className='blank';strip.append(el)}}
     document.getElementById('note').textContent=mode==='month'?'':'左右へスクロールして選べます。';
   }
   resize();
@@ -1814,12 +1819,12 @@ const cw = (W - 100) / 7, x0 = 50, y0 = topY;
   g.font = F(28, 700); g.textAlign = 'center'; g.fillText(w, x0 + cw * i + cw / 2, y0 + 40);
 });
 g.textAlign = 'left';
-const DAY_NG = '#c8601a', NIGHT_NG = '#22345a';   // 日直NGはオレンジ、宿直NGは濃紺
+const DAY_NG = '#cf6a35', NIGHT_NG = '#2e3f6e';   // 日直NGはオレンジ、宿直NGは濃紺
 let count = 0;
 D.days.forEach((day, i) => {
   const p = D.offset + i, col = p % 7, row = Math.floor(p / 7);
   const x = x0 + col * cw, y = y0 + 60 + row * cellH;
-  g.fillStyle = day.hol ? '#fcf1f2' : '#ffffff'; g.fillRect(x, y, cw, cellH);
+  g.fillStyle = day.hol ? '#fff6f5' : '#ffffff'; g.fillRect(x, y, cw, cellH);
   g.strokeStyle = '#cbd2dc'; g.lineWidth = 2; g.strokeRect(x, y, cw, cellH);
   g.fillStyle = day.sat ? '#1670c5' : day.hol ? '#c92336' : '#243247';
   g.font = F(30, 700); g.fillText(String(day.d), x + 12, y + 40);
@@ -2091,7 +2096,7 @@ def doctor_entry_page(key):
  <div style="font-weight:800;font-size:1.05rem;color:#22345a">⚠ 休日は「日直」と「宿直」を別々に指定します</div>
  <div style="margin-top:4px;font-size:.95rem;color:#243247">終日入れない日は、<b>両方</b>押してください。</div>
  <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:.82rem;font-weight:700">
-  <div style="width:104px;text-align:center"><div style="background:#fdf1f2;border:1px solid #efd3d7;border-radius:8px;padding:2px 5px 5px;text-align:left"><div style="display:flex;justify-content:space-between;padding:4px 7px;border-radius:6px;background:#c8601a;color:#fff;margin-top:3px">日直<span>NG</span></div><div style="display:flex;justify-content:space-between;padding:4px 7px;border-radius:6px;background:#22345a;color:#fff;margin-top:3px">宿直<span>NG</span></div></div><div style="margin-top:4px;color:#243247">終日NG</div></div><div style="width:104px;text-align:center"><div style="background:#fdf1f2;border:1px solid #efd3d7;border-radius:8px;padding:2px 5px 5px;text-align:left"><div style="display:flex;justify-content:space-between;padding:3px 6px;border-radius:6px;background:#fff;border:1px solid #cdd5df;color:#1f2b3d;margin-top:3px">日直<span style="color:#2f7d4f">可</span></div><div style="display:flex;justify-content:space-between;padding:4px 7px;border-radius:6px;background:#22345a;color:#fff;margin-top:3px">宿直<span>NG</span></div></div><div style="margin-top:4px;color:#243247">宿直だけNG<br><span style="color:#566174">日直は入れる</span></div></div><div style="width:104px;text-align:center"><div style="background:#fdf1f2;border:1px solid #efd3d7;border-radius:8px;padding:2px 5px 5px;text-align:left"><div style="display:flex;justify-content:space-between;padding:4px 7px;border-radius:6px;background:#c8601a;color:#fff;margin-top:3px">日直<span>NG</span></div><div style="display:flex;justify-content:space-between;padding:3px 6px;border-radius:6px;background:#fff;border:1px solid #cdd5df;color:#1f2b3d;margin-top:3px">宿直<span style="color:#2f7d4f">可</span></div></div><div style="margin-top:4px;color:#243247">日直だけNG<br><span style="color:#566174">宿直は入れる</span></div></div>
+  <div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">日直<span>NG</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#2e3f6e;color:#fff">宿直<span>NG</span></div></div></div><div style="margin-top:4px;color:#243247">終日NG</div></div><div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#fff;color:#243041;">日直<span style="color:#2f8a5b">可</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#2e3f6e;color:#fff">宿直<span>NG</span></div></div></div><div style="margin-top:4px;color:#243247">宿直だけNG<br><span style="color:#566174">日直は入れる</span></div></div><div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">日直<span>NG</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#fff;color:#243041;border-top:1px solid #e3e7ed;">宿直<span style="color:#2f8a5b">可</span></div></div></div><div style="margin-top:4px;color:#243247">日直だけNG<br><span style="color:#566174">宿直は入れる</span></div></div>
  </div>
 </div>""", unsafe_allow_html=True)
 
