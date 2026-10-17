@@ -1910,7 +1910,7 @@ WORK_SAVE_FLOAT_CSS = """
 <style>
 /* 画面いちばん上の帯（右上に Fork・⋮ がある白い帯）の空いている所に置く。表や入力欄には重ならない */
 .st-key-work_save_float {
-    position: fixed; top: 0.45rem; right: 9rem; z-index: 1000002;
+    position: fixed; top: 0.45rem; right: 8.5rem; z-index: 1000002;
     width: auto !important; max-width: 60vw;
     display: flex !important; flex-direction: row !important; align-items: center; gap: 10px;
     background: transparent;
@@ -1922,7 +1922,7 @@ WORK_SAVE_FLOAT_CSS = """
 .work-save-note.busy { color: #566174; }
 .work-save-note.bad { color: #c92336; }
 @media (max-width: 640px) {
-    .st-key-work_save_float { right: 6.5rem; top: 0.5rem; }
+    .st-key-work_save_float { right: 5.5rem; top: 0.5rem; max-width: 75vw; }
     .st-key-work_save_float button { padding: 0.15rem 0.6rem; font-size: 0.8rem; }
     .work-save-note { display: none; }
 }
@@ -1931,21 +1931,48 @@ WORK_SAVE_FLOAT_CSS = """
 
 
 def work_save_floating():
-    """画面右上に追従する「作業を途中保存する」ボタンを置く。"""
+    """画面右上の帯に「前回の作業の続きから始める」と「作業を途中保存する」を並べて置く。"""
     global work_save_request, WORK_SAVE_SLOT
     if not remote_is_configured():
         return
     st.markdown(WORK_SAVE_FLOAT_CSS, unsafe_allow_html=True)
+    msg = st.session_state.pop("work_state_message", None)
+    if msg:
+        if msg[0] == "success":
+            st.toast(msg[1], icon="📂")
+        else:
+            st.error(msg[1])
+    has_popover = hasattr(st, "popover")
     with st.container(key="work_save_float"):
+        # --- 前回の作業の続きから始める（押すと小さな枠が開く） ---
+        box = st.popover("📂 前回の作業の続きから始める") if has_popover \
+            else st.expander("📂 前回の作業の続きから始める", expanded=False)
+        with box:
+            if admin_logged_in("work_restore_pw"):
+                saved_at, saved = work_state_info()
+                if saved:
+                    st.write(f"保存日時：**{saved_at}**")
+                    st.write(f"{saved['year']}年{saved['month']}月の作業")
+                    st.button("この作業を読み込む", key="work_restore", type="primary", on_click=work_state_restore)
+                    st.caption("年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位が、"
+                               "途中保存したときの状態に戻ります。今の画面の入力内容は置き換わります。")
+                else:
+                    st.caption("まだ途中保存された作業はありません。隣の「💾 作業を途中保存する」で保存できます。")
+            else:
+                st.caption("読み込みには管理用パスワードが必要です。")
+
+        # --- 作業を途中保存する ---
         if st.session_state.get("remote_admin_ok"):
             if st.button("💾 作業を途中保存する", key="work_save_button", type="primary"):
                 work_save_request = True
             WORK_SAVE_SLOT = st.empty()
             if work_save_request:
                 WORK_SAVE_SLOT.markdown("<span class='work-save-note busy'>保存しています…</span>", unsafe_allow_html=True)
+            elif msg and msg[0] == "success":
+                WORK_SAVE_SLOT.markdown("<span class='work-save-note'>✅ 前回の作業を読み込みました</span>", unsafe_allow_html=True)
         else:
             # パスワード未入力のときは、押すと入力欄が開くボタンにする
-            box = st.popover("💾 作業を途中保存する") if hasattr(st, "popover") \
+            box = st.popover("💾 作業を途中保存する") if has_popover \
                 else st.expander("💾 作業を途中保存する", expanded=False)
             with box:
                 st.caption("途中保存には管理用パスワードが必要です。")
@@ -2362,7 +2389,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 
 **途中で中断するとき**は、画面右上の「💾 作業を途中保存する」を押してください。スクロールしても右上に付いてくるので、いつでも押せます（管理用パスワードが必要です）。
 年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位がまとめて途中保存され、
-次回は画面上部の「💾 前回の作業の続きから始める」で元に戻せます。当直案を作成したときも自動で途中保存されます。
+次回は画面右上の「📂 前回の作業の続きから始める」で元に戻せます。当直案を作成したときも自動で途中保存されます。
 
 ※「保存」はアプリの保存先（スプレッドシート）に残すこと、「ダウンロード」はパソコンなどにファイルとして取り出すことです。
 「医師条件をCSVでダウンロード」は、医師条件だけをファイルとして手元に残したいときに使います。
@@ -2465,23 +2492,7 @@ else:
     default_year = today.year
     default_month = today.month + 1
 
-# --- 前回保存した作業を読み込む ---
-if remote_is_configured():
-    with st.expander("💾 前回の作業の続きから始める（途中保存の読み込み）", expanded=False):
-        msg = st.session_state.pop("work_state_message", None)
-        if msg:
-            (st.success if msg[0] == "success" else st.error)(msg[1])
-        if admin_logged_in("work_restore_pw"):
-            saved_at, saved = work_state_info()
-            if saved:
-                st.write(f"保存日時：**{saved_at}**（{saved['year']}年{saved['month']}月の作業）")
-                st.button("この作業を読み込む", key="work_restore", type="primary", on_click=work_state_restore)
-                st.caption("年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位が、保存したときの状態に戻ります。")
-            else:
-                st.caption("まだ保存された作業はありません。画面右上の「💾 作業を途中保存する」で保存できます。")
-
-
-# 画面右上に追従する途中保存ボタン
+# 画面右上の帯に「前回の作業の続きから始める」「作業を途中保存する」を置く
 work_save_floating()
 
 if "sel_year" not in st.session_state:
@@ -3134,7 +3145,7 @@ if work_save_request:
     try:
         work_state_save(work_snapshot)
         _slot.markdown(f"<span class='work-save-note'>✅ {remote_now()[-8:-3]} 途中保存しました</span>", unsafe_allow_html=True)
-        st.toast("途中保存しました。次回は画面上部の「💾 前回の作業の続きから始める」から読み込めます。", icon="💾")
+        st.toast("途中保存しました。次回は画面右上の「📂 前回の作業の続きから始める」から読み込めます。", icon="💾")
     except Exception as e:
         _slot.markdown("<span class='work-save-note bad'>⚠ 途中保存できませんでした</span>", unsafe_allow_html=True)
         st.error(f"途中保存できませんでした。通信状態を確認して、もう一度押してください。詳細：{e}")
