@@ -311,6 +311,12 @@ body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI"
 /* 管理者画面で変更がないときは、押す必要がないことが分かる見た目にする */
 #apply.clean{background:#eef1f5;color:#7a8494;box-shadow:none;cursor:default}
 #note.dirty{color:#c2410c;font-weight:800;font-size:13px}
+/* 先生用画面：保存ボタンのすぐ上の、管理者へのコメント欄 */
+#commentBox{display:none;margin:4px 2px 12px}
+#commentBox label{display:block;font-size:14px;font-weight:700;margin-bottom:5px;color:var(--ink)}
+#commentBox label small{font-weight:500;color:var(--sub)}
+#comment{width:100%;min-height:76px;resize:vertical;padding:8px 10px;border:1px solid #c9d2de;border-radius:8px;font:14px/1.5 system-ui,sans-serif;color:var(--ink)}
+#comment:focus{outline:2px solid #4c8dff;outline-offset:0;border-color:transparent}
 @media(max-width:600px){
  .strip.month{gap:3px}
  .month .cell{padding:5px 2px 3px;border-radius:8px}
@@ -328,7 +334,7 @@ body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI"
 }
 </style><body>
 
-<div id="strip" class="strip" aria-label="NG日カレンダー"></div><div id="note"></div><button id="apply" type="button">NG日を反映する</button><script>
+<div id="strip" class="strip" aria-label="NG日カレンダー"></div><div id="note"></div><div id="commentBox"><label for="comment">管理者へのコメント・要望 <small>（任意）</small></label><textarea id="comment" maxlength="500"></textarea></div><button id="apply" type="button">NG日を反映する</button><script>
 let version=null,days=[],draft=[];let mode='row';let frameHeight=0;
 function send(type,data={}){window.parent.postMessage({isStreamlitMessage:true,type,...data},'*')}
 function resize(){let h=document.body.scrollHeight+10;if(h!==frameHeight){frameHeight=h;send('streamlit:setFrameHeight',{height:h})}}
@@ -346,7 +352,10 @@ function paint(cell,value){
 window.addEventListener('message',(event)=>{
   if(!event.data||event.data.type!=='streamlit:render')return;
   let a=event.data.args;
-  reportDirty=!!a.report_dirty;baseLabel=a.button_label||(a.doctor+'先生のNG日を反映する');
+  reportDirty=!!a.report_dirty;baseLabel=a.button_label||(a.doctor+'先生のNG日を反映する');pendingWord=a.pending_word||'反映';
+  // 先生用画面だけ、保存ボタンの上にコメント欄を出す（保存済みのコメントが変わったときだけ書き換える）
+  if(a.comment_enabled){document.getElementById('commentBox').style.display='block';
+    if(a.comment!==commentBase){commentBase=a.comment||'';document.getElementById('comment').value=commentBase}}
   if(a.version!==version){
     version=a.version;mode=a.mode||'row';days=a.days;draft=days.map(d=>d.value);sentDirty=false;
     let strip=document.getElementById('strip');
@@ -390,15 +399,18 @@ window.addEventListener('message',(event)=>{
 });
 // 反映していない変更（日数）を数えて、ボタンと案内の見た目を切り替える。
 // 管理者画面（report_dirty）では、変更の有無をアプリにも知らせる（先生を切り替えるときの注意に使う）
-let sentDirty=false,reportDirty=false,baseLabel='';
+let sentDirty=false,reportDirty=false,baseLabel='',pendingWord='反映',commentBase=null;
+document.getElementById('comment').addEventListener('input',()=>{updateDirty();resize()});
 function updateDirty(initial){
   const n=draft.filter((v,i)=>v!==days[i].value).length;
+  const ta=document.getElementById('comment');
+  const cm=commentBase!==null&&ta.value!==commentBase;   // コメントを書き換えたか（先生用画面）
   const btn=document.getElementById('apply'),note=document.getElementById('note');
-  btn.classList.toggle('dirty',n>0);
-  btn.classList.toggle('clean',n===0&&reportDirty);
-  btn.textContent=n>0?baseLabel+'（未反映 '+n+'日）':(reportDirty?'✓ 反映済み（変更はありません）':baseLabel);
+  btn.classList.toggle('dirty',n>0||cm);
+  btn.classList.toggle('clean',n===0&&!cm&&reportDirty);
+  btn.textContent=n>0?baseLabel+'（未'+pendingWord+' '+n+'日）':(cm?baseLabel+'（コメント未'+pendingWord+'）':(reportDirty?'✓ 反映済み（変更はありません）':baseLabel));
   note.classList.toggle('dirty',n>0);
-  if(n>0)note.textContent='⚠ まだ反映していない変更が '+n+'日分あります。選び終わったら下のボタンを押してください。';
+  if(n>0)note.textContent='⚠ まだ'+pendingWord+'していない変更が '+n+'日分あります。選び終わったら下のボタンを押してください。';
   else if(!initial&&note.classList)note.textContent='';
   if(reportDirty&&!initial&&(n>0)!==sentDirty){
     sentDirty=n>0;
@@ -407,7 +419,7 @@ function updateDirty(initial){
 }
 document.getElementById('apply').onclick=()=>{
   if(reportDirty&&!draft.some((v,i)=>v!==days[i].value))return;   // 変更がなければ何もしない
-  send('streamlit:setComponentValue',{value:{kind:'apply',version,values:draft,token:Date.now().toString()+'-'+Math.random()},dataType:'json'});
+  send('streamlit:setComponentValue',{value:{kind:'apply',version,values:draft,comment:document.getElementById('comment').value,token:Date.now().toString()+'-'+Math.random()},dataType:'json'});
   document.getElementById('note').textContent='処理しています…';};
 new ResizeObserver(resize).observe(document.body);send('streamlit:componentReady',{apiVersion:1});resize();
 </script></body></html>"""
@@ -2118,25 +2130,10 @@ def doctor_entry_page(key):
 
     saved_status_box()
 
-    with st.expander("NGの種類について", expanded=False):
-        st.markdown("""
-- **宿NG**：宿直（夜）に入れない日。平日はこれを選びます。
-- **日NG**：日直（日中）に入れない日。土日祝だけ選べます。
-- **全NG**：日直・宿直とも入れない日。土日祝だけ選べます。
-- ⚠ の日は、翌日PMにdutyがあるため、原則として宿直を外します。
-        """)
-
-    # --- 管理者へのコメント（任意）。NG日の保存と一緒に送られる ---
+    # 管理者へのコメント（任意）は、カレンダーの下・保存ボタンのすぐ上に出す（カレンダー部品の中にある）
     comment_key = f"remote_comment_{year}_{month}"
-    if comment_key not in st.session_state:
-        st.session_state[comment_key] = latest.get("コメント", "") if latest else ""
-    st.text_area(
-        "管理者へのコメント・要望（任意）",
-        key=comment_key, max_chars=500, height=90,
-        placeholder="例：第2週は学会のため、できれば平日の宿直を避けたいです。／ 月4回までを希望します。",
-        help="カレンダーの下の保存ボタンを押すと、NG日と一緒に保存されます。",
-    )
-    st.caption("下のカレンダーで「日直」「宿直」のボタンを押してNGにし（休日は日直と宿直が別々です）、カレンダーの下の「保存する」ボタンを押してください。コメントも一緒に保存されます。"
+    saved_comment = latest.get("コメント", "") if latest else ""
+    st.caption("下のカレンダーで「日直」「宿直」のボタンを押してNGにし、いちばん下の「NG日とコメントを保存する」を押してください。"
                "コメントだけを直したいときも、同じボタンを押してください（NG日はそのまま）。")
 
     # 以前の紙の用紙（休日は日直・宿直まとめて×）から変わった点を、カレンダーのすぐ上で強調する
@@ -2158,7 +2155,8 @@ def doctor_entry_page(key):
     response = horizontal_ng_component(HORIZONTAL_NG_HTML)(
         days=days, mode="row" if layout != "月間カレンダー" else "month",
         offset=datetime.date(year, month, 1).weekday(), doctor=doctor,
-        button_label="NG日とコメントを保存する",
+        button_label="NG日とコメントを保存する", pending_word="保存",
+        comment_enabled=True, comment=saved_comment,
         version=revision, key=component_key, default=None,
     )
     seen_key = component_key + "_last_token"
@@ -2182,8 +2180,9 @@ def doctor_entry_page(key):
                         merged[d] = v
             try:
                 now = remote_now()
-                remote_append("submissions", [f"{year}-{month}", doctor, ng_dict_to_text(merged), now,
-                                              st.session_state.get(comment_key, "").strip()])
+                comment_text = str(response.get("comment", saved_comment) or "").strip()[:500]
+                st.session_state[comment_key] = comment_text
+                remote_append("submissions", [f"{year}-{month}", doctor, ng_dict_to_text(merged), now, comment_text])
             except Exception:
                 st.error("保存できませんでした。通信状態を確認して、もう一度保存ボタンを押してください。")
                 return
