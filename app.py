@@ -2002,9 +2002,14 @@ WORK_SAVE_FLOAT_CSS = """
 .st-key-work_save_float > div:has(.work-save-note) { order: -1; }
 .work-save-note.busy { color: #566174; }
 .work-save-note.bad { color: #c92336; }
+/* スマートフォン：右上のStreamlitのアイコンと重ならないよう左に寄せ、ボタンの文字を短くする */
 @media (max-width: 640px) {
-    .st-key-work_save_float { right: 8rem; top: 0.5rem; max-width: 70vw; }
-    .st-key-work_save_float button { padding: 0.15rem 0.6rem; font-size: 0.8rem; }
+    .st-key-work_save_float { left: 0.5rem; right: auto; top: 0.55rem; max-width: calc(100vw - 6rem); gap: 6px; }
+    .st-key-work_save_float button { padding: 0.1rem 0.55rem; min-height: 2rem; }
+    .st-key-work_save_float > div:nth-child(1) button p,
+    .st-key-work_save_float > div:nth-child(2) button p { font-size: 0 !important; }
+    .st-key-work_save_float > div:nth-child(1) button p::after { content: "📂 続きから"; font-size: 0.8rem; }
+    .st-key-work_save_float > div:nth-child(2) button p::after { content: "💾 途中保存"; font-size: 0.8rem; }
     .work-save-note { display: none; }
 }
 </style>
@@ -2662,9 +2667,12 @@ st.markdown("""
 /* 下の帯に最後の内容が隠れないよう、ページの下に余白を取る */
 [data-testid="stMainBlockContainer"],.block-container{padding-bottom:6.5rem !important}
 @media (max-width:600px){
-  .st-key-create_bar{height:58px !important;padding:0 .6rem;gap:8px !important}
+  /* スマートフォン：右下にはStreamlitのマークが出るので、作成ボタンを左に置き、右側を空ける */
+  .st-key-create_bar{height:58px !important;padding:0 7.5rem 0 .6rem;gap:8px !important}
+  .st-key-create_bar > div:has(button){order:1 !important}
+  .st-key-create_bar > div:has(.cb-box){order:2 !important}
   .st-key-create_bar button{padding:0 .9rem;font-size:.9rem}
-  .cb-nav{display:none}.cb-res{font-size:.75rem;white-space:normal}
+  .cb-nav{display:none}.cb-res{margin-left:0;font-size:.75rem;white-space:normal}
 }
 </style>""", unsafe_allow_html=True)
 create_bar_request = False
