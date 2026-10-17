@@ -1908,15 +1908,24 @@ work_save_request = False
 
 WORK_SAVE_FLOAT_CSS = """
 <style>
+/* 画面いちばん上の帯（右上に Fork・⋮ がある白い帯）の空いている所に置く。表や入力欄には重ならない */
 .st-key-work_save_float {
-    position: fixed; top: 4.2rem; right: 1.2rem; z-index: 999990;
-    width: auto !important; max-width: 260px;
-    background: #ffffff; border: 1px solid #d0d7e2; border-radius: 10px;
-    padding: 8px 10px; box-shadow: 0 4px 14px rgba(0,0,0,.15);
+    position: fixed; top: 0.45rem; right: 9rem; z-index: 1000002;
+    width: auto !important; max-width: 60vw;
+    display: flex !important; flex-direction: row !important; align-items: center; gap: 10px;
+    background: transparent;
 }
-.st-key-work_save_float button { font-weight: 700; }
-.st-key-work_save_float [data-testid="stAlert"] { padding: 4px 8px; font-size: .85rem; }
-@media (max-width: 640px) { .st-key-work_save_float { top: 3.6rem; right: .5rem; max-width: 200px; } }
+.st-key-work_save_float > div { width: auto !important; flex: 0 0 auto !important; }
+.st-key-work_save_float button { min-height: 2.2rem; padding: 0.2rem 0.9rem; font-weight: 700; white-space: nowrap; }
+.st-key-work_save_float p { margin: 0; white-space: nowrap; }
+.work-save-note { font-size: 0.85rem; color: #1b7f3b; font-weight: 600; }
+.work-save-note.busy { color: #566174; }
+.work-save-note.bad { color: #c92336; }
+@media (max-width: 640px) {
+    .st-key-work_save_float { right: 6.5rem; top: 0.5rem; }
+    .st-key-work_save_float button { padding: 0.15rem 0.6rem; font-size: 0.8rem; }
+    .work-save-note { display: none; }
+}
 </style>
 """
 
@@ -1929,14 +1938,14 @@ def work_save_floating():
     st.markdown(WORK_SAVE_FLOAT_CSS, unsafe_allow_html=True)
     with st.container(key="work_save_float"):
         if st.session_state.get("remote_admin_ok"):
-            if st.button("💾 作業を途中保存する", key="work_save_button", type="primary", use_container_width=True):
+            if st.button("💾 作業を途中保存する", key="work_save_button", type="primary"):
                 work_save_request = True
             WORK_SAVE_SLOT = st.empty()
             if work_save_request:
-                WORK_SAVE_SLOT.info("途中保存しています…")
+                WORK_SAVE_SLOT.markdown("<span class='work-save-note busy'>保存しています…</span>", unsafe_allow_html=True)
         else:
             # パスワード未入力のときは、押すと入力欄が開くボタンにする
-            box = st.popover("💾 作業を途中保存する", use_container_width=True) if hasattr(st, "popover") \
+            box = st.popover("💾 作業を途中保存する") if hasattr(st, "popover") \
                 else st.expander("💾 作業を途中保存する", expanded=False)
             with box:
                 st.caption("途中保存には管理用パスワードが必要です。")
@@ -3124,10 +3133,11 @@ if work_save_request:
     _slot = WORK_SAVE_SLOT or st.empty()
     try:
         work_state_save(work_snapshot)
-        _slot.success(f"✅ 途中保存しました（{remote_now()[-8:-3]}）")
+        _slot.markdown(f"<span class='work-save-note'>✅ {remote_now()[-8:-3]} 途中保存しました</span>", unsafe_allow_html=True)
         st.toast("途中保存しました。次回は画面上部の「💾 前回の作業の続きから始める」から読み込めます。", icon="💾")
     except Exception as e:
-        _slot.error(f"途中保存できませんでした。詳細：{e}")
+        _slot.markdown("<span class='work-save-note bad'>⚠ 途中保存できませんでした</span>", unsafe_allow_html=True)
+        st.error(f"途中保存できませんでした。通信状態を確認して、もう一度押してください。詳細：{e}")
 
 create_button_container = st.container(key="create_duty_action")
 st.header("3. 当直案の作成・確認")
