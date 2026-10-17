@@ -601,7 +601,7 @@ def memo_preview(row, length=7):
     return f"{icons} {short}".strip()
 
 
-def memo_cell_html(row):
+def memo_cell_html(row, tip_up=False):
     """メモ欄：ふだんは短く表示し、押すと全文が開く（スマートフォンでも使える）。"""
     if not row.get("comment") and not row.get("note"):
         return '<td class="memo"></td>'
@@ -610,16 +610,12 @@ def memo_cell_html(row):
         parts.append(f'<b>💬 コメント</b>（{html_escape(row.get("comment_at", ""))}）<br>' + html_escape(row["comment"]).replace("\n", "<br>"))
     if row.get("note"):
         parts.append('<b>📝 備考</b><br>' + html_escape(row["note"]).replace("\n", "<br>"))
-    # ポップアップ用の全文（カーソルを合わせると表示される）
-    tip = []
-    if row.get("comment"):
-        tip.append(f"💬 コメント（{row.get('comment_at', '')}）\n{row['comment']}")
-    if row.get("note"):
-        tip.append(f"📝 備考\n{row['note']}")
-    tip_text = html_escape("\n\n".join(tip)).replace("\n", "&#10;")
-    # パソコン：カーソルを合わせるとポップアップ。スマートフォン（カーソルがない）：タップでその場に開く
-    return (f'<td class="memo"><details><summary title="{tip_text}">{html_escape(memo_preview(row))}</summary>'
-            f'<div class="full">{"<br><br>".join(parts)}</div></details></td>')
+    full = "<br><br>".join(parts)
+    # パソコン：カーソルを合わせるとすぐ横に全文（.tip）。スマートフォン（カーソルがない）：タップでその場に開く（details）
+    # 表の下のほうの行は、全文を上向きに開いて表からはみ出さないようにする
+    up = " up" if tip_up else ""
+    return (f'<td class="memo"><details><summary>{html_escape(memo_preview(row))}</summary>'
+            f'<div class="full">{full}</div></details><div class="tip{up}">{full}</div></td>')
 
 
 def duty_matrix_html(days, rows, year, month):
@@ -644,12 +640,19 @@ def duty_matrix_html(days, rows, year, month):
 .dm tr.short td.nm{color:#c0392b}
 .dm th.miss{background:#fde2e0}
 .dm .sum{padding:0 6px;font-weight:700;min-width:34px}
-.dm .memo{min-width:40px;width:60px;text-align:left;padding:0 4px;font-size:11px;vertical-align:top}
+.dm .memo{min-width:40px;width:60px;text-align:left;padding:0 4px;font-size:11px;vertical-align:middle;position:relative}
+.dm thead th.memo{text-align:center;font-size:12px}
 .dm .memo details summary{cursor:pointer;list-style:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:56px;color:#425268}
 .dm .memo details summary::-webkit-details-marker{display:none}
 .dm .memo details[open] summary{color:#1f3c74;font-weight:700}
 .dm .memo .full{white-space:normal;width:220px;padding:4px 6px;margin:2px 0 4px;background:#f6f8fb;border:1px solid #d8dde5;border-radius:4px;line-height:1.45}
-@media (hover:hover){.dm .memo details .full{display:none}.dm .memo details summary{cursor:help}}
+/* パソコン（カーソルがある端末）：カーソルを合わせた瞬間に全文を表示する */
+.dm .memo .tip{display:none;position:absolute;left:calc(100% - 2px);top:0;z-index:20;width:260px;white-space:normal;text-align:left;
+  padding:7px 9px;background:#fff;border:1px solid #c9d2de;border-radius:6px;box-shadow:0 6px 18px rgba(16,24,40,.18);font-size:12px;line-height:1.5;color:#243247}
+.dm .memo .tip.up{top:auto;bottom:0}
+@media (hover:hover){.dm .memo details .full{display:none}.dm .memo details summary{cursor:default}
+  .dm td.memo:hover{z-index:20}.dm td.memo:hover .tip{display:block}}
+@media (hover:none){.dm .memo .tip{display:none !important}}
 .dm-legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;margin:2px 0 6px;color:#243247}
 .dm-legend span{display:inline-flex;align-items:center;gap:4px}
 .dm-legend i{display:inline-block;min-width:34px;padding:1px 4px;border:1px solid #d8dde5;border-radius:3px;font-style:normal;font-weight:700;text-align:center;font-size:11px}
@@ -671,8 +674,9 @@ def duty_matrix_html(days, rows, year, month):
     head.append(''.join(f'<th class="sum" style="{count_cell_css(key, True)}">{label}</th>' for key, label in MATRIX_COUNT_COLUMNS) + '</tr>')
 
     body = []
-    for row in rows:
-        tr = [f'<tr><td class="nm">{html_escape(row["name"])}</td><td class="pmcol">{html_escape(row["pm_duty"])}</td>{memo_cell_html(row)}']
+    for idx, row in enumerate(rows):
+        tip_up = idx >= max(len(rows) - 6, 6)
+        tr = [f'<tr><td class="nm">{html_escape(row["name"])}</td><td class="pmcol">{html_escape(row["pm_duty"])}</td>{memo_cell_html(row, tip_up)}']
         for info, cell in zip(days, row['cells']):
             td_class = ' class="hol"' if info['holiday'] else ''
             if cell['type'] == 'shift':
