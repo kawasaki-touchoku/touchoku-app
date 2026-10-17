@@ -1649,7 +1649,7 @@ def remote_qr_cards_html(cards):
   <div class="panel cover">
     <div class="cover-title">当直NG日 入力用カード</div>
     <div class="cover-name">{n} 先生</div>
-    <div class="staple left"><svg class="staple-svg" viewBox="0 0 60 20" xmlns="http://www.w3.org/2000/svg" aria-label="ホチキス止めの位置"><path d="M6 15 V6 Q6 4 8 4 H52 Q54 4 54 6 V15" fill="none" stroke="#6b7380" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 5.2 H50" stroke="#d5dae1" stroke-width="1" stroke-linecap="round"/></svg></div><div class="staple right"><svg class="staple-svg" viewBox="0 0 60 20" xmlns="http://www.w3.org/2000/svg" aria-label="ホチキス止めの位置"><path d="M6 15 V6 Q6 4 8 4 H52 Q54 4 54 6 V15" fill="none" stroke="#6b7380" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 5.2 H50" stroke="#d5dae1" stroke-width="1" stroke-linecap="round"/></svg></div>
+    <div class="staple left"><svg class="staple-svg" viewBox="0 0 20 60" xmlns="http://www.w3.org/2000/svg" aria-label="ホチキス止めの位置"><path d="M15 6 H6 Q4 6 4 8 V52 Q4 54 6 54 H15" fill="none" stroke="#6b7380" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.2 10 V50" stroke="#d5dae1" stroke-width="1" stroke-linecap="round"/></svg></div><div class="staple right"><svg class="staple-svg" viewBox="0 0 20 60" xmlns="http://www.w3.org/2000/svg" aria-label="ホチキス止めの位置"><path d="M15 6 H6 Q4 6 4 8 V52 Q4 54 6 54 H15" fill="none" stroke="#6b7380" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.2 10 V50" stroke="#d5dae1" stroke-width="1" stroke-linecap="round"/></svg></div>
   </div>
   <div class="fold"><span>② ここを山折り（上の部分を裏側へ）</span></div>
   <div class="panel qr">
@@ -1700,9 +1700,12 @@ body {{ margin: 0; font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiry
 .cover-title {{ margin-top: 6mm; font-size: 14pt; color: #4a5568; }}
 .cover-name {{ margin-top: 3mm; font-size: 30pt; font-weight: 700; }}
 .cover-note {{ margin-top: 4mm; font-size: 11pt; color: #b42332; }}
-.staple {{ position: absolute; bottom: 9mm; width: 16mm; height: 6mm; }}
+/* ホチキスは左右の端・高さの真ん中に縦向きで留める。
+   折りたたむと、内側のQRコード・URL・説明文のどれにも重ならない位置（端から約5〜10mm。印刷できない端の余白も避ける） */
+.staple {{ position: absolute; top: 50%; transform: translateY(-50%); width: 5mm; height: 18mm; }}
+.staple.right svg {{ transform: scaleX(-1); }}
 .staple-svg {{ width: 100%; height: 100%; display: block; }}
-.staple.left {{ left: 14mm; }} .staple.right {{ right: 14mm; }}
+.staple.left {{ left: 5mm; }} .staple.right {{ right: 5mm; }}
 .qr-name {{ font-size: 15pt; font-weight: 700; margin-bottom: 4mm; }}
 .qr-body {{ display: flex; align-items: center; gap: 10mm; }}
 .qr-side .big {{ font-size: 17pt; font-weight: 700; line-height: 1.4; }}
@@ -1718,7 +1721,7 @@ body {{ margin: 0; font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiry
 </style></head><body>
 <div class="bar"><button onclick="window.print()">🖨️ 印刷する</button>
 A4・縦・<b>片面</b>で印刷してください（{len(cards)}名分・1人1枚）。印刷の設定で「倍率：100%（実際のサイズ）」「余白：なし」を選ぶと、折り線の位置が正しくなります。<br>
-折り方：① 下の1/3を内側に折る（谷折り）→ ② 上の1/3（宛名）を裏側に折る（山折り）→ 宛名が表に出たら、左右2か所をホチキスで留めます。</div>
+折り方：① 下の1/3を内側に折る（谷折り）→ ② 上の1/3（宛名）を裏側に折る（山折り）→ 宛名が表に出たら、左右の端の印の位置（2か所）をホチキスで留めます。</div>
 {''.join(pages)}
 </body></html>"""
 
