@@ -708,6 +708,7 @@ def duty_matrix_html(days, rows, year, month):
     head = ['<tr><th class="nm">名前</th><th class="pmcol">翌日<br>PM duty</th><th class="memo">メモ</th>']
     for info in days:
         miss_class = ' class="miss"' if info['shortage'] else ''
+        miss_class = f' class="c{info["day"]}{" miss" if info["shortage"] else ""}"'
         head.append(f'<th{miss_class} style="color:{head_color(info)}">{info["day"]}<br>{info["weekday"]}</th>')
     head.append(''.join(f'<th class="sum" style="{count_cell_css(key, True)}">{label}</th>' for key, label in MATRIX_COUNT_COLUMNS) + '</tr>')
 
@@ -716,16 +717,17 @@ def duty_matrix_html(days, rows, year, month):
         tip_up = idx >= max(len(rows) - 6, 6)
         tr = [f'<tr><td class="nm">{html_escape(row["name"])}</td><td class="pmcol">{html_escape(row["pm_duty"])}</td>{memo_cell_html(row, tip_up)}']
         for info, cell in zip(days, row['cells']):
-            td_class = ' class="hol"' if info['holiday'] else ''
+            col = f'c{info["day"]}'   # 列（日付）ごとの印。カーソルを合わせた列を色付けするのに使う
+            td_class = f' class="{col} hol"' if info['holiday'] else f' class="{col}"'
             if cell['type'] == 'shift':
                 bg, fg = MATRIX_SHIFT_COLORS.get(cell['shift'], ('#eee', '#000'))
                 wish_css = f'box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME},inset 0 0 0 4px #ffffff;' if cell.get('wish') else ''
-                tr.append(f'<td><div class="cell" style="background:{bg};color:{fg};{wish_css}">{slot_label(cell["text"], "<br>")}</div></td>')
+                tr.append(f'<td class="{col}"><div class="cell" style="background:{bg};color:{fg};{wish_css}">{slot_label(cell["text"], "<br>")}</div></td>')
             elif cell['type'] == 'ng':
                 pm_class = ' pm' if cell.get('pm') else ''
                 tr.append(f'<td{td_class}><div class="cell ng{pm_class}">{cell["text"]}</div></td>')
             elif cell['type'] == 'pm':
-                tr.append('<td><div class="cell pm"></div></td>')
+                tr.append(f'<td class="{col}"><div class="cell pm"></div></td>')
             else:
                 tr.append(f'<td{td_class}></td>')
         tr.append(''.join(f'<td class="sum" style="{count_cell_css(key, False)}">{row[key]}</td>' for key, _ in MATRIX_COUNT_COLUMNS) + '</tr>')
@@ -741,12 +743,21 @@ def duty_matrix_html(days, rows, year, month):
             if count:
                 slot_total += 1
                 label = slot_label(slot, "<br>") + ("" if count == 1 else f"×{count}")
-                tr.append(f'<td><div class="cell" style="background:{bg};color:{fg};white-space:normal;line-height:1.15;font-size:10px">{label}</div></td>')
+                tr.append(f'<td class="c{info["day"]}"><div class="cell" style="background:{bg};color:{fg};white-space:normal;line-height:1.15;font-size:10px">{label}</div></td>')
             else:
-                tr.append('<td></td>')
+                tr.append(f'<td class="c{info["day"]}"></td>')
         tr.append(f'<td class="sum" colspan="{len(MATRIX_COUNT_COLUMNS)}" style="color:#c0392b">{slot_total}枠</td></tr>')
         body.append(''.join(tr))
-    return css + ''.join(legend) + f'<div class="dm-wrap"><table class="dm"><thead>{"".join(head)}</thead><tbody>{"".join(body)}</tbody></table></div>'
+    # カーソルを合わせたセルの「行」と「列」を薄い黄色で示す（縦横に長い表での見間違いを防ぐ）
+    hl = "#fff1b8"
+    hover_css = ("<style>"
+                 f".dm tbody tr:hover td{{background-color:{hl} !important}}"
+                 f".dm tbody tr:hover td.nm{{background-color:#ffe08a !important}}"
+                 + "".join(f".dm:has(.c{info['day']}:hover) .c{info['day']}{{background-color:{hl} !important}}"
+                           f".dm:has(.c{info['day']}:hover) th.c{info['day']}{{background-color:#ffe08a !important}}" for info in days)
+                 + ".dm tbody td:hover{outline:2px solid #e0a800;outline-offset:-2px}"
+                 "</style>")
+    return css + hover_css + ''.join(legend) + f'<div class="dm-wrap"><table class="dm"><thead>{"".join(head)}</thead><tbody>{"".join(body)}</tbody></table></div>'
 
 
 def html_escape(text):
