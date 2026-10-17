@@ -318,7 +318,7 @@ HORIZONTAL_NG_HTML = r"""<!doctype html><html lang="ja"><meta charset="utf-8"><m
 .cell[data-holiday="true"][data-state="日NG"] .day-band,
 .cell[data-holiday="true"][data-state="宿NG"] .night-band,
 .cell[data-holiday="true"][data-state="全NG"] .band{background:#b42332;color:#fff}
-</style><body><div id="strip" class="strip" aria-label="NG日カレンダー"></div><div id="note" class="note">左右へスクロールして選択できます。</div><button id="apply" type="button">NG日を保存する</button><script>
+</style><body><div id="strip" class="strip" aria-label="NG日カレンダー"></div><div id="note" class="note">左右へスクロールして選択できます。</div><button id="apply" type="button">NG日を反映する</button><script>
 let version=null,days=[],draft=[];let mode='row';let frameHeight=0;
 function send(type,data={}){window.parent.postMessage({isStreamlitMessage:true,type,...data},'*')}
 function resize(){let h=document.body.scrollHeight+10;if(h!==frameHeight){frameHeight=h;send('streamlit:setFrameHeight',{height:h})}}
@@ -332,7 +332,7 @@ function paint(cell,value){
 window.addEventListener('message',(event)=>{
   if(!event.data||event.data.type!=='streamlit:render')return;
   let a=event.data.args;
-  document.getElementById('apply').textContent=a.button_label||(a.doctor+'先生のNG日を保存する');
+  document.getElementById('apply').textContent=a.button_label||(a.doctor+'先生のNG日を反映する');
   if(a.version!==version){
     version=a.version;mode=a.mode||'row';days=a.days;draft=days.map(d=>d.value);
     let strip=document.getElementById('strip');
@@ -361,15 +361,15 @@ window.addEventListener('message',(event)=>{
       let sel=document.createElement('select');sel.setAttribute('aria-label',d.day+'日のNG設定');
       d.options.forEach(v=>{let o=document.createElement('option');o.value=v;o.textContent=labels[v];sel.append(o)});
       sel.value=d.value;
-      sel.onchange=()=>{draft[i]=sel.value;paint(cell,sel.value);document.getElementById('note').textContent='未保存の変更があります。選び終わったら下のボタンを押してください。'};
+      sel.onchange=()=>{draft[i]=sel.value;paint(cell,sel.value);document.getElementById('note').textContent='まだ反映していない変更があります。選び終わったら下のボタンを押してください。'};
       cell.append(head,sel);paint(cell,d.value);strip.append(cell);
     });
     if(mode==='month'){let blanks=(7-(a.offset+days.length)%7)%7;for(let i=0;i<blanks;i++){let el=document.createElement('div');el.className='blank';strip.append(el)}}
-    document.getElementById('note').textContent='NGを選ぶと色が変わります。選び終わったら保存してください。';
+    document.getElementById('note').textContent='NGを選ぶと色が変わります。選び終わったら下のボタンを押してください。';
   }
   resize();
 });
-document.getElementById('apply').onclick=()=>{send('streamlit:setComponentValue',{value:{version,values:draft,token:Date.now().toString()+'-'+Math.random()},dataType:'json'});document.getElementById('note').textContent='保存しています…';};
+document.getElementById('apply').onclick=()=>{send('streamlit:setComponentValue',{value:{version,values:draft,token:Date.now().toString()+'-'+Math.random()},dataType:'json'});document.getElementById('note').textContent='処理しています…';};
 new ResizeObserver(resize).observe(document.body);send('streamlit:componentReady',{apiVersion:1});resize();
 </script></body></html>"""
 
@@ -1901,6 +1901,29 @@ def admin_logged_in(widget_key):
     return False
 
 
+# 途中保存ボタンは画面のあちこちに置く。押された場所を覚えておき、
+# 全部の入力を読み終えた位置（作成ボタンの上）でまとめて保存し、結果をその場所に表示する。
+WORK_SAVE_SLOTS = {}
+work_save_request = None
+
+
+def work_save_spot(spot):
+    """途中保存ボタンを1つ置く（spot はボタンの場所の名前）。"""
+    global work_save_request
+    if not remote_is_configured():
+        return
+    if st.session_state.get("remote_admin_ok"):
+        if st.button("💾 ここまでの作業を途中保存する", key=f"work_save_{spot}"):
+            work_save_request = spot
+        WORK_SAVE_SLOTS[spot] = st.empty()
+        if work_save_request == spot:
+            WORK_SAVE_SLOTS[spot].info("途中保存しています…（赤いエラーが表示されている場合は、直してからもう一度押してください）")
+    else:
+        with st.expander("💾 作業を途中保存する", expanded=False):
+            st.caption("途中保存には管理用パスワードが必要です。一度入力すると、ほかの場所の途中保存ボタンもすぐ使えます。")
+            admin_logged_in(f"work_save_pw_{spot}")
+
+
 def doctor_entry_page(key):
     """専用URLで開いた先生用の画面。その先生のNG日だけを入力・保存できる。"""
     st.markdown("<style>[data-testid='stSidebar']{display:none}</style>", unsafe_allow_html=True)
@@ -2041,7 +2064,7 @@ def doctor_entry_page(key):
     if just_saved:
         saved_status_box(show_comment=False)
     if latest:
-        with st.expander("📷 提出内容を画像で保存する（控えとして）", expanded=just_saved):
+        with st.expander("📷 提出内容を画像で残す（控えとして）", expanded=just_saved):
             st.caption("保存済みの内容をカレンダーの画像にします。保存し直した場合は、画像も新しい内容になります。")
             ng_receipt_image(doctor, year, month, latest.get("保存日時", ""), parse_ng_dict(saved_text, year, month), holidays)
     st.caption("このページのURLは、先生専用です。ほかの方には共有しないでください。")
@@ -2303,17 +2326,18 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 
 1. **年月・休日を設定**：作る年月を選びます。平日に日直を置く日（年末年始など）は「休日にする」にチェックします。
 2. **確定当直を入力（任意）**：担当が決まっている当直や、先月末の当直を入れます。月初の勤務間隔の確認に使われます。
-3. **医師条件を読み込む**：保存しておいた「医師条件CSV」をアップロードします（アプリは時間がたつとリセットされるため、毎回読み込みます）。
+3. **医師条件を読み込む**：途中保存から続ける場合は不要です。初めての場合や、手元の「医師条件CSV」を使う場合はアップロードします。
 4. **NG日を集める**：先生方に専用URLから入力してもらい、管理画面で取り込みます（「NG日の集め方」のタブを参照）。
 5. **不足時の優先順位を確認（任意）**：人数が足りない月に、どの枠から埋めるかを決めます。
 6. **「この条件で当直案を作成する」を押す**：押すたびに違うパターンの案ができます。気に入った案が出るまで押し直して構いません。
-7. **結果を確認してダウンロード**：「医師別の当直一覧」をExcelで、「作成した当直案」をCSVで保存できます。
+7. **結果を確認してダウンロード**：「医師別の当直一覧」をExcelで、「作成した当直案」をCSVでダウンロードできます。
 
-**途中で中断するとき**は、「当直案を作成する」ボタンの上にある「💾 作業を途中保存する」を押してください（管理用パスワードが必要です）。
-年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位がまとめて保存され、
-次回は画面上部の「💾 前回の作業の続きから始める」で元に戻せます。当直案を作成したときも自動で保存されます。
+**途中で中断するとき**は、「💾 ここまでの作業を途中保存する」を押してください。各項目の下と画面左のメニューにあり、どれを押しても同じです（管理用パスワードが必要です）。
+年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位がまとめて途中保存され、
+次回は画面上部の「💾 前回の作業の続きから始める」で元に戻せます。当直案を作成したときも自動で途中保存されます。
 
-「医師条件をCSVで保存」は、医師条件だけをファイルとして手元に残したいときに使います。
+※「保存」はアプリの保存先（スプレッドシート）に残すこと、「ダウンロード」はパソコンなどにファイルとして取り出すことです。
+「医師条件をCSVでダウンロード」は、医師条件だけをファイルとして手元に残したいときに使います。
         """)
     with tab_ng:
         st.markdown("""
@@ -2330,7 +2354,7 @@ NG日の欄にある「📨 先生方からのNG日入力（専用URL）」を�
 
 **方法B：管理者が直接入力する**
 
-「NG日を入力する医師」で先生を選び、カレンダーでNG日を選んで「NG日を保存する」を押します。紙やメールで集めた場合はこちらを使います。
+「NG日を入力する医師」で先生を選び、カレンダーでNG日を選んで「NG日を反映する」を押します。紙やメールで集めた場合はこちらを使います。
 
 | NGの種類 | 意味 |
 | --- | --- |
@@ -2426,7 +2450,16 @@ if remote_is_configured():
                 st.button("この作業を読み込む", key="work_restore", type="primary", on_click=work_state_restore)
                 st.caption("年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位が、保存したときの状態に戻ります。")
             else:
-                st.caption("まだ保存された作業はありません。画面の下の「💾 作業を途中保存する」で保存できます。")
+                st.caption("まだ保存された作業はありません。各項目の下や画面左のメニューにある「💾 ここまでの作業を途中保存する」で保存できます。")
+
+    # 画面左のメニューにも途中保存ボタンを置く（どこまでスクロールしていても押せるように）
+    with st.sidebar:
+        st.markdown("### 💾 作業の途中保存")
+        st.caption("入力の途中でも、ここからいつでも途中保存できます。次回は画面上部の「💾 前回の作業の続きから始める」で読み込めます。")
+        work_save_spot("sidebar")
+        if st.session_state.get("remote_admin_ok"):
+            _saved_at, _ = work_state_info()
+            st.caption(f"前回の途中保存：{_saved_at}" if _saved_at else "まだ途中保存はありません。")
 
 if "sel_year" not in st.session_state:
     st.session_state["sel_year"] = default_year
@@ -2605,6 +2638,7 @@ for d in range(1, num_days + 1):
 
 total_slots = sum(shift_counts.values())
 holiday_total_placeholder.metric("🏥 必要な総当直枠数", f"{total_slots} 枠")
+work_save_spot("holidays")
 
 st.divider()
 
@@ -2663,6 +2697,7 @@ st.markdown("### 📅 先月今月来月の確定当直")
 st.write("表のセルをクリックして、日付と担当医師名を入力・編集できます。")
 edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
 edited_fixed_df = edited_fixed_df_raw.reset_index()
+work_save_spot("fixed")
 
 st.divider()
 
@@ -2738,7 +2773,7 @@ with col_dl:
         mime="text/csv",
     )
 with col_ul:
-    uploaded_file = st.file_uploader("医師条件（途中保存CSVも可）をアップロード", type="csv", key=f"staff_csv_{st.session_state.get('uploader_gen', 0)}")
+    uploaded_file = st.file_uploader("医師条件（以前ダウンロードしたCSVも可）をアップロード", type="csv", key=f"staff_csv_{st.session_state.get('uploader_gen', 0)}")
 
 if uploaded_file is not None:
     if st.session_state.get('last_uploaded_file_id') != uploaded_file.file_id:
@@ -2818,6 +2853,7 @@ if _notes:
     with st.expander(f"📝 備考の全文を見る（{len(_notes)}名）", expanded=False):
         # st.table は長い文章を折り返して全部表示する
         st.table(pd.DataFrame(_notes, columns=["先生の名前", "備考"]).set_index("先生の名前"))
+work_save_spot("staff")
 staff_df, staff_input_errors = validate_staff_inputs(staff_df, year, month)
 if staff_input_errors:
     show_input_errors(staff_input_errors)
@@ -2840,7 +2876,7 @@ st.divider()
 
 st.markdown("### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
 st.info("先生方に専用URLから入力してもらう場合は、下の「📨 先生方からのNG日入力（専用URL）」を使います。"
-        "管理者が直接入力する場合は、医師を選んでカレンダーでNGを選び、最後に「NG日を保存する」を押してください。")
+        "管理者が直接入力する場合は、医師を選んでカレンダーでNGを選び、最後に「NG日を反映する」を押してください。")
 with st.expander("NGの種類・一括操作について", expanded=False):
     st.markdown("""
 | 選択肢 | 意味 |
@@ -2852,20 +2888,20 @@ with st.expander("NGの種類・一括操作について", expanded=False):
 
 平日は「OK」「宿NG」から選びます。
 「全日NGにする」は平日を宿NG、休日を全NGにし、「すべてOKに戻す」はNG指定を解除します。
-一括操作は押すと保存されます。確定済み当直・優先度100以上の希望は、NGより優先されます。
+一括操作は押すとすぐ反映されます。確定済み当直・優先度100以上の希望は、NGより優先されます。
 
 「休日にする」のチェックを外した日は、平日として表示されます（全NG→宿NG として扱い、日NGは平日には関係しません）。
 チェックを戻すと、元のNG指定がそのまま復活します。
 
-**「保存」は、今開いている画面の計算条件への保存です。**
-次回も使う場合は、下の「医師条件をCSVで保存」をご利用ください。
+**「NG日を反映する」は、今開いている画面の計算条件に入れる操作です。**
+次回も続きから使う場合は、「💾 ここまでの作業を途中保存する」を押してください。
     """)
 
 ng_layout = st.radio("NGカレンダーの表示", ["月間カレンダー", "1日〜月末を横一列"], horizontal=True, key="ng_calendar_layout")
 ng_horizontal = ng_layout == "1日〜月末を横一列"
-st.caption("表示を切り替える前に、選択中のNG日を保存してください。保存済みの内容は、どちらの表示でも共通です。")
+st.caption("表示を切り替える前に、選択中のNG日を反映してください。反映済みの内容は、どちらの表示でも共通です。")
 if ng_horizontal:
-    st.caption("左右へスクロールして日付を選べます。選択中の色はすぐに変わります。最後に「NG日を保存する」を押してください。")
+    st.caption("左右へスクロールして日付を選べます。選択中の色はすぐに変わります。最後に「NG日を反映する」を押してください。")
 
 day_is_holiday = {d: is_holiday_date(datetime.date(year, month, d), year, month, custom_holidays) for d in range(1, num_days + 1)}
 
@@ -2946,9 +2982,9 @@ if not valid_staff.empty:
                     elif val == "日NG": saved_strs.append(f"{d}日(日直NG)")
                     elif val == "宿NG": saved_strs.append(f"{d}日(宿直NG)")
                 if saved_strs:
-                    st.success(f"✅ **保存済みのNG日:** {', '.join(saved_strs)}")
+                    st.success(f"✅ **反映済みのNG日:** {', '.join(saved_strs)}")
                 else:
-                    st.info("💡 **現在、保存されているNG日はありません**")
+                    st.info("💡 **現在、反映されているNG日はありません**")
 
                 component_days = []
                 for d in range(1, num_days + 1):
@@ -3003,16 +3039,19 @@ if not valid_staff.empty:
         staff_df.at[original_idx, NG_COLUMN] = ",".join(ng_items)
 
 
-st.divider()
-st.markdown("### 📂 医師条件をCSVで保存（次回も使う場合）")
-st.write("医師名・回数・勤務間隔・希望日・保存済みのNG日・備考を保存します。次回は「医師条件」のアップロード欄から読み込んでください。")
-st.caption("保存前に、各医師の「NG日を保存する」を押してください。対象年月・特別休日・増員設定・確定済み当直・生成結果・色分けとそのメモは、このCSVには含まれません。")
+work_save_spot("ng")
 
-# 保存するCSVも、画面と同じく「先生の名前 → 備考 → その他」の順にそろえる（読み込みは列名で行うので、古い並びのCSVもそのまま使える）
+st.divider()
+st.markdown("### 📂 医師条件をCSVでダウンロード（手元にファイルで残す場合）")
+st.write("医師名・回数・勤務間隔・希望日・NG日・備考をCSVファイルとしてパソコンなどにダウンロードします。このファイルは「医師条件」のアップロード欄から読み込めます。")
+st.caption("ダウンロードの前に、各医師の「NG日を反映する」を押してください。対象年月・特別休日・増員設定・確定済み当直・生成結果・色分けとそのメモは、このCSVには含まれません。"
+           "続きから作業するだけなら、CSVではなく「💾 途中保存」を使うほうが簡単です。")
+
+# ダウンロードするCSVも、画面と同じく「先生の名前 → 備考 → その他」の順にそろえる（読み込みは列名で行うので、古い並びのCSVもそのまま使える）
 _first = ["先生の名前"] + [c for c in staff_df.columns if str(c).startswith("備考")]
 current_csv = staff_df[_first + [c for c in staff_df.columns if c not in _first]].to_csv(index=False).encode('utf-8-sig')
 st.download_button(
-    label="📥 医師条件をCSVで保存",
+    label="📥 医師条件をCSVでダウンロード",
     data=current_csv,
     file_name=f"医師条件_{year}年{month}月.csv",
     mime="text/csv",
@@ -3067,17 +3106,18 @@ work_snapshot = {
     "staff_csv": staff_df.to_csv(index=False),
     "priority": {k: int(v) for k, v in shortage_priority.items()},
 }
+work_save_spot("before_create")
 if remote_is_configured():
-    with st.expander("💾 作業を途中保存する（次回、続きから始められます）", expanded=False):
-        st.caption("年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位を保存します。"
-                   "保存は1つだけで、保存し直すと前の内容は置き換わります。「当直案を作成する」を押したときも自動で保存されます（管理用パスワード入力済みの場合）。")
-        if admin_logged_in("work_save_pw"):
-            if st.button("今の入力内容を保存する", key="work_save", type="primary"):
-                try:
-                    work_state_save(work_snapshot)
-                    st.success(f"保存しました（{remote_now()}）。次回は画面上部の「💾 前回の作業の続きから始める」から読み込めます。")
-                except Exception as e:
-                    st.error(f"保存できませんでした。詳細：{e}")
+    st.caption("💾 途中保存では、年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位をまとめて保存します。"
+               "保存先は1つだけで、途中保存し直すと前の内容は置き換わります。「当直案を作成する」を押したときも自動で途中保存されます（管理用パスワード入力済みの場合）。")
+# どこかの途中保存ボタンが押されていたら、ここで（全部の入力を読み終えてから）保存する
+if work_save_request:
+    _slot = WORK_SAVE_SLOTS.get(work_save_request) or st.empty()
+    try:
+        work_state_save(work_snapshot)
+        _slot.success(f"✅ 途中保存しました（{remote_now()}）。次回は画面上部の「💾 前回の作業の続きから始める」から読み込めます。")
+    except Exception as e:
+        _slot.error(f"途中保存できませんでした。詳細：{e}")
 
 create_button_container = st.container(key="create_duty_action")
 st.header("3. 当直案の作成・確認")
@@ -3101,7 +3141,7 @@ if st.session_state.get('result_needs_refresh'):
 if len(staff_df) > 0:
     with create_button_container:
         create_clicked = st.button("🚀 この条件で当直案を作成する", type="primary", use_container_width=True)
-        st.caption("※ 押すたびに、同じ条件でも違うパターンの当直表を作ります。気に入った案はダウンロードして保存してください。")
+        st.caption("※ 押すたびに、同じ条件でも違うパターンの当直表を作ります。気に入った案は、下のボタンからダウンロードしてください（作成した当直案は途中保存には含まれません）。")
     if create_clicked:
         # 管理者としてログインしていれば、作成のたびに入力内容を自動で途中保存する
         if remote_is_configured() and st.session_state.get("remote_admin_ok"):
