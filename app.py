@@ -278,14 +278,14 @@ body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI"
 .legend i{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:5px}
 .strip{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 14px}
 .strip.month{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;overflow:visible;padding-bottom:6px}
-.wk{text-align:center;font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--sub);padding:0 0 4px}
+.wk{text-align:center;font-size:15px;font-weight:800;letter-spacing:.06em;color:#4a5566;padding:0 0 6px}
 .blank{border-radius:12px;background:#fafbfc}
 .cell{flex:0 0 112px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 7px 7px;
       box-shadow:0 1px 2px rgba(16,24,40,.04);display:flex;flex-direction:column;align-items:stretch;min-width:0}
 .month .cell{flex:none}
 .cell[data-holiday="true"]{background:var(--hol);border-color:var(--holline)}
-.date{text-align:center;font-size:15px;font-weight:800;line-height:20px;white-space:nowrap;font-variant-numeric:tabular-nums}
-.date small{font-size:11px;font-weight:600;margin-left:1px}
+.date{text-align:center;font-size:21px;font-weight:800;line-height:26px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.date small{font-size:14px;font-weight:700;margin-left:1px}
 .date.holiday{color:var(--sun)}.date.saturday{color:var(--sat)}
 .flag{height:26px;display:flex;align-items:center;justify-content:center}
 .pm{display:inline-flex;align-items:center;gap:3px;color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:4px;padding:0 5px;font-size:13px;font-weight:900;line-height:18px;white-space:nowrap}
@@ -307,7 +307,8 @@ body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI"
 @media(max-width:600px){
  .strip.month{gap:3px}
  .month .cell{padding:5px 2px 3px;border-radius:8px}
- .month .date{font-size:13px;line-height:16px}
+ .month .date{font-size:17px;line-height:21px}
+ .wk{font-size:13px}
  .month .flag{height:28px}
  .month .pm{font-size:11px;padding:0 2px;gap:1px;line-height:14px}
  .month .pm small{font-size:7.5px;white-space:normal;max-width:30px;overflow-wrap:anywhere}
