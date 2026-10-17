@@ -278,9 +278,14 @@ HORIZONTAL_NG_HTML = r"""<!doctype html><html lang="ja"><meta charset="utf-8"><m
 /* 上段が日直、下段が宿直。不可の勤務帯だけ塗る。 */
 .cell,.month .cell{background:#fff;border-color:#cbd2dc}
 .head,.month .head{height:124px;gap:4px;justify-content:flex-start;padding-top:2px;color:#243247;background:transparent}
-.state{width:100%;display:grid;grid-template-rows:repeat(2,29px);gap:0;border:1px solid #d6dce5;border-radius:5px;overflow:hidden;order:3}
+.state{width:100%;display:grid;grid-template-rows:repeat(2,36px);gap:0;border:1px solid #d6dce5;border-radius:5px;overflow:hidden;order:3}
 .band{display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:750;background:#fff;color:#425268;white-space:nowrap}
 .band + .band{border-top:1px solid #d6dce5}.band.off{background:#fcfcfd;color:#d8dde5;font-weight:400}
+/* 日直・宿直の段そのものを押して、可⇔NG を切り替える */
+.band.tap{cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;gap:3px}
+.band.tap:hover{filter:brightness(.95)}
+.band.tap:focus-visible{outline:3px solid #4789ff;outline-offset:-3px}
+.band .mark{font-size:12px;font-weight:900}
 .cell[data-state="全NG"] .band{background:#b42332;color:#fff}
 .cell[data-state="日NG"] .day-band{background:#9a4700;color:#fff}
 .cell[data-state="宿NG"] .night-band{background:#1856a4;color:#fff}
@@ -297,7 +302,7 @@ HORIZONTAL_NG_HTML = r"""<!doctype html><html lang="ja"><meta charset="utf-8"><m
 .head,.month .head{
  display:grid;
  grid-template-columns:minmax(0,1fr);
- grid-template-rows:26px 30px 60px;
+ grid-template-rows:26px 30px 74px;
  justify-content:stretch;
  width:100%;
  min-width:0;
@@ -310,9 +315,13 @@ HORIZONTAL_NG_HTML = r"""<!doctype html><html lang="ja"><meta charset="utf-8"><m
 }
 .head > .day{line-height:24px;margin:0;align-self:center}
 .head > .warning-slot{height:30px;min-height:30px;width:100%;margin:0}
-.head > .state{height:60px;min-height:60px;margin:0;align-self:end}
+.head > .state{height:74px;min-height:74px;margin:0;align-self:end}
+.head,.month .head{height:142px}
+.cell{padding-bottom:6px}.blank{min-height:158px !important}
+@media(max-width:600px){.month .head{height:138px}.month .band{font-size:10px;letter-spacing:-.02em}.month .band .mark{display:none}}
 @media(max-width:600px){
- .month .head{grid-template-rows:22px 30px 60px}
+ .month .head{grid-template-rows:22px 30px 74px}
+ .month .blank{min-height:146px !important}
 }
 /* 休日はNGの勤務帯をすべて同じ赤にする。平日の宿NGは従来の青。 */
 .cell[data-holiday="true"][data-state="日NG"] .day-band,
@@ -322,13 +331,16 @@ HORIZONTAL_NG_HTML = r"""<!doctype html><html lang="ja"><meta charset="utf-8"><m
 let version=null,days=[],draft=[];let mode='row';let frameHeight=0;
 function send(type,data={}){window.parent.postMessage({isStreamlitMessage:true,type,...data},'*')}
 function resize(){let h=document.body.scrollHeight+10;if(h!==frameHeight){frameHeight=h;send('streamlit:setFrameHeight',{height:h})}}
-const labels={OK:'OK','全NG':'全NG','日NG':'日NG','宿NG':'宿NG'};  // 記号は幅がそろわないので付けない（色の帯で区別できる）
 function paint(cell,value){
   cell.dataset.state=value;
   let holiday=cell.dataset.holiday==='true';
-  cell.querySelector('.day-band').textContent=holiday?(value==='全NG'||value==='日NG'?'日直NG':'日直可'):'日直なし';
-  cell.querySelector('.night-band').textContent=value==='全NG'||value==='宿NG'?'宿直NG':'宿直可';
+  let dayNg=value==='全NG'||value==='日NG', nightNg=value==='全NG'||value==='宿NG';
+  let db=cell.querySelector('.day-band'), nb=cell.querySelector('.night-band');
+  if(holiday){db.innerHTML=dayNg?'<span class="mark">✕</span>日直NG':'日直 可';db.setAttribute('aria-pressed',String(dayNg));}
+  else{db.textContent='日直なし';}
+  nb.innerHTML=nightNg?'<span class="mark">✕</span>宿直NG':'宿直 可';nb.setAttribute('aria-pressed',String(nightNg));
 }
+function combine(dayNg,nightNg){return dayNg&&nightNg?'全NG':dayNg?'日NG':nightNg?'宿NG':'OK'}
 window.addEventListener('message',(event)=>{
   if(!event.data||event.data.type!=='streamlit:render')return;
   let a=event.data.args;
@@ -358,14 +370,23 @@ window.addEventListener('message',(event)=>{
         warningSlot.append(warning);
       }
       head.append(day,warningSlot,state);
-      let sel=document.createElement('select');sel.setAttribute('aria-label',d.day+'日のNG設定');
-      d.options.forEach(v=>{let o=document.createElement('option');o.value=v;o.textContent=labels[v];sel.append(o)});
-      sel.value=d.value;
-      sel.onchange=()=>{draft[i]=sel.value;paint(cell,sel.value);document.getElementById('note').textContent='まだ反映していない変更があります。選び終わったら下のボタンを押してください。'};
-      cell.append(head,sel);paint(cell,d.value);strip.append(cell);
+      // 日直・宿直の段を押すと、その勤務だけ 可⇔NG が切り替わる（休日は両方を別々に指定できる）
+      const toggle=(which)=>{
+        let v=draft[i];let dayNg=v==='全NG'||v==='日NG',nightNg=v==='全NG'||v==='宿NG';
+        if(which==='day')dayNg=!dayNg;else nightNg=!nightNg;
+        let nv=combine(dayNg,nightNg);if(!d.options.includes(nv))return;
+        draft[i]=nv;paint(cell,nv);
+        document.getElementById('note').textContent=a.dirty_note||'まだ反映していない変更があります。選び終わったら下のボタンを押してください。';
+      };
+      const tappable=(el,which,label)=>{el.classList.add('tap');el.tabIndex=0;el.setAttribute('role','button');
+        el.setAttribute('aria-label',d.day+'日の'+label);el.onclick=()=>toggle(which);
+        el.onkeydown=(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle(which)}}};
+      if(d.options.includes('日NG'))tappable(dayBand,'day','日直');
+      tappable(nightBand,'night','宿直');
+      cell.append(head);paint(cell,d.value);strip.append(cell);
     });
     if(mode==='month'){let blanks=(7-(a.offset+days.length)%7)%7;for(let i=0;i<blanks;i++){let el=document.createElement('div');el.className='blank';strip.append(el)}}
-    document.getElementById('note').textContent='NGを選ぶと色が変わります。選び終わったら下のボタンを押してください。';
+    document.getElementById('note').textContent='「日直」「宿直」の欄を押すと、可⇔NGが切り替わります（休日は日直と宿直を別々に指定します）。選び終わったら下のボタンを押してください。';
   }
   resize();
 });
@@ -1648,7 +1669,7 @@ def remote_qr_cards_html(cards):
     <div class="howto-title">入力のしかた</div>
     <ol>
       <li>QRコードを読み取り、入力ページを開く</li>
-      <li>当直に入れない日を、カレンダーで選ぶ</li>
+      <li>入れない日の「日直」「宿直」の欄を押して、NGにする</li>
       <li>「NG日とコメントを保存する」を押す</li>
       <li>「✅ 保存しました」が出れば完了</li>
     </ol>
@@ -2077,7 +2098,7 @@ def doctor_entry_page(key):
         placeholder="例：第2週は学会のため、できれば平日の宿直を避けたいです。／ 月4回までを希望します。",
         help="カレンダーの下の保存ボタンを押すと、NG日と一緒に保存されます。",
     )
-    st.caption("NG日を下のカレンダーで選び、カレンダーの下の「保存する」ボタンを押してください。コメントも一緒に保存されます。"
+    st.caption("下のカレンダーで「日直」「宿直」の欄を押してNGにし（休日は日直と宿直が別々です）、カレンダーの下の「保存する」ボタンを押してください。コメントも一緒に保存されます。"
                "コメントだけを直したいときも、同じボタンを押してください（NG日はそのまま）。")
 
     layout = st.radio("表示", ["月間カレンダー", "1日〜月末を横一列"], horizontal=True, key="remote_layout")
@@ -2415,11 +2436,13 @@ NG日の欄にある「📨 先生方からのNG日入力（専用URL）」を�
 
 「NG日を入力する医師」で先生を選び、カレンダーでNG日を選んで「NG日を反映する」を押します。紙やメールで集めた場合はこちらを使います。
 
+カレンダーの「日直」「宿直」の欄を押すと、その勤務だけNGになります（もう一度押すと可に戻ります）。
+
 | NGの種類 | 意味 |
 | --- | --- |
-| 宿NG | 宿直（夜）に入れない。平日はこれを選びます |
-| 日NG | 日直（日中）に入れない。休日だけ選べます |
-| 全NG | 日直・宿直とも入れない。休日だけ選べます |
+| 宿NG | 宿直（夜）に入れない。「宿直」の欄だけ押した状態 |
+| 日NG | 日直（日中）に入れない。休日だけ。「日直」の欄だけ押した状態 |
+| 全NG | 日直・宿直とも入れない。休日だけ。両方の欄を押した状態 |
 | ⚠ | 翌日PMにdutyがあるため、原則その日の宿直を外す日 |
         """)
     with tab_result:
@@ -2911,17 +2934,19 @@ st.divider()
 
 st.markdown("### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
 st.info("先生方に専用URLから入力してもらう場合は、下の「📨 先生方からのNG日入力（専用URL）」を使います。"
-        "管理者が直接入力する場合は、医師を選んでカレンダーでNGを選び、最後に「NG日を反映する」を押してください。")
+        "管理者が直接入力する場合は、医師を選んでカレンダーの「日直」「宿直」の欄を押してNGにし、最後に「NG日を反映する」を押してください。")
 with st.expander("NGの種類・一括操作について", expanded=False):
     st.markdown("""
-| 選択肢 | 意味 |
-| --- | --- |
-| OK | この日についてNGを指定しません。曜日・回数など、ほかの条件は適用されます。 |
-| 全NG | 日直・宿直ともに勤務できません。休日で選べます。 |
-| 日NG | 日直に勤務できません。宿直は候補になります。休日で選べます。 |
-| 宿NG | 宿直に勤務できません。休日なら日直は候補になります。 |
+カレンダーの各日の「日直」「宿直」の欄を押すと、その勤務だけ「可」⇔「NG」が切り替わります。
 
-平日は「OK」「宿NG」から選びます。
+| 表示 | 意味 |
+| --- | --- |
+| 日直 可・宿直 可 | この日についてNGを指定しません（OK）。曜日・回数など、ほかの条件は適用されます。 |
+| 日直NG・宿直NG | 日直・宿直ともに勤務できません（全NG）。休日だけです。 |
+| 日直NGのみ | 日直に勤務できません。宿直は候補になります（日NG）。休日だけです。 |
+| 宿直NGのみ | 宿直に勤務できません。休日なら日直は候補になります（宿NG）。 |
+
+平日は日直がないので、「宿直」の欄だけ押せます。
 「全日NGにする」は平日を宿NG、休日を全NGにし、「すべてOKに戻す」はNG指定を解除します。
 一括操作は押すとすぐ反映されます。確定済み当直・優先度100以上の希望は、NGより優先されます。
 
