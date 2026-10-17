@@ -1659,9 +1659,7 @@ def remote_qr_cards_html(cards):
       <div class="qr-side">
         <div class="big">スマートフォンの<br>カメラで読み取る</div>
         <div class="small">QRコードにカメラを向けると、<br>NG日の入力ページが開きます。</div>
-        <div class="wake"><b>英語の画面（Zzzz…）が出たときは</b><br>
-          しばらく使われていないと、アプリが休止しています。<br>
-          青いボタン「<b>Yes, get this app back up!</b>」を押して、<br>1分ほど待つと入力ページが開きます。</div>
+        <div class="wake"><b>英語の画面（Zzzz…）が出たら</b><br>青いボタン「<b>Yes, get this app back up!</b>」を押して、<br>1分ほどお待ちください。</div>
       </div>
     </div>
     <div class="url">{_html.escape(url)}</div>
@@ -1706,13 +1704,14 @@ body {{ margin: 0; font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiry
 .staple.right svg {{ transform: scaleX(-1); }}
 .staple-svg {{ width: 100%; height: 100%; display: block; }}
 .staple.left {{ left: 5mm; }} .staple.right {{ right: 5mm; }}
-.qr-name {{ font-size: 15pt; font-weight: 700; margin-bottom: 4mm; }}
-.qr-body {{ display: flex; align-items: center; gap: 10mm; }}
+.qr-name {{ font-size: 15pt; font-weight: 700; margin-bottom: 4mm; text-align: center; }}
+.qr-body {{ display: flex; align-items: center; justify-content: center; gap: 7mm; }}
+.qr-side {{ max-width: 92mm; }}
 .qr-side .big {{ font-size: 17pt; font-weight: 700; line-height: 1.4; }}
 .qr-side .small {{ margin-top: 4mm; font-size: 11.5pt; line-height: 1.6; color: #374151; }}
 .qr-side .wake {{ margin-top: 4mm; padding: 2mm 3mm; border: 1px solid #e3b341; background: #fff8e1; border-radius: 1.5mm;
                  font-size: 9.5pt; line-height: 1.55; color: #5b4300; }}
-.url {{ position: absolute; left: 16mm; right: 16mm; bottom: 6mm; font-size: 7.5pt; color: #6b7280; word-break: break-all; font-family: monospace; }}
+.url {{ position: absolute; left: 30mm; right: 30mm; bottom: 6mm; text-align: center; font-size: 7.5pt; color: #6b7280; word-break: break-all; font-family: monospace; }}
 .howto-title {{ font-size: 15pt; font-weight: 700; margin-bottom: 2mm; }}
 .howto ol {{ margin: 0 0 3mm 6mm; padding-left: 5mm; font-size: 12.5pt; line-height: 1.75; }}
 .howto .change {{ margin: 0 0 2.5mm; padding: 1.5mm 3mm; border: 1.5px solid #e8590c; background: #fff4e6; border-radius: 1.5mm; font-size: 10.5pt; line-height: 1.5; color: #3b2a1a; }}
