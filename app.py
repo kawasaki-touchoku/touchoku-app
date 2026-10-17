@@ -1675,6 +1675,7 @@ def remote_qr_cards_html(cards):
       <li>「NG日とコメントを保存する」を押す</li>
       <li>「✅ 保存しました」が出れば完了</li>
     </ol>
+    <div class="change">休日は「日直」と「宿直」を<b>別々に</b>指定します。終日入れない日は<b>両方</b>押してください。</div>
     <ul>
       <li><b>このURLは毎月同じです。</b>ブックマークしておくと便利です。</li>
       <li>締め切りまでは何度でも修正でき、<b>最後に保存した内容</b>が採用されます。</li>
@@ -1711,6 +1712,7 @@ body {{ margin: 0; font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiry
 .url {{ position: absolute; left: 16mm; right: 16mm; bottom: 6mm; font-size: 7.5pt; color: #6b7280; word-break: break-all; font-family: monospace; }}
 .howto-title {{ font-size: 15pt; font-weight: 700; margin-bottom: 2mm; }}
 .howto ol {{ margin: 0 0 3mm 6mm; padding-left: 5mm; font-size: 12.5pt; line-height: 1.75; }}
+.howto .change {{ margin: 0 0 2.5mm; padding: 1.5mm 3mm; border: 1.5px solid #e8590c; background: #fff4e6; border-radius: 1.5mm; font-size: 10.5pt; line-height: 1.5; color: #3b2a1a; }}
 .howto ul {{ margin: 0; padding-left: 5mm; font-size: 10.5pt; line-height: 1.65; color: #374151; }}
 @media print {{ body {{ background: #fff; }} .bar {{ display: none; }} .sheet {{ margin: 0; box-shadow: none; }} }}
 </style></head><body>
@@ -2102,6 +2104,30 @@ def doctor_entry_page(key):
     )
     st.caption("下のカレンダーで「日直」「宿直」の欄を押してNGにし（休日は日直と宿直が別々です）、カレンダーの下の「保存する」ボタンを押してください。コメントも一緒に保存されます。"
                "コメントだけを直したいときも、同じボタンを押してください（NG日はそのまま）。")
+
+    # 以前の紙の用紙（休日は日直・宿直まとめて×）から変わった点を、カレンダーのすぐ上で強調する
+    st.markdown("""
+<div style="border:2px solid #e8590c;background:#fff4e6;border-radius:10px;padding:12px 14px;margin:6px 0 10px">
+ <div style="font-weight:800;font-size:1.05rem;color:#c2410c">⚠ 休日は「日直」と「宿直」を別々に指定します</div>
+ <div style="margin-top:4px;font-size:.95rem;color:#3b2a1a">終日入れない日は、<b>両方</b>押してください。</div>
+ <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:.85rem;font-weight:700">
+  <div style="text-align:center;width:100px">
+   <div style="width:96px;border:1px solid #d6dce5;border-radius:5px;overflow:hidden">
+    <div style="background:#b42332;color:#fff;padding:5px 0">✕ 日直NG</div>
+    <div style="background:#b42332;color:#fff;padding:5px 0;border-top:1px solid #fff">✕ 宿直NG</div></div>
+   <div style="margin-top:4px;color:#3b2a1a">終日NG</div></div>
+  <div style="text-align:center;width:100px">
+   <div style="width:96px;border:1px solid #d6dce5;border-radius:5px;overflow:hidden">
+    <div style="background:#e3f5e9;color:#12692f;padding:5px 0">○ 日直 可</div>
+    <div style="background:#b42332;color:#fff;padding:5px 0">✕ 宿直NG</div></div>
+   <div style="margin-top:4px;color:#3b2a1a">宿直だけNG<br><span style="color:#c2410c">日直は入れる</span></div></div>
+  <div style="text-align:center;width:100px">
+   <div style="width:96px;border:1px solid #d6dce5;border-radius:5px;overflow:hidden">
+    <div style="background:#b42332;color:#fff;padding:5px 0">✕ 日直NG</div>
+    <div style="background:#e3f5e9;color:#12692f;padding:5px 0">○ 宿直 可</div></div>
+   <div style="margin-top:4px;color:#3b2a1a">日直だけNG<br><span style="color:#c2410c">宿直は入れる</span></div></div>
+ </div>
+</div>""", unsafe_allow_html=True)
 
     layout = st.radio("表示", ["月間カレンダー", "1日〜月末を横一列"], horizontal=True, key="remote_layout")
     pm_weekdays = pm_duty_weekdays(tokens[doctor].get("翌日PM duty", ""))
