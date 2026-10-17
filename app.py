@@ -2477,6 +2477,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 4. **NG日を集める**：先生方に専用URLから入力してもらい、管理画面で取り込みます（「NG日の集め方」のタブを参照）。
 5. **不足時の優先順位を確認（任意）**：人数が足りない月に、どの枠から埋めるかを決めます。
 6. **「この条件で当直案を作成する」を押す**：押すたびに違うパターンの案ができます。気に入った案が出るまで押し直して構いません。
+   画面右下の「🚀 当直案を作成」ボタンは、どこまでスクロールしていても押せます。結果（未決定の枠の数）もそこに出るので、条件を直しては作り直す作業が、その場でくり返せます。
 7. **結果を確認してダウンロード**：「医師別の当直一覧」をExcelで、「作成した当直案」をCSVでダウンロードできます。
 
 **途中で中断するとき**は、画面右上の「💾 作業を途中保存する」を押してください。スクロールしても右上に付いてくるので、いつでも押せます（管理用パスワードが必要です）。
@@ -2592,10 +2593,11 @@ st.markdown("""
 </style>""", unsafe_allow_html=True)
 
 
-def section_banner(icon, title, sub="", tag="", first=False):
+def section_banner(icon, title, sub="", tag="", first=False, anchor=""):
     tag_html = f'<span class="tag">{tag}</span>' if tag else ""
     sub_html = f'<div class="s">{sub}</div>' if sub else ""
-    st.markdown(f'<div class="sec-banner{" first" if first else ""}"><span class="ic">{icon}</span>'
+    id_html = f' id="{anchor}"' if anchor else ""
+    st.markdown(f'<div{id_html} class="sec-banner{" first" if first else ""}"><span class="ic">{icon}</span>'
                 f'<div><div class="t">{title}</div>{sub_html}</div>{tag_html}</div>', unsafe_allow_html=True)
 
 
@@ -2615,6 +2617,38 @@ else:
 
 # 画面右上の帯に「前回の作業の続きから始める」「作業を途中保存する」を置く
 work_save_floating()
+
+# --- 画面右下に固定する「当直案を作成」ボタン ---
+# 条件を直す → 作成し直す、を行ったり来たりせずに繰り返せるように、どこまでスクロールしていても押せるようにする。
+# 結果（未決定の枠の数）もここに出し、各項目へすぐ移動できるリンクも置く。
+st.markdown("""
+<style>
+.st-key-create_bar{position:fixed;right:1.2rem;bottom:3.6rem;z-index:1000001;width:auto !important;max-width:300px;
+  background:#fff;border:1px solid #cfd6e0;border-radius:14px;padding:10px 12px 8px;box-shadow:0 8px 24px rgba(16,24,40,.18);gap:6px !important}
+.st-key-create_bar button{width:100%;min-height:2.6rem;font-weight:800}
+.st-key-create_bar p{margin:0}
+.cb-res{font-size:.85rem;font-weight:700;line-height:1.4}
+.cb-res.ok{color:#2f8a5b}.cb-res.bad{color:#c2410c}.cb-res.wait{color:#566174}
+.cb-nav{display:flex;gap:6px;flex-wrap:wrap;font-size:.8rem}
+.cb-nav a{flex:1;text-align:center;text-decoration:none;color:#2f4a6d !important;background:#eef3f8;border-radius:6px;padding:3px 6px;white-space:nowrap}
+.cb-nav a:hover{background:#dde7f2}
+@media (max-width:600px){.st-key-create_bar{right:.5rem;bottom:3.2rem;max-width:210px;padding:7px 8px}.cb-nav{font-size:.72rem}}
+</style>""", unsafe_allow_html=True)
+create_bar_request = False
+with st.container(key="create_bar"):
+    if st.button("🚀 当直案を作成", key="create_bar_button", type="primary"):
+        create_bar_request = True
+    CREATE_BAR_SLOT = st.empty()
+    _last = st.session_state.get("create_bar_summary")
+    if create_bar_request:
+        CREATE_BAR_SLOT.markdown("<div class='cb-res wait'>計算しています…（最大75秒）</div>", unsafe_allow_html=True)
+    elif st.session_state.get("result_needs_refresh"):
+        CREATE_BAR_SLOT.markdown("<div class='cb-res wait'>条件が変わりました。もう一度作成してください。</div>", unsafe_allow_html=True)
+    elif _last:
+        CREATE_BAR_SLOT.markdown(_last, unsafe_allow_html=True)
+    _res_anchor = "#sec-result" if "generated_df" in st.session_state else "#sec-create"
+    st.markdown("<div class='cb-nav'><a href='#sec-staff' target='_self'>医師条件</a><a href='#sec-ng' target='_self'>NG日</a>"
+                f"<a href='{_res_anchor}' target='_self'>結果</a></div>", unsafe_allow_html=True)
 
 if "sel_year" not in st.session_state:
     st.session_state["sel_year"] = default_year
@@ -2860,7 +2894,7 @@ with st.container(key="fixed_section"), st.expander("📅 先月今月来月の�
     edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
     edited_fixed_df = edited_fixed_df_raw.reset_index()
 
-section_banner("👩‍⚕️", "医師条件の読み込み・入力", "先生ごとの回数・間隔・希望日とNG日を入力します", "必須")
+section_banner("👩‍⚕️", "医師条件の読み込み・入力", "先生ごとの回数・間隔・希望日とNG日を入力します", "必須", anchor="sec-staff")
 st.info("下の表に医師ごとの条件を入力してください。CSVを使う場合は、ひな形をダウンロードして編集し、アップロードします。NG日は、この後の医師別カレンダーで設定します。")
 st.caption("最初に表示される5名は入力例です。実際の医師名・条件に置き換えてください。希望優先度は通常「1」を使用します。")
 with st.expander("入力例：曜日・希望日・備考", expanded=False):
@@ -3015,6 +3049,8 @@ if _notes:
 staff_df, staff_input_errors = validate_staff_inputs(staff_df, year, month)
 if staff_input_errors:
     show_input_errors(staff_input_errors)
+    if create_bar_request:
+        CREATE_BAR_SLOT.markdown("<div class='cb-res bad'>⚠ 医師条件の入力に誤りがあります。赤い表示を確認してください。</div>", unsafe_allow_html=True)
     st.stop()
 
 st.markdown("### ⚖️ 必要枠数と担当可能回数の目安")
@@ -3032,6 +3068,7 @@ if "月間最大回数" in staff_df.columns:
         c3.metric("🚨 担当可能回数 − 必要枠数", f"{margin} 回分", delta_color="inverse")
 st.divider()
 
+st.markdown("<div id='sec-ng'></div>", unsafe_allow_html=True)
 st.markdown("### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
 st.info("先生方に専用URLから入力してもらう場合は、下の「📨 先生方からのNG日入力（専用URL）」を使います。"
         "管理者が直接入力する場合は、医師を選んでカレンダーの「日直」「宿直」のボタンを押してNGにし、最後に「NG日を反映する」を押してください。")
@@ -3296,7 +3333,7 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
-section_banner("🎯", "当直案の作成・確認", "不足時の優先順位を確認して、当直案を作ります")
+section_banner("🎯", "当直案の作成・確認", "不足時の優先順位を確認して、当直案を作ります", anchor="sec-create")
 st.subheader("🎯 人数が足りないときに優先して埋める枠（任意）")
 st.info("全員の条件を満たす当直表が作れない場合に、どの枠から優先して埋めるかを決めます。数字が小さいほど優先し、同じ数字の枠は同順位として扱います。")
 st.caption("人数が足りている月は、この設定は結果に影響しません。初期設定は、A宿直・B宿直・A日直・B日直が1、外来宿直が2、外来日直が3です。")
@@ -3357,18 +3394,23 @@ staff_df = staff_df.dropna(subset=['先生の名前']).reset_index(drop=True)
 fixed_df, fixed_input_errors = validate_fixed_inputs(edited_fixed_df, staff_df['先生の名前'].tolist(), year, month, custom_holidays)
 if fixed_input_errors:
     show_input_errors(fixed_input_errors)
+    if create_bar_request:
+        CREATE_BAR_SLOT.markdown("<div class='cb-res bad'>⚠ 確定当直の入力に誤りがあります。赤い表示を確認してください。</div>", unsafe_allow_html=True)
     st.stop()
 current_signature = input_signature(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority)
 if 'generated_df' in st.session_state and st.session_state.get('generated_signature') != current_signature:
     for key in ['generated_df', 'past_worked_dates', 'future_worked_dates', 'generated_warnings', 'generated_signature', 'generated_year', 'generated_month']:
         st.session_state.pop(key, None)
     st.session_state['result_needs_refresh'] = True
+    st.session_state.pop("create_bar_summary", None)
+    if not create_bar_request:
+        CREATE_BAR_SLOT.markdown("<div class='cb-res wait'>条件が変わりました。もう一度作成してください。</div>", unsafe_allow_html=True)
 if st.session_state.get('result_needs_refresh'):
     st.warning("条件が変更されています。再作成してください。前回の結果表示とダウンロードを停止しました。")
 
 if len(staff_df) > 0:
     with create_button_container:
-        create_clicked = st.button("🚀 この条件で当直案を作成する", type="primary", use_container_width=True)
+        create_clicked = st.button("🚀 この条件で当直案を作成する", type="primary", use_container_width=True) or create_bar_request
         st.caption("※ 押すたびに、同じ条件でも違うパターンの当直表を作ります。気に入った案は、下のボタンからダウンロードしてください（作成した当直案は途中保存には含まれません）。")
     if create_clicked:
         with st.spinner("当直案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
@@ -3393,6 +3435,9 @@ if len(staff_df) > 0:
                 st.session_state.pop('generated_df', None)
                 with result_notice_container:
                     show_schedule_notice(None, [f"当直計算中にエラーが発生しました。詳細: {e}"])
+        if 'generated_df' not in st.session_state:
+            st.session_state.pop("create_bar_summary", None)
+            CREATE_BAR_SLOT.markdown("<div class='cb-res bad'>⚠ 当直案を作れませんでした。「結果」で理由を確認してください。</div>", unsafe_allow_html=True)
 
     if 'generated_df' in st.session_state:
         year = st.session_state['generated_year']
@@ -3409,11 +3454,19 @@ if len(staff_df) > 0:
         def split_names(value):
             return [x.strip() for x in re.split(r'[、,]', str(value))]
 
+        st.markdown("<div id='sec-result'></div>", unsafe_allow_html=True)
         st.subheader("🗓️ 医師別の当直一覧")
         st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。希望日が通った当直は茶色の太い枠で囲みます。")
         matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday,
                                                      comments=remote_comments_safe(year, month))
         missing_total = sum(len(info['shortage']) for info in matrix_days)
+        # 右下の「当直案を作成」ボタンの下に、結果のまとめを出す
+        _t = remote_now()[-8:-3]
+        _summary = (f"<div class='cb-res bad'>⚠ {_t} 作成：未決定 {missing_total}枠</div>" if missing_total
+                    else f"<div class='cb-res ok'>✅ {_t} 作成：全枠決定</div>")
+        if create_clicked or not st.session_state.get("create_bar_summary"):
+            st.session_state["create_bar_summary"] = _summary
+        CREATE_BAR_SLOT.markdown(st.session_state["create_bar_summary"], unsafe_allow_html=True)
         if missing_total:
             st.warning(f"当直が決まっていない枠が{missing_total}枠あります。表の一番下（赤線の下）で確認できます。")
         st.markdown(duty_matrix_html(matrix_days, matrix_rows, year, month), unsafe_allow_html=True)
