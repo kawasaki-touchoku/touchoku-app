@@ -1989,7 +1989,7 @@ WORK_SAVE_FLOAT_CSS = """
 <style>
 /* 画面いちばん上の帯（右上に Fork・⋮ がある白い帯）の空いている所に置く。表や入力欄には重ならない */
 .st-key-work_save_float {
-    position: fixed; top: 0.45rem; left: 1rem; right: auto; z-index: 1000002;
+    position: fixed; top: 0.45rem; left: 1rem; right: auto; z-index: 1000002; margin: 0 !important;
     width: auto !important; max-width: 60vw;
     display: flex !important; flex-direction: row !important; align-items: center; gap: 10px;
     background: transparent;
@@ -2652,7 +2652,7 @@ st.markdown("""
 <style>
 .st-key-create_bar{position:fixed;left:0;right:0;bottom:0;z-index:1000001;width:auto !important;height:64px !important;min-height:0 !important;
   display:flex !important;flex-direction:row !important;align-items:center !important;gap:14px !important;
-  padding:0 9rem 0 1.5rem;background:rgba(255,255,255,.96);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+  padding:0 9rem 0 1rem;background:rgba(255,255,255,.96);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
   border-top:1px solid #e3e7ed;box-shadow:0 -2px 10px rgba(16,24,40,.06);overflow:visible !important}
 .st-key-create_bar > div{width:auto !important;flex:0 0 auto !important;margin:0 !important}
 .st-key-create_bar [data-testid="stElementContainer"],.st-key-create_bar [data-testid="stMarkdownContainer"],
@@ -2660,7 +2660,9 @@ st.markdown("""
 /* 並び：いちばん左に作成ボタン、その右に移動リンク、右端に結果 */
 .st-key-create_bar > div:has(button){order:1}
 .st-key-create_bar > div:has(.cb-box){order:2;flex:1 1 auto !important}
-.st-key-create_bar button{min-height:2.7rem;padding:0 1.6rem;font-size:1rem;font-weight:800;white-space:nowrap}
+.st-key-create_bar button{min-height:2.7rem;padding:0 1.5rem 0 1.15rem;font-size:1rem;font-weight:800;white-space:nowrap}
+/* 絵文字の前に入る余白をなくし、ボタンの左右の余白を見た目でそろえる */
+.st-key-create_bar button p{margin:0;letter-spacing:.01em}
 .st-key-create_bar p{margin:0}
 .cb-box{display:flex;flex-direction:row;align-items:center;gap:14px;width:100%}
 .cb-res{margin-left:auto;font-size:.9rem;font-weight:800;line-height:1.4;white-space:nowrap}
@@ -2672,7 +2674,7 @@ st.markdown("""
 [data-testid="stMainBlockContainer"],.block-container{padding-bottom:6.5rem !important}
 @media (max-width:600px){
   /* スマートフォン：右下にはStreamlitのマークが出るので、右側を空ける */
-  .st-key-create_bar{height:58px !important;padding:0 7.5rem 0 .6rem;gap:8px !important}
+  .st-key-create_bar{height:58px !important;padding:0 7.5rem 0 .5rem;gap:8px !important}
   .st-key-create_bar button{padding:0 .9rem;font-size:.9rem}
   .cb-nav{display:none}.cb-res{margin-left:0;font-size:.75rem;white-space:normal}
 }
