@@ -321,7 +321,7 @@ body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI"
  .month .blank{border-radius:8px}
 }
 </style><body>
-<div class="legend"><span><i style="background:var(--day)"></i>日直NG</span><span><i style="background:var(--night)"></i>宿直NG</span><span><i style="background:var(--hol);border:1px solid var(--holline)"></i>休日</span><span><b class="pm" style="font-size:11px">⚠︎<small>翌日PM duty</small></b></span><span>押すと「可」⇔「NG」が切り替わります</span></div>
+
 <div id="strip" class="strip" aria-label="NG日カレンダー"></div><div id="note"></div><button id="apply" type="button">NG日を反映する</button><script>
 let version=null,days=[],draft=[];let mode='row';let frameHeight=0;
 function send(type,data={}){window.parent.postMessage({isStreamlitMessage:true,type,...data},'*')}
@@ -632,9 +632,10 @@ def duty_matrix_html(days, rows, year, month):
 .dm{border-collapse:collapse;font:12px system-ui,sans-serif;white-space:nowrap;background:#fff;color:#243247}
 .dm th,.dm td{border:1px solid #d8dde5;padding:0;text-align:center;height:26px}
 .dm thead th{background:#f3f5f8;font-weight:700;padding:2px 3px;min-width:30px}
-.dm .nm{position:sticky;left:0;background:#fff;text-align:left;padding:0 8px;font-weight:600;z-index:1;min-width:90px}
+.dm .nm{position:sticky;left:0;background:#fff;text-align:left;padding:0 5px;font-weight:600;z-index:1;min-width:52px;white-space:nowrap}
 .dm thead .nm{background:#f3f5f8;z-index:2}
-.dm .pmcol{padding:0 6px;color:#566174}
+.dm .pmcol{padding:0 3px;color:#566174;font-size:11px;min-width:34px}
+.dm thead .pmcol{line-height:1.2}
 .dm td.hol{background:#fdf1f1}
 .dm .cell{display:flex;align-items:center;justify-content:center;height:100%;min-height:26px;font-weight:700;font-size:10px;padding:1px 2px;width:38px;margin:0 auto;white-space:normal;line-height:1.15;text-align:center;word-break:keep-all}
 .dm .ng{color:#c0392b;font-size:14px}
@@ -643,8 +644,8 @@ def duty_matrix_html(days, rows, year, month):
 .dm tr.short td.nm{color:#c0392b}
 .dm th.miss{background:#fde2e0}
 .dm .sum{padding:0 6px;font-weight:700;min-width:34px}
-.dm .memo{min-width:56px;text-align:left;padding:0 4px;font-size:11px;vertical-align:top}
-.dm .memo details summary{cursor:pointer;list-style:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:116px;color:#425268}
+.dm .memo{min-width:40px;width:60px;text-align:left;padding:0 4px;font-size:11px;vertical-align:top}
+.dm .memo details summary{cursor:pointer;list-style:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:56px;color:#425268}
 .dm .memo details summary::-webkit-details-marker{display:none}
 .dm .memo details[open] summary{color:#1f3c74;font-weight:700}
 .dm .memo .full{white-space:normal;width:220px;padding:4px 6px;margin:2px 0 4px;background:#f6f8fb;border:1px solid #d8dde5;border-radius:4px;line-height:1.45}
@@ -663,7 +664,7 @@ def duty_matrix_html(days, rows, year, month):
     legend.append('<span><i style="color:#c0392b;border-color:#c0392b">⚠️ 未決定</i>赤線の下：当直が決まっていない枠</span>')
     legend.append('</div>')
 
-    head = ['<tr><th class="nm">名前</th><th class="pmcol">翌日PM duty</th><th class="memo">メモ</th>']
+    head = ['<tr><th class="nm">名前</th><th class="pmcol">翌日<br>PM duty</th><th class="memo">メモ</th>']
     for info in days:
         miss_class = ' class="miss"' if info['shortage'] else ''
         head.append(f'<th{miss_class} style="color:{head_color(info)}">{info["day"]}<br>{info["weekday"]}</th>')
