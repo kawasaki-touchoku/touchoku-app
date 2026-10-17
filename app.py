@@ -1636,6 +1636,9 @@ def remote_qr_cards_html(cards):
       <div class="qr-side">
         <div class="big">スマートフォンの<br>カメラで読み取る</div>
         <div class="small">QRコードにカメラを向けると、<br>NG日の入力ページが開きます。</div>
+        <div class="wake"><b>英語の画面（Zzzz…）が出たときは</b><br>
+          しばらく使われていないと、アプリが休止しています。<br>
+          青いボタン「<b>Yes, get this app back up!</b>」を押して、<br>1分ほど待つと入力ページが開きます。</div>
       </div>
     </div>
     <div class="url">{_html.escape(url)}</div>
@@ -1680,6 +1683,8 @@ body {{ margin: 0; font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiry
 .qr-body {{ display: flex; align-items: center; gap: 10mm; }}
 .qr-side .big {{ font-size: 17pt; font-weight: 700; line-height: 1.4; }}
 .qr-side .small {{ margin-top: 4mm; font-size: 11.5pt; line-height: 1.6; color: #374151; }}
+.qr-side .wake {{ margin-top: 4mm; padding: 2mm 3mm; border: 1px solid #e3b341; background: #fff8e1; border-radius: 1.5mm;
+                 font-size: 9.5pt; line-height: 1.55; color: #5b4300; }}
 .url {{ position: absolute; left: 16mm; right: 16mm; bottom: 6mm; font-size: 7.5pt; color: #6b7280; word-break: break-all; font-family: monospace; }}
 .howto-title {{ font-size: 15pt; font-weight: 700; margin-bottom: 2mm; }}
 .howto ol {{ margin: 0 0 3mm 6mm; padding-left: 5mm; font-size: 12.5pt; line-height: 1.75; }}
@@ -2391,8 +2396,6 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位がまとめて途中保存され、
 次回は画面右上の「📂 前回の作業の続きから始める」で元に戻せます。途中保存は、ボタンを押したときだけ行われます（当直案の作成では保存されません）。
 
-※「保存」はアプリの保存先（スプレッドシート）に残すこと、「ダウンロード」はパソコンなどにファイルとして取り出すことです。
-「医師条件をCSVでダウンロード」は、医師条件だけをファイルとして手元に残したいときに使います。
         """)
     with tab_ng:
         st.markdown("""
@@ -2403,6 +2406,7 @@ NG日の欄にある「📨 先生方からのNG日入力（専用URL）」を�
 1. **受付を開始**：締め切り日を書いて「受付を開始する」を押します。
 2. **URLを配る（初回だけ）**：「配布用カード（QRコード付き）」を印刷して、各先生に渡します。URLは毎月同じなので、翌月からは「入力が始まりました」と伝えるだけです。
 3. **先生が入力**：先生はスマートフォンのカメラでQRコードを読み取り、カレンダーでNG日を選んで保存します。管理者へのコメントも書けます。締め切りまでは何度でも直せて、最後に保存した内容が採用されます。
+   アプリは12時間ほど誰も開かないと休止し、英語の画面（Zzzz…）が出ます。青いボタン「Yes, get this app back up!」を押して1分ほど待つと開きます（配布用カードにも書いてあります）。
 4. **提出状況を確認**：管理画面の表で、提出済み・未提出・コメントを確認できます。
 5. **締め切る**：「締め切る」を押すと、先生側は編集できなくなります。
 6. **取り込む**：「提出されたNG日を取り込む」を押すと、全員分が下のNGカレンダーに入ります。その先生のNG日は、提出内容に置き換わります。取り込んだあとも個別に直せます。
