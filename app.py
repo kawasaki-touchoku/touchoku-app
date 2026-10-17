@@ -3001,17 +3001,22 @@ if not valid_staff.empty:
         mark = "　💬" if name in doctor_comments or doctor_notes.get(name) else ""
         return (f"{name}（NG {count}日）" if count else f"{name}（NGなし）") + mark
 
-    def move_ng_doctor(step):
-        i = doctor_names.index(st.session_state["ng_selected_doctor"])
-        st.session_state["ng_selected_doctor"] = doctor_names[(i + step) % len(doctor_names)]
+    def move_ng_doctor(step, names):
+        # 名前の一覧は押したときの画面のものを受け取る。
+        # 選択中の医師が一覧にない場合（名前を書き換えた・CSVを読み込み直した直後など）は先頭の医師にする
+        if not names:
+            return
+        current = st.session_state.get("ng_selected_doctor")
+        i = names.index(current) if current in names else -step
+        st.session_state["ng_selected_doctor"] = names[(i + step) % len(names)]
 
     sel_col, prev_col, next_col = st.columns([6, 1.2, 1.2])
     selected_doc = sel_col.selectbox("NG日を入力する医師", doctor_names, key="ng_selected_doctor", format_func=ng_doctor_label)
     # ボタンの高さを選択欄にそろえるための余白
     prev_col.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
     next_col.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
-    prev_col.button("◀ 前の医師", key="ng_prev_doctor", on_click=move_ng_doctor, args=(-1,), use_container_width=True)
-    next_col.button("次の医師 ▶", key="ng_next_doctor", on_click=move_ng_doctor, args=(1,), use_container_width=True)
+    prev_col.button("◀ 前の医師", key="ng_prev_doctor", on_click=move_ng_doctor, args=(-1, list(doctor_names)), use_container_width=True)
+    next_col.button("次の医師 ▶", key="ng_next_doctor", on_click=move_ng_doctor, args=(1, list(doctor_names)), use_container_width=True)
 
     for t_idx, doc_name in enumerate(doctor_names):
         original_idx = valid_staff.index[t_idx]
