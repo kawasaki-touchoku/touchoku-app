@@ -287,10 +287,10 @@ HORIZONTAL_NG_HTML = r"""<!doctype html><html lang="ja"><meta charset="utf-8"><m
 .band.tap:focus-visible{outline:3px solid #4789ff;outline-offset:-3px}
 .band .mark{font-size:12px;font-weight:900}
 /* 「可」の段は緑で目立たせる（休日に日直の指定を忘れていないか一目で分かるように） */
-.band.ok{background:#e3f5e9 !important;color:#12692f !important;font-weight:800;box-shadow:inset 0 0 0 1px #8fd0a5}
+.band.ok{background:#e9f3ec !important;color:#2c5e3d !important;font-weight:800;box-shadow:inset 0 0 0 1px #b5d3bf}
 /* 日直NGは赤、宿直NGは青（休日・平日とも同じ） */
-.cell[data-state="全NG"] .day-band,.cell[data-state="日NG"] .day-band{background:#b42332;color:#fff}
-.cell[data-state="全NG"] .night-band,.cell[data-state="宿NG"] .night-band{background:#1856a4;color:#fff}
+.cell[data-state="全NG"] .day-band,.cell[data-state="日NG"] .day-band{background:#c4404a;color:#fff}
+.cell[data-state="全NG"] .night-band,.cell[data-state="宿NG"] .night-band{background:#2f62ad;color:#fff}
 .warning-slot{height:22px;min-height:22px;display:flex;align-items:center;justify-content:center}
 .weekday-warning{color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:4px;padding:0 4px;font-size:14px;font-weight:900;line-height:20px}
 .blank{min-height:176px}
@@ -326,8 +326,8 @@ HORIZONTAL_NG_HTML = r"""<!doctype html><html lang="ja"><meta charset="utf-8"><m
  .month .blank{min-height:146px !important}
 }
 /* 休日（土日祝・特別休日）はマスの背景をピンクにして、平日とはっきり分ける */
-.cell[data-holiday="true"],.month .cell[data-holiday="true"]{background:#ffe4e8 !important;border-color:#e58a97 !important}
-.cell[data-holiday="true"] .state{border-color:#e58a97}
+.cell[data-holiday="true"],.month .cell[data-holiday="true"]{background:#fcf1f2 !important;border-color:#e6c3c8 !important}
+.cell[data-holiday="true"] .state{border-color:#e6c3c8}
 </style><body><div id="strip" class="strip" aria-label="NG日カレンダー"></div><div id="note" class="note">左右へスクロールして選択できます。</div><button id="apply" type="button">NG日を反映する</button><script>
 let version=null,days=[],draft=[];let mode='row';let frameHeight=0;
 function send(type,data={}){window.parent.postMessage({isStreamlitMessage:true,type,...data},'*')}
@@ -1833,12 +1833,12 @@ const cw = (W - 100) / 7, x0 = 50, y0 = topY;
   g.font = F(28, 700); g.textAlign = 'center'; g.fillText(w, x0 + cw * i + cw / 2, y0 + 40);
 });
 g.textAlign = 'left';
-const DAY_NG = '#b42332', NIGHT_NG = '#1856a4';   // 日直NGは赤、宿直NGは青
+const DAY_NG = '#c4404a', NIGHT_NG = '#2f62ad';   // 日直NGは赤、宿直NGは青
 let count = 0;
 D.days.forEach((day, i) => {
   const p = D.offset + i, col = p % 7, row = Math.floor(p / 7);
   const x = x0 + col * cw, y = y0 + 60 + row * cellH;
-  g.fillStyle = day.hol ? '#ffe4e8' : '#ffffff'; g.fillRect(x, y, cw, cellH);
+  g.fillStyle = day.hol ? '#fcf1f2' : '#ffffff'; g.fillRect(x, y, cw, cellH);
   g.strokeStyle = '#cbd2dc'; g.lineWidth = 2; g.strokeRect(x, y, cw, cellH);
   g.fillStyle = day.sat ? '#1670c5' : day.hol ? '#c92336' : '#243247';
   g.font = F(30, 700); g.fillText(String(day.d), x + 12, y + 40);
@@ -2112,18 +2112,18 @@ def doctor_entry_page(key):
  <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:.85rem;font-weight:700">
   <div style="text-align:center;width:100px">
    <div style="width:96px;border:1px solid #d6dce5;border-radius:5px;overflow:hidden">
-    <div style="background:#b42332;color:#fff;padding:5px 0">✕ 日直NG</div>
-    <div style="background:#1856a4;color:#fff;padding:5px 0">✕ 宿直NG</div></div>
+    <div style="background:#c4404a;color:#fff;padding:5px 0">✕ 日直NG</div>
+    <div style="background:#2f62ad;color:#fff;padding:5px 0">✕ 宿直NG</div></div>
    <div style="margin-top:4px;color:#3b2a1a">終日NG</div></div>
   <div style="text-align:center;width:100px">
    <div style="width:96px;border:1px solid #d6dce5;border-radius:5px;overflow:hidden">
-    <div style="background:#e3f5e9;color:#12692f;padding:5px 0">○ 日直 可</div>
-    <div style="background:#1856a4;color:#fff;padding:5px 0">✕ 宿直NG</div></div>
+    <div style="background:#e9f3ec;color:#2c5e3d;padding:5px 0">○ 日直 可</div>
+    <div style="background:#2f62ad;color:#fff;padding:5px 0">✕ 宿直NG</div></div>
    <div style="margin-top:4px;color:#3b2a1a">宿直だけNG<br><span style="color:#c2410c">日直は入れる</span></div></div>
   <div style="text-align:center;width:100px">
    <div style="width:96px;border:1px solid #d6dce5;border-radius:5px;overflow:hidden">
-    <div style="background:#b42332;color:#fff;padding:5px 0">✕ 日直NG</div>
-    <div style="background:#e3f5e9;color:#12692f;padding:5px 0">○ 宿直 可</div></div>
+    <div style="background:#c4404a;color:#fff;padding:5px 0">✕ 日直NG</div>
+    <div style="background:#e9f3ec;color:#2c5e3d;padding:5px 0">○ 宿直 可</div></div>
    <div style="margin-top:4px;color:#3b2a1a">日直だけNG<br><span style="color:#c2410c">宿直は入れる</span></div></div>
  </div>
 </div>""", unsafe_allow_html=True)
