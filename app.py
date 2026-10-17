@@ -2588,6 +2588,7 @@ st.markdown("""
   border-bottom:1px solid #e3e7ed;box-shadow:0 2px 10px rgba(16,24,40,.06)}
 /* 下の帯のリンクで移動したとき、画面上部の帯（ボタンの並ぶ所）に見出しが隠れないよう、少し上に余白を取って止める */
 #sec-staff,#sec-ng,#sec-create,#sec-result{scroll-margin-top:5.5rem}
+.sec-banner[id]{scroll-margin-top:5.5rem}
 /* 折りたたみ式の項目（確定当直）も、同じ帯の見た目にする */
 .st-key-fixed_section{margin:2.6rem 0 .4rem}
 .st-key-fixed_section [data-testid="stExpander"] details{border:0;border-radius:12px;overflow:hidden;box-shadow:0 2px 6px rgba(31,52,82,.18)}
@@ -3097,10 +3098,7 @@ if "月間最大回数" in staff_df.columns:
         c3.metric("✨ 担当可能回数 − 必要枠数", f"+{margin} 回分")
     else:
         c3.metric("🚨 担当可能回数 − 必要枠数", f"{margin} 回分", delta_color="inverse")
-st.divider()
-
-st.markdown("<div id='sec-ng'></div>", unsafe_allow_html=True)
-st.markdown("### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
+section_banner("🚫", "先生ごとのNG日設定", "先生を選んでカレンダーでNG日を指定します。専用URLで集めたNG日の取り込みもここで行います", anchor="sec-ng")
 st.info("先生方に専用URLから入力してもらう場合は、下の「📨 先生方からのNG日入力（専用URL）」を使います。"
         "管理者が直接入力する場合は、医師を選んでカレンダーの「日直」「宿直」のボタンを押してNGにし、最後に「NG日を反映する」を押してください。")
 with st.expander("NGの種類・一括操作について", expanded=False):
