@@ -1670,7 +1670,7 @@ def remote_qr_cards_html(cards):
   <div class="panel cover">
     <div class="cover-title">当直NG日 入力用カード</div>
     <div class="cover-name">{n} 先生</div>
-    <div class="staple left"><svg class="staple-svg" viewBox="0 0 20 60" xmlns="http://www.w3.org/2000/svg" aria-label="ホチキス止めの位置"><path d="M15 6 H6 Q4 6 4 8 V52 Q4 54 6 54 H15" fill="none" stroke="#a3aab5" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.2 10 V50" stroke="#d5dae1" stroke-width="1" stroke-linecap="round"/></svg></div><div class="stapler left"><svg class="stapler-svg" viewBox="0 0 130 84" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="#b4bac4" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M30 6 L104 34 A20 20 0 0 1 104 74 L14 74 Q8 74 8 68 L8 64 Q8 58 14 58 L74 58"/><path d="M30 6 Q24 4 22 10 L16 30 L80 52"/><path d="M16 30 L14 38 L30 44 L32 37"/><circle cx="98" cy="54" r="8"/></svg></div><div class="staple right"><svg class="staple-svg" viewBox="0 0 20 60" xmlns="http://www.w3.org/2000/svg" aria-label="ホチキス止めの位置"><path d="M15 6 H6 Q4 6 4 8 V52 Q4 54 6 54 H15" fill="none" stroke="#a3aab5" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.2 10 V50" stroke="#d5dae1" stroke-width="1" stroke-linecap="round"/></svg></div><div class="stapler right"><svg class="stapler-svg" viewBox="0 0 130 84" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="#b4bac4" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M30 6 L104 34 A20 20 0 0 1 104 74 L14 74 Q8 74 8 68 L8 64 Q8 58 14 58 L74 58"/><path d="M30 6 Q24 4 22 10 L16 30 L80 52"/><path d="M16 30 L14 38 L30 44 L32 37"/><circle cx="98" cy="54" r="8"/></svg></div>
+    <div class="staple left"><svg class="staple-svg" viewBox="0 0 20 60" xmlns="http://www.w3.org/2000/svg" aria-label="ホチキス止めの位置"><path d="M15 6 H6 Q4 6 4 8 V52 Q4 54 6 54 H15" fill="none" stroke="#d6dbe2" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.2 10 V50" stroke="#d5dae1" stroke-width="1" stroke-linecap="round"/></svg></div><div class="stapler left"><svg class="stapler-svg" viewBox="0 0 130 84" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="#dde1e7" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M30 6 L104 34 A20 20 0 0 1 104 74 L14 74 Q8 74 8 68 L8 64 Q8 58 14 58 L74 58"/><path d="M30 6 Q24 4 22 10 L16 30 L80 52"/><path d="M16 30 L14 38 L30 44 L32 37"/><circle cx="98" cy="54" r="8"/></svg></div><div class="staple right"><svg class="staple-svg" viewBox="0 0 20 60" xmlns="http://www.w3.org/2000/svg" aria-label="ホチキス止めの位置"><path d="M15 6 H6 Q4 6 4 8 V52 Q4 54 6 54 H15" fill="none" stroke="#d6dbe2" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.2 10 V50" stroke="#d5dae1" stroke-width="1" stroke-linecap="round"/></svg></div><div class="stapler right"><svg class="stapler-svg" viewBox="0 0 130 84" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="#dde1e7" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M30 6 L104 34 A20 20 0 0 1 104 74 L14 74 Q8 74 8 68 L8 64 Q8 58 14 58 L74 58"/><path d="M30 6 Q24 4 22 10 L16 30 L80 52"/><path d="M16 30 L14 38 L30 44 L32 37"/><circle cx="98" cy="54" r="8"/></svg></div>
   </div>
   <div class="fold"><span>② ここを山折り（上の部分を裏側へ）</span></div>
   <div class="panel qr">
@@ -1720,13 +1720,13 @@ body {{ margin: 0; font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiry
 .cover-name {{ margin-top: 3mm; font-size: 30pt; font-weight: 700; }}
 .cover-note {{ margin-top: 4mm; font-size: 11pt; color: #b42332; }}
 /* ホチキスは左右の端・高さの真ん中に縦向きで留める。
-   折りたたむと、内側のQRコード・URL・説明文のどれにも重ならない位置（端から約5〜10mm。印刷できない端の余白も避ける） */
-.staple {{ position: absolute; top: 50%; transform: translateY(-50%); width: 5mm; height: 18mm; }}
+   折りたたむと、内側のQRコード・URL・説明文のどれにも重ならない位置（端から約5〜9mm。印刷できない端の余白も避ける） */
+.staple {{ position: absolute; top: 50%; transform: translateY(-50%); width: 3.5mm; height: 12.6mm; }}
 .staple.right svg {{ transform: scaleX(-1); }}
 /* ホチキスの絵（印のすぐ内側。口が印の方を向く）。宛名面だけに印刷されるので、内側の内容には重ならない */
-.stapler {{ position: absolute; top: 50%; transform: translateY(-50%); width: 9mm; height: 6mm; }}
+.stapler {{ position: absolute; top: 50%; transform: translateY(-50%); width: 4.5mm; height: 3mm; }}
 .stapler svg {{ width: 100%; height: 100%; display: block; }}
-.stapler.left {{ left: 11.5mm; }} .stapler.right {{ right: 11.5mm; }}
+.stapler.left {{ left: 9.5mm; }} .stapler.right {{ right: 9.5mm; }}
 .stapler.right svg {{ transform: scaleX(-1); }}
 .staple-svg {{ width: 100%; height: 100%; display: block; }}
 .staple.left {{ left: 5mm; }} .staple.right {{ right: 5mm; }}
