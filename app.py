@@ -288,9 +288,9 @@ HORIZONTAL_NG_HTML = r"""<!doctype html><html lang="ja"><meta charset="utf-8"><m
 .band .mark{font-size:12px;font-weight:900}
 /* 「可」の段は緑で目立たせる（休日に日直の指定を忘れていないか一目で分かるように） */
 .band.ok{background:#e9f3ec !important;color:#2c5e3d !important;font-weight:800;box-shadow:inset 0 0 0 1px #b5d3bf}
-/* 日直NGは赤、宿直NGは青（休日・平日とも同じ） */
-.cell[data-state="全NG"] .day-band,.cell[data-state="日NG"] .day-band{background:#c4404a;color:#fff}
-.cell[data-state="全NG"] .night-band,.cell[data-state="宿NG"] .night-band{background:#2f62ad;color:#fff}
+/* 日直NGはオレンジ、宿直NGは濃紺（休日・平日とも同じ） */
+.cell[data-state="全NG"] .day-band,.cell[data-state="日NG"] .day-band{background:#c8601a;color:#fff}
+.cell[data-state="全NG"] .night-band,.cell[data-state="宿NG"] .night-band{background:#22345a;color:#fff}
 .warning-slot{height:22px;min-height:22px;display:flex;align-items:center;justify-content:center}
 .weekday-warning{color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:4px;padding:0 4px;font-size:14px;font-weight:900;line-height:20px}
 .blank{min-height:176px}
@@ -1713,7 +1713,7 @@ body {{ margin: 0; font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiry
 .url {{ position: absolute; left: 30mm; right: 30mm; bottom: 6mm; text-align: center; font-size: 7.5pt; color: #6b7280; word-break: break-all; font-family: monospace; }}
 .howto-title {{ font-size: 15pt; font-weight: 700; margin-bottom: 2mm; }}
 .howto ol {{ margin: 0 0 3mm 6mm; padding-left: 5mm; font-size: 12.5pt; line-height: 1.75; }}
-.howto .change {{ margin: 0 0 2.5mm; padding: 1.5mm 3mm; border: 1.5px solid #e8590c; background: #fff4e6; border-radius: 1.5mm; font-size: 10.5pt; line-height: 1.5; color: #3b2a1a; }}
+.howto .change {{ margin: 0 0 2.5mm; padding: 1.5mm 3mm; border: 1.5px solid #8a94a6; background: #f4f6f9; border-radius: 1.5mm; font-size: 10.5pt; line-height: 1.5; color: #3b2a1a; }}
 .howto ul {{ margin: 0; padding-left: 5mm; font-size: 10.5pt; line-height: 1.65; color: #374151; }}
 @media print {{ body {{ background: #fff; }} .bar {{ display: none; }} .sheet {{ margin: 0; box-shadow: none; }} }}
 </style></head><body>
@@ -1833,7 +1833,7 @@ const cw = (W - 100) / 7, x0 = 50, y0 = topY;
   g.font = F(28, 700); g.textAlign = 'center'; g.fillText(w, x0 + cw * i + cw / 2, y0 + 40);
 });
 g.textAlign = 'left';
-const DAY_NG = '#c4404a', NIGHT_NG = '#2f62ad';   // 日直NGは赤、宿直NGは青
+const DAY_NG = '#c8601a', NIGHT_NG = '#22345a';   // 日直NGはオレンジ、宿直NGは濃紺
 let count = 0;
 D.days.forEach((day, i) => {
   const p = D.offset + i, col = p % 7, row = Math.floor(p / 7);
@@ -2106,25 +2106,25 @@ def doctor_entry_page(key):
 
     # 以前の紙の用紙（休日は日直・宿直まとめて×）から変わった点を、カレンダーのすぐ上で強調する
     st.markdown("""
-<div style="border:2px solid #e8590c;background:#fff4e6;border-radius:10px;padding:12px 14px;margin:6px 0 10px">
- <div style="font-weight:800;font-size:1.05rem;color:#c2410c">⚠ 休日は「日直」と「宿直」を別々に指定します</div>
- <div style="margin-top:4px;font-size:.95rem;color:#3b2a1a">終日入れない日は、<b>両方</b>押してください。</div>
+<div style="border:2px solid #8a94a6;background:#f4f6f9;border-radius:10px;padding:12px 14px;margin:6px 0 10px">
+ <div style="font-weight:800;font-size:1.05rem;color:#22345a">⚠ 休日は「日直」と「宿直」を別々に指定します</div>
+ <div style="margin-top:4px;font-size:.95rem;color:#243247">終日入れない日は、<b>両方</b>押してください。</div>
  <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:.85rem;font-weight:700">
   <div style="text-align:center;width:100px">
    <div style="width:96px;border:1px solid #d6dce5;border-radius:5px;overflow:hidden">
-    <div style="background:#c4404a;color:#fff;padding:5px 0">✕ 日直NG</div>
-    <div style="background:#2f62ad;color:#fff;padding:5px 0">✕ 宿直NG</div></div>
-   <div style="margin-top:4px;color:#3b2a1a">終日NG</div></div>
+    <div style="background:#c8601a;color:#fff;padding:5px 0">✕ 日直NG</div>
+    <div style="background:#22345a;color:#fff;padding:5px 0">✕ 宿直NG</div></div>
+   <div style="margin-top:4px;color:#243247">終日NG</div></div>
   <div style="text-align:center;width:100px">
    <div style="width:96px;border:1px solid #d6dce5;border-radius:5px;overflow:hidden">
     <div style="background:#e9f3ec;color:#2c5e3d;padding:5px 0">○ 日直 可</div>
-    <div style="background:#2f62ad;color:#fff;padding:5px 0">✕ 宿直NG</div></div>
-   <div style="margin-top:4px;color:#3b2a1a">宿直だけNG<br><span style="color:#c2410c">日直は入れる</span></div></div>
+    <div style="background:#22345a;color:#fff;padding:5px 0">✕ 宿直NG</div></div>
+   <div style="margin-top:4px;color:#243247">宿直だけNG<br><span style="color:#566174">日直は入れる</span></div></div>
   <div style="text-align:center;width:100px">
    <div style="width:96px;border:1px solid #d6dce5;border-radius:5px;overflow:hidden">
-    <div style="background:#c4404a;color:#fff;padding:5px 0">✕ 日直NG</div>
+    <div style="background:#c8601a;color:#fff;padding:5px 0">✕ 日直NG</div>
     <div style="background:#e9f3ec;color:#2c5e3d;padding:5px 0">○ 宿直 可</div></div>
-   <div style="margin-top:4px;color:#3b2a1a">日直だけNG<br><span style="color:#c2410c">宿直は入れる</span></div></div>
+   <div style="margin-top:4px;color:#243247">日直だけNG<br><span style="color:#566174">宿直は入れる</span></div></div>
  </div>
 </div>""", unsafe_allow_html=True)
 
