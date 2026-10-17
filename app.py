@@ -3018,8 +3018,10 @@ if not valid_staff.empty:
     )
     # 医師の選択はタブではなく選択欄にする。
     # （タブは表示の切り替えなどで画面が作り直されると先頭の医師に戻ってしまい、入力ミスの原因になるため）
-    if st.session_state.get("ng_selected_doctor") not in doctor_names:
-        st.session_state["ng_selected_doctor"] = doctor_names[0]
+    # 選択中の医師は「ng_current_doctor」に覚えておく（選択欄そのものの値には頼らない）。
+    # 選択欄の表示（NG日数など）が変わると、Streamlit が選択欄を別物とみなして先頭に戻すことがあるため。
+    if st.session_state.get("ng_current_doctor") not in doctor_names:
+        st.session_state["ng_current_doctor"] = doctor_names[0]
 
     # 先生方のコメント（専用URLから）と、医師条件の備考。選択欄の💬マークと、カレンダーの上の表示に使う
     doctor_comments = remote_comments_safe(year, month)
@@ -3062,22 +3064,30 @@ if not valid_staff.empty:
         # 選択中の医師が一覧にない場合（名前を書き換えた・CSVを読み込み直した直後など）は先頭の医師にする
         if not names:
             return
-        current = st.session_state.get("ng_selected_doctor")
+        current = st.session_state.get("ng_current_doctor")
         if not ng_leave_allowed(current):
             return
         i = names.index(current) if current in names else -step
-        st.session_state["ng_selected_doctor"] = names[(i + step) % len(names)]
+        st.session_state["ng_current_doctor"] = names[(i + step) % len(names)]
 
-    def on_ng_doctor_select():
-        prev = st.session_state.get("ng_shown_doctor")
-        new = st.session_state.get("ng_selected_doctor")
+    def on_ng_doctor_select(widget_key):
+        prev = st.session_state.get("ng_current_doctor")
+        new = st.session_state.get(widget_key)
         if prev and prev != new and not ng_leave_allowed(prev):
-            st.session_state["ng_selected_doctor"] = prev   # 切り替えを取りやめて、元の先生に戻す
+            st.session_state[widget_key] = prev   # 切り替えを取りやめて、元の先生に戻す
+            return
+        st.session_state["ng_current_doctor"] = new
 
     sel_col, prev_col, next_col = st.columns([6, 1.2, 1.2])
-    selected_doc = sel_col.selectbox("NG日を入力する医師", doctor_names, key="ng_selected_doctor", format_func=ng_doctor_label,
-                                     on_change=on_ng_doctor_select)
-    st.session_state["ng_shown_doctor"] = selected_doc
+    # 選択欄は、表示が変わるたびに作り直し、いつも ng_current_doctor の先生を選んだ状態で表示する
+    _labels = [ng_doctor_label(n) for n in doctor_names]
+    _sel_key = "ng_doctor_select_" + hashlib.sha256("\n".join(_labels).encode("utf-8")).hexdigest()[:12]
+    for _k in [k for k in st.session_state.keys() if str(k).startswith("ng_doctor_select_") and k != _sel_key]:
+        del st.session_state[_k]
+    st.session_state[_sel_key] = st.session_state["ng_current_doctor"]
+    sel_col.selectbox("NG日を入力する医師", doctor_names, key=_sel_key, format_func=ng_doctor_label,
+                      on_change=on_ng_doctor_select, args=(_sel_key,))
+    selected_doc = st.session_state["ng_current_doctor"]
     # ボタンの高さを選択欄にそろえるための余白
     prev_col.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
     next_col.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
