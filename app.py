@@ -1901,27 +1901,46 @@ def admin_logged_in(widget_key):
     return False
 
 
-# 途中保存ボタンは画面のあちこちに置く。押された場所を覚えておき、
-# 全部の入力を読み終えた位置（作成ボタンの上）でまとめて保存し、結果をその場所に表示する。
-WORK_SAVE_SLOTS = {}
-work_save_request = None
+# 途中保存ボタンは、画面の右上に固定して表示する（スクロールしても付いてくる）。
+# 押されたことを覚えておき、全部の入力を読み終えた位置（作成ボタンの上）で保存し、結果をボタンの下に表示する。
+WORK_SAVE_SLOT = None
+work_save_request = False
+
+WORK_SAVE_FLOAT_CSS = """
+<style>
+.st-key-work_save_float {
+    position: fixed; top: 4.2rem; right: 1.2rem; z-index: 999990;
+    width: auto !important; max-width: 260px;
+    background: #ffffff; border: 1px solid #d0d7e2; border-radius: 10px;
+    padding: 8px 10px; box-shadow: 0 4px 14px rgba(0,0,0,.15);
+}
+.st-key-work_save_float button { font-weight: 700; }
+.st-key-work_save_float [data-testid="stAlert"] { padding: 4px 8px; font-size: .85rem; }
+@media (max-width: 640px) { .st-key-work_save_float { top: 3.6rem; right: .5rem; max-width: 200px; } }
+</style>
+"""
 
 
-def work_save_spot(spot):
-    """途中保存ボタンを1つ置く（spot はボタンの場所の名前）。"""
-    global work_save_request
+def work_save_floating():
+    """画面右上に追従する「作業を途中保存する」ボタンを置く。"""
+    global work_save_request, WORK_SAVE_SLOT
     if not remote_is_configured():
         return
-    if st.session_state.get("remote_admin_ok"):
-        if st.button("💾 ここまでの作業を途中保存する", key=f"work_save_{spot}"):
-            work_save_request = spot
-        WORK_SAVE_SLOTS[spot] = st.empty()
-        if work_save_request == spot:
-            WORK_SAVE_SLOTS[spot].info("途中保存しています…（赤いエラーが表示されている場合は、直してからもう一度押してください）")
-    else:
-        with st.expander("💾 作業を途中保存する", expanded=False):
-            st.caption("途中保存には管理用パスワードが必要です。一度入力すると、ほかの場所の途中保存ボタンもすぐ使えます。")
-            admin_logged_in(f"work_save_pw_{spot}")
+    st.markdown(WORK_SAVE_FLOAT_CSS, unsafe_allow_html=True)
+    with st.container(key="work_save_float"):
+        if st.session_state.get("remote_admin_ok"):
+            if st.button("💾 作業を途中保存する", key="work_save_button", type="primary", use_container_width=True):
+                work_save_request = True
+            WORK_SAVE_SLOT = st.empty()
+            if work_save_request:
+                WORK_SAVE_SLOT.info("途中保存しています…")
+        else:
+            # パスワード未入力のときは、押すと入力欄が開くボタンにする
+            box = st.popover("💾 作業を途中保存する", use_container_width=True) if hasattr(st, "popover") \
+                else st.expander("💾 作業を途中保存する", expanded=False)
+            with box:
+                st.caption("途中保存には管理用パスワードが必要です。")
+                admin_logged_in("work_save_pw")
 
 
 def doctor_entry_page(key):
@@ -2332,7 +2351,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 6. **「この条件で当直案を作成する」を押す**：押すたびに違うパターンの案ができます。気に入った案が出るまで押し直して構いません。
 7. **結果を確認してダウンロード**：「医師別の当直一覧」をExcelで、「作成した当直案」をCSVでダウンロードできます。
 
-**途中で中断するとき**は、「💾 ここまでの作業を途中保存する」を押してください。各項目の下と画面左のメニューにあり、どれを押しても同じです（管理用パスワードが必要です）。
+**途中で中断するとき**は、画面右上の「💾 作業を途中保存する」を押してください。スクロールしても右上に付いてくるので、いつでも押せます（管理用パスワードが必要です）。
 年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位がまとめて途中保存され、
 次回は画面上部の「💾 前回の作業の続きから始める」で元に戻せます。当直案を作成したときも自動で途中保存されます。
 
@@ -2450,16 +2469,11 @@ if remote_is_configured():
                 st.button("この作業を読み込む", key="work_restore", type="primary", on_click=work_state_restore)
                 st.caption("年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位が、保存したときの状態に戻ります。")
             else:
-                st.caption("まだ保存された作業はありません。各項目の下や画面左のメニューにある「💾 ここまでの作業を途中保存する」で保存できます。")
+                st.caption("まだ保存された作業はありません。画面右上の「💾 作業を途中保存する」で保存できます。")
 
-    # 画面左のメニューにも途中保存ボタンを置く（どこまでスクロールしていても押せるように）
-    with st.sidebar:
-        st.markdown("### 💾 作業の途中保存")
-        st.caption("入力の途中でも、ここからいつでも途中保存できます。次回は画面上部の「💾 前回の作業の続きから始める」で読み込めます。")
-        work_save_spot("sidebar")
-        if st.session_state.get("remote_admin_ok"):
-            _saved_at, _ = work_state_info()
-            st.caption(f"前回の途中保存：{_saved_at}" if _saved_at else "まだ途中保存はありません。")
+
+# 画面右上に追従する途中保存ボタン
+work_save_floating()
 
 if "sel_year" not in st.session_state:
     st.session_state["sel_year"] = default_year
@@ -2638,7 +2652,6 @@ for d in range(1, num_days + 1):
 
 total_slots = sum(shift_counts.values())
 holiday_total_placeholder.metric("🏥 必要な総当直枠数", f"{total_slots} 枠")
-work_save_spot("holidays")
 
 st.divider()
 
@@ -2697,7 +2710,6 @@ st.markdown("### 📅 先月今月来月の確定当直")
 st.write("表のセルをクリックして、日付と担当医師名を入力・編集できます。")
 edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
 edited_fixed_df = edited_fixed_df_raw.reset_index()
-work_save_spot("fixed")
 
 st.divider()
 
@@ -2853,7 +2865,6 @@ if _notes:
     with st.expander(f"📝 備考の全文を見る（{len(_notes)}名）", expanded=False):
         # st.table は長い文章を折り返して全部表示する
         st.table(pd.DataFrame(_notes, columns=["先生の名前", "備考"]).set_index("先生の名前"))
-work_save_spot("staff")
 staff_df, staff_input_errors = validate_staff_inputs(staff_df, year, month)
 if staff_input_errors:
     show_input_errors(staff_input_errors)
@@ -2894,7 +2905,7 @@ with st.expander("NGの種類・一括操作について", expanded=False):
 チェックを戻すと、元のNG指定がそのまま復活します。
 
 **「NG日を反映する」は、今開いている画面の計算条件に入れる操作です。**
-次回も続きから使う場合は、「💾 ここまでの作業を途中保存する」を押してください。
+次回も続きから使う場合は、画面右上の「💾 作業を途中保存する」を押してください。
     """)
 
 ng_layout = st.radio("NGカレンダーの表示", ["月間カレンダー", "1日〜月末を横一列"], horizontal=True, key="ng_calendar_layout")
@@ -3039,7 +3050,6 @@ if not valid_staff.empty:
         staff_df.at[original_idx, NG_COLUMN] = ",".join(ng_items)
 
 
-work_save_spot("ng")
 
 st.divider()
 st.markdown("### 📂 医師条件をCSVでダウンロード（手元にファイルで残す場合）")
@@ -3106,16 +3116,16 @@ work_snapshot = {
     "staff_csv": staff_df.to_csv(index=False),
     "priority": {k: int(v) for k, v in shortage_priority.items()},
 }
-work_save_spot("before_create")
 if remote_is_configured():
     st.caption("💾 途中保存では、年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位をまとめて保存します。"
                "保存先は1つだけで、途中保存し直すと前の内容は置き換わります。「当直案を作成する」を押したときも自動で途中保存されます（管理用パスワード入力済みの場合）。")
-# どこかの途中保存ボタンが押されていたら、ここで（全部の入力を読み終えてから）保存する
+# 右上の途中保存ボタンが押されていたら、ここで（全部の入力を読み終えてから）保存する
 if work_save_request:
-    _slot = WORK_SAVE_SLOTS.get(work_save_request) or st.empty()
+    _slot = WORK_SAVE_SLOT or st.empty()
     try:
         work_state_save(work_snapshot)
-        _slot.success(f"✅ 途中保存しました（{remote_now()}）。次回は画面上部の「💾 前回の作業の続きから始める」から読み込めます。")
+        _slot.success(f"✅ 途中保存しました（{remote_now()[-8:-3]}）")
+        st.toast("途中保存しました。次回は画面上部の「💾 前回の作業の続きから始める」から読み込めます。", icon="💾")
     except Exception as e:
         _slot.error(f"途中保存できませんでした。詳細：{e}")
 
