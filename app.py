@@ -1457,6 +1457,7 @@ REMOTE_SHEETS = {
     "tokens": ["先生", "キー", "翌日PM duty", "作成日時"],
     "settings": ["項目", "値"],
     "submissions": ["年月", "先生", "NG日", "保存日時", "コメント"],
+    "saved_state": ["項目", "値"],   # 作業の途中保存（年月・休日・医師条件・確定当直など）
 }
 
 
@@ -1831,6 +1832,73 @@ const a = document.getElementById('dl'); a.href = url; a.download = `NG日_${D.y
 </script>
 """.replace("__DATA__", json.dumps(data, ensure_ascii=False)).replace("__WEEKS__", str(weeks))
     components.html(html_src, height=int(540 * (230 + 60 + weeks * 150 + 110) / 1080) + 100)
+
+
+
+# ==========================================
+# 作業の途中保存と復元（スプレッドシートの saved_state シートに保存）
+# ==========================================
+def work_state_save(snapshot):
+    text = json.dumps(snapshot, ensure_ascii=False)
+    if len(text) > 45000:
+        raise ValueError("保存する内容が大きすぎます（医師の人数や確定当直の行数を確認してください）。")
+    remote_rewrite("saved_state", [["保存日時", remote_now()], ["内容", text]])
+
+
+def work_state_info():
+    """保存済みの作業 (保存日時, 内容) を返す。なければ (None, None)。"""
+    try:
+        rows = {r.get("項目", ""): r.get("値", "") for r in remote_read("saved_state")}
+    except Exception:
+        return None, None
+    if not rows.get("内容"):
+        return None, None
+    try:
+        return rows.get("保存日時", ""), json.loads(rows["内容"])
+    except ValueError:
+        return None, None
+
+
+def work_state_restore():
+    """保存した作業を画面に戻す（ボタンのコールバック。画面を作る前に実行される）。"""
+    saved_at, data = work_state_info()
+    if not data:
+        st.session_state["work_state_message"] = ("error", "保存された作業が見つかりませんでした。")
+        return
+    y, m = int(data["year"]), int(data["month"])
+    for key in list(st.session_state.keys()):
+        if key.startswith(("ng_", "hol_", "next_month_special_holiday_", "shortage_priority_")):
+            del st.session_state[key]
+    st.session_state["sel_year"] = y
+    st.session_state["sel_month"] = m
+    for d in data.get("holidays", []):
+        st.session_state[f"hol_{y}_{m}_{int(d)}"] = True
+    st.session_state[f"next_month_special_holiday_{y}_{m}"] = bool(data.get("next_special"))
+    for slot, rank in (data.get("priority") or {}).items():
+        st.session_state[f"shortage_priority_{slot}"] = int(rank)
+    st.session_state["restored_state"] = data
+    # ファイルのアップロード欄を空にして、復元した内容を使う
+    st.session_state["uploader_gen"] = st.session_state.get("uploader_gen", 0) + 1
+    st.session_state.pop("last_uploaded_file_id", None)
+    st.session_state["work_state_message"] = ("success", f"{saved_at} に保存した作業（{y}年{m}月）を読み込みました。")
+
+
+def admin_logged_in(widget_key):
+    """管理用パスワードの確認。成功すると、同じ画面のほかの管理機能でも入力不要になる。"""
+    if st.session_state.get("remote_admin_ok"):
+        return True
+    admin_password = remote_secret("admin_password")
+    if not admin_password:
+        st.caption("管理用パスワード（admin_password）が設定されていません。")
+        return False
+    pw = st.text_input("管理用パスワード", type="password", key=widget_key)
+    if pw:
+        if pw == str(admin_password):
+            st.session_state["remote_admin_ok"] = True
+            st.rerun()
+        else:
+            st.error("パスワードが違います。")
+    return False
 
 
 def doctor_entry_page(key):
@@ -2241,8 +2309,11 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 6. **「この条件で当直案を作成する」を押す**：押すたびに違うパターンの案ができます。気に入った案が出るまで押し直して構いません。
 7. **結果を確認してダウンロード**：「医師別の当直一覧」をExcelで、「作成した当直案」をCSVで保存できます。
 
-最後に「医師条件をCSVで保存」を押しておくと、次の月はそのファイルを読み込むだけで始められます。
-特別休日・増員設定・確定当直・不足時の優先順位は、このCSVには含まれません。
+**途中で中断するとき**は、「当直案を作成する」ボタンの上にある「💾 作業を途中保存する」を押してください（管理用パスワードが必要です）。
+年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位がまとめて保存され、
+次回は画面上部の「💾 前回の作業の続きから始める」で元に戻せます。当直案を作成したときも自動で保存されます。
+
+「医師条件をCSVで保存」は、医師条件だけをファイルとして手元に残したいときに使います。
         """)
     with tab_ng:
         st.markdown("""
@@ -2342,9 +2413,29 @@ else:
     default_year = today.year
     default_month = today.month + 1
 
+# --- 前回保存した作業を読み込む ---
+if remote_is_configured():
+    with st.expander("💾 前回の作業の続きから始める（途中保存の読み込み）", expanded=False):
+        msg = st.session_state.pop("work_state_message", None)
+        if msg:
+            (st.success if msg[0] == "success" else st.error)(msg[1])
+        if admin_logged_in("work_restore_pw"):
+            saved_at, saved = work_state_info()
+            if saved:
+                st.write(f"保存日時：**{saved_at}**（{saved['year']}年{saved['month']}月の作業）")
+                st.button("この作業を読み込む", key="work_restore", type="primary", on_click=work_state_restore)
+                st.caption("年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位が、保存したときの状態に戻ります。")
+            else:
+                st.caption("まだ保存された作業はありません。画面の下の「💾 作業を途中保存する」で保存できます。")
+
+if "sel_year" not in st.session_state:
+    st.session_state["sel_year"] = default_year
+if "sel_month" not in st.session_state:
+    st.session_state["sel_month"] = default_month
 col_y, col_m = st.columns(2)
-year = int(col_y.number_input("年", min_value=2000, value=default_year, step=1))
-month = int(col_m.number_input("月", min_value=1, max_value=12, value=default_month, step=1))
+year = int(col_y.number_input("年", min_value=2000, step=1, key="sel_year"))
+month = int(col_m.number_input("月", min_value=1, max_value=12, step=1, key="sel_month"))
+restored_state = st.session_state.get("restored_state")
 
 st.divider()
 
@@ -2472,6 +2563,8 @@ _, num_days = calendar.monthrange(year, month)
 date_options = [f"{d}日" for d in range(1, num_days + 1)]
 
 multi_df_template = pd.DataFrame(columns=["日付", "当直枠", "人数"])
+if restored_state and restored_state.get("multi") and (int(restored_state["year"]), int(restored_state["month"])) == (year, month):
+    multi_df_template = pd.DataFrame(restored_state["multi"], columns=["日付", "当直枠", "人数"])
 edited_multi_df = st.data_editor(
     multi_df_template,
     num_rows="dynamic",
@@ -2547,7 +2640,7 @@ with col_dl_fixed:
         mime="text/csv",
     )
 with col_ul_fixed:
-    fixed_file = st.file_uploader("決定済み当直表（CSV）をアップロード", type="csv", key="fixed_csv")
+    fixed_file = st.file_uploader("決定済み当直表（CSV）をアップロード", type="csv", key=f"fixed_csv_{st.session_state.get('uploader_gen', 0)}")
 
 if fixed_file is not None:
     try:
@@ -2555,6 +2648,8 @@ if fixed_file is not None:
     except Exception as e:
         st.error(f"確定当直ファイルの読み込みに失敗しました。詳細: {e}")
         st.stop()
+elif restored_state and restored_state.get("fixed_csv"):
+    base_fixed_df = parse_fixed_csv(restored_state["fixed_csv"].encode("utf-8"))
 else:
     base_fixed_df = pd.DataFrame(columns=fixed_columns)
     base_fixed_df.loc[0] = ["" for _ in range(len(fixed_columns))]
@@ -2643,7 +2738,7 @@ with col_dl:
         mime="text/csv",
     )
 with col_ul:
-    uploaded_file = st.file_uploader("医師条件（途中保存CSVも可）をアップロード", type="csv", key="staff_csv")
+    uploaded_file = st.file_uploader("医師条件（途中保存CSVも可）をアップロード", type="csv", key=f"staff_csv_{st.session_state.get('uploader_gen', 0)}")
 
 if uploaded_file is not None:
     if st.session_state.get('last_uploaded_file_id') != uploaded_file.file_id:
@@ -2656,6 +2751,8 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"医師条件CSVを読み込めませんでした。詳細: {e}")
         st.stop()
+elif restored_state and restored_state.get("staff_csv"):
+    base_df = parse_staff_csv(restored_state["staff_csv"].encode("utf-8"))
 else:
     base_df = df_template.copy()
 
@@ -2960,6 +3057,28 @@ st.button("優先順位を初期設定に戻す", key="reset_shortage_priority",
 priority_order = shortage_priority_groups(shortage_priority)
 st.caption("現在の優先順位：" + " ＞ ".join("・".join(g) for g in priority_order))
 
+# --- 作業の途中保存 ---
+work_snapshot = {
+    "year": year, "month": month,
+    "holidays": sorted(int(d) for d in custom_holidays),
+    "next_special": bool(next_month_special_holiday),
+    "multi": [[f"{d}日", s, int(c)] for (d, s), c in multi_slots_dict.items()],
+    "fixed_csv": edited_fixed_df.to_csv(index=False),
+    "staff_csv": staff_df.to_csv(index=False),
+    "priority": {k: int(v) for k, v in shortage_priority.items()},
+}
+if remote_is_configured():
+    with st.expander("💾 作業を途中保存する（次回、続きから始められます）", expanded=False):
+        st.caption("年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位を保存します。"
+                   "保存は1つだけで、保存し直すと前の内容は置き換わります。「当直案を作成する」を押したときも自動で保存されます（管理用パスワード入力済みの場合）。")
+        if admin_logged_in("work_save_pw"):
+            if st.button("今の入力内容を保存する", key="work_save", type="primary"):
+                try:
+                    work_state_save(work_snapshot)
+                    st.success(f"保存しました（{remote_now()}）。次回は画面上部の「💾 前回の作業の続きから始める」から読み込めます。")
+                except Exception as e:
+                    st.error(f"保存できませんでした。詳細：{e}")
+
 create_button_container = st.container(key="create_duty_action")
 st.header("3. 当直案の作成・確認")
 result_notice_container = st.container()
@@ -2984,6 +3103,12 @@ if len(staff_df) > 0:
         create_clicked = st.button("🚀 この条件で当直案を作成する", type="primary", use_container_width=True)
         st.caption("※ 押すたびに、同じ条件でも違うパターンの当直表を作ります。気に入った案はダウンロードして保存してください。")
     if create_clicked:
+        # 管理者としてログインしていれば、作成のたびに入力内容を自動で途中保存する
+        if remote_is_configured() and st.session_state.get("remote_admin_ok"):
+            try:
+                work_state_save(work_snapshot)
+            except Exception:
+                pass
         with st.spinner("当直案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
             try:
                 df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority)
