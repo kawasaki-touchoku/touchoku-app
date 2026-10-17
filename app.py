@@ -1611,49 +1611,85 @@ def qr_svg(text, size_mm=38):
 
 def remote_qr_cards_html(cards):
     """
-    先生ごとの専用URLをQRコード付きのカードにした、印刷用のHTMLを作る（A4に8人分）。
-    ブラウザで開いて印刷するので、日本語の文字化けが起きない。
+    先生ごとの専用URLを、A4・1人1枚の三つ折り用紙にした印刷用HTMLを作る。
+    片面印刷のまま、下1/3を内側に折り（谷折り）、上1/3を裏側に折る（山折り）と、
+    宛名だけが外に出て、QRコードと説明は内側に隠れる。左右をホチキスで留めて配る。
     cards: [(先生, 専用URL)]
     """
     import html as _html
-    items = []
+    pages = []
     for name, url in cards:
-        items.append(f"""
-<div class="card">
-  <div class="label">当直NG日 入力用</div>
-  <div class="name">{_html.escape(name)} 先生</div>
-  <div class="body">
-    {qr_svg(url)}
-    <div class="note">
-      スマートフォンのカメラで<br>QRコードを読み取ると、<br>当直NG日の入力ページが<br>開きます。<br><br>
-      ・このURLは毎月同じです。<br>　ブックマークすると便利です。<br>
-      ・先生専用です。他の方に<br>　渡さないでください。
-    </div>
+        n = _html.escape(name)
+        pages.append(f"""
+<section class="sheet">
+  <div class="panel cover">
+    <div class="cover-title">当直NG日 入力用カード</div>
+    <div class="cover-name">{n} 先生</div>
+    <div class="staple left">ホチキス</div><div class="staple right">ホチキス</div>
   </div>
-  <div class="url">{_html.escape(url)}</div>
-</div>""")
+  <div class="fold"><span>② ここを山折り（上の部分を裏側へ）</span></div>
+  <div class="panel qr">
+    <div class="qr-name">{n} 先生 専用</div>
+    <div class="qr-body">
+      {qr_svg(url, size_mm=58)}
+      <div class="qr-side">
+        <div class="big">スマートフォンの<br>カメラで読み取る</div>
+        <div class="small">QRコードにカメラを向けると、<br>NG日の入力ページが開きます。</div>
+      </div>
+    </div>
+    <div class="url">{_html.escape(url)}</div>
+  </div>
+  <div class="fold"><span>① ここを谷折り（下の部分を内側へ）</span></div>
+  <div class="panel howto">
+    <div class="howto-title">入力のしかた</div>
+    <ol>
+      <li>QRコードを読み取り、入力ページを開く</li>
+      <li>当直に入れない日を、カレンダーで選ぶ</li>
+      <li>「NG日とコメントを保存する」を押す</li>
+      <li>「✅ 保存しました」が出れば完了</li>
+    </ol>
+    <ul>
+      <li><b>このURLは毎月同じです。</b>ブックマークしておくと便利です。</li>
+      <li>締め切りまでは何度でも修正でき、<b>最後に保存した内容</b>が採用されます。</li>
+      <li>このカードは<b>先生専用</b>です。他の方に渡さないでください。なくした場合は担当者へご連絡ください。</li>
+    </ul>
+  </div>
+</section>""")
     return f"""<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>当直NG日入力 配布用カード</title>
 <style>
-@page {{ size: A4 portrait; margin: 10mm; }}
+@page {{ size: A4 portrait; margin: 0; }}
 * {{ box-sizing: border-box; }}
-body {{ margin: 0; font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif; color: #222; }}
-.bar {{ padding: 12px 16px; background: #eef3f8; border-bottom: 1px solid #cfd8e3; font-size: 14px; }}
+body {{ margin: 0; font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif; color: #1f2a37; background: #e9edf2; }}
+.bar {{ padding: 12px 16px; background: #eef3f8; border-bottom: 1px solid #cfd8e3; font-size: 14px; line-height: 1.6; }}
 .bar button {{ font-size: 15px; padding: 8px 18px; margin-right: 12px; cursor: pointer; }}
-.sheet {{ display: grid; grid-template-columns: 95mm 95mm; grid-auto-rows: 69mm; width: 190mm; margin: 10mm auto; }}
-.card {{ border: 1px dashed #999; padding: 4mm 5mm; position: relative; break-inside: avoid; page-break-inside: avoid; }}
-.label {{ font-size: 8pt; color: #5a6680; }}
-.name {{ font-size: 15pt; font-weight: 700; margin: 1mm 0 2mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-.body {{ display: flex; gap: 3mm; align-items: flex-start; }}
-.body svg {{ flex: none; }}
-.note {{ font-size: 7.5pt; line-height: 1.45; }}
-.url {{ position: absolute; left: 5mm; right: 5mm; bottom: 3mm; font-size: 5.5pt; color: #666; word-break: break-all; font-family: monospace; }}
-@media print {{ .bar {{ display: none; }} .sheet {{ margin: 0; }} }}
+.sheet {{ width: 210mm; height: 297mm; margin: 8mm auto; background: #fff; display: flex; flex-direction: column;
+         box-shadow: 0 1px 4px rgba(0,0,0,.15); break-after: page; page-break-after: always; overflow: hidden; }}
+.panel {{ height: 98mm; padding: 10mm 16mm; position: relative; }}
+.fold {{ height: 1.5mm; border-top: 1.2px dashed #8a94a6; position: relative; }}
+.fold span {{ position: absolute; right: 12mm; top: -3.2mm; background: #fff; padding: 0 2mm; font-size: 9pt; color: #6b7686; }}
+.cover {{ display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }}
+.seal {{ border: 2.5px solid #b42332; color: #b42332; font-weight: 700; font-size: 20pt; padding: 1mm 6mm; border-radius: 2mm; letter-spacing: .3em; }}
+.cover-title {{ margin-top: 6mm; font-size: 14pt; color: #4a5568; }}
+.cover-name {{ margin-top: 3mm; font-size: 30pt; font-weight: 700; }}
+.cover-note {{ margin-top: 4mm; font-size: 11pt; color: #b42332; }}
+.staple {{ position: absolute; bottom: 8mm; width: 22mm; height: 9mm; border: 1px dashed #b0b8c4; border-radius: 1.5mm;
+          font-size: 8pt; color: #9aa3b0; display: flex; align-items: center; justify-content: center; }}
+.staple.left {{ left: 14mm; }} .staple.right {{ right: 14mm; }}
+.qr-name {{ font-size: 15pt; font-weight: 700; margin-bottom: 4mm; }}
+.qr-body {{ display: flex; align-items: center; gap: 10mm; }}
+.qr-side .big {{ font-size: 17pt; font-weight: 700; line-height: 1.4; }}
+.qr-side .small {{ margin-top: 4mm; font-size: 11.5pt; line-height: 1.6; color: #374151; }}
+.url {{ position: absolute; left: 16mm; right: 16mm; bottom: 6mm; font-size: 7.5pt; color: #6b7280; word-break: break-all; font-family: monospace; }}
+.howto-title {{ font-size: 15pt; font-weight: 700; margin-bottom: 2mm; }}
+.howto ol {{ margin: 0 0 3mm 6mm; padding-left: 5mm; font-size: 12.5pt; line-height: 1.75; }}
+.howto ul {{ margin: 0; padding-left: 5mm; font-size: 10.5pt; line-height: 1.65; color: #374151; }}
+@media print {{ body {{ background: #fff; }} .bar {{ display: none; }} .sheet {{ margin: 0; box-shadow: none; }} }}
 </style></head><body>
 <div class="bar"><button onclick="window.print()">🖨️ 印刷する</button>
-A4・縦で印刷し、点線で切り離して各先生に渡してください（{len(cards)}名分）。印刷の設定で「倍率：100%（実際のサイズ）」を選ぶと、きれいに収まります。</div>
-<div class="sheet">{''.join(items)}</div>
+A4・縦・<b>片面</b>で印刷してください（{len(cards)}名分・1人1枚）。印刷の設定で「倍率：100%（実際のサイズ）」「余白：なし」を選ぶと、折り線の位置が正しくなります。<br>
+折り方：① 下の1/3を内側に折る（谷折り）→ ② 上の1/3（宛名）を裏側に折る（山折り）→ 宛名が表に出たら、左右2か所をホチキスで留めます。</div>
+{''.join(pages)}
 </body></html>"""
-
 
 def remote_latest_submissions(month_key):
     """その年月の、先生ごとの最新の提出 {先生: {"NG日":…, "保存日時":…}}"""
@@ -2101,7 +2137,8 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
                     st.download_button(f"🖨️ 配布用カード（QRコード付き・{len(card_targets)}名分）をダウンロード",
                                        remote_qr_cards_html([(n, url_by_name[n]) for n in card_targets]).encode("utf-8"),
                                        file_name="NG日入力_配布用カード.html", mime="text/html", key="remote_qr_cards", type="primary")
-                    st.caption("ダウンロードしたファイルを開くとブラウザに表示されるので、「印刷する」を押してA4で印刷します。8人分ずつ並ぶので、点線で切って各先生に渡してください。先生はスマートフォンのカメラでQRコードを読み取るだけで入力ページを開けます。")
+                    st.caption("ダウンロードしたファイルを開くとブラウザに表示されるので、「印刷する」を押してA4・片面で印刷します（1人1枚）。"
+                               "三つ折りにすると宛名だけが外に出て、QRコードは内側に隠れます。左右をホチキスで留めて各先生に渡してください。")
                 except ImportError:
                     st.error("カードを作るには、requirements.txt に「reportlab」の1行を追加してください。")
             if st.checkbox("URLを作り直す（URLが漏れてしまった場合）", key="remote_regen_open"):
