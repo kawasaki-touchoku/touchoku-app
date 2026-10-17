@@ -2476,8 +2476,8 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 3. **医師条件を読み込む**：途中保存から続ける場合は不要です。初めての場合や、手元の「医師条件CSV」を使う場合はアップロードします。
 4. **NG日を集める**：先生方に専用URLから入力してもらい、管理画面で取り込みます（「NG日の集め方」のタブを参照）。
 5. **不足時の優先順位を確認（任意）**：人数が足りない月に、どの枠から埋めるかを決めます。
-6. **画面右下の「🚀 当直案を作成」を押す**：どこまでスクロールしていても押せます。押すたびに違うパターンの案ができるので、気に入った案が出るまで押し直して構いません。
-   結果（未決定の枠の数）もボタンの下に出るので、条件を直しては作り直す作業が、その場でくり返せます。
+6. **画面のいちばん下の帯の「🚀 当直案を作成」を押す**：どこまでスクロールしていても押せます。押すたびに違うパターンの案ができるので、気に入った案が出るまで押し直して構いません。
+   結果（未決定の枠の数）もボタンの横に出るので、条件を直しては作り直す作業が、その場でくり返せます。
 7. **結果を確認してダウンロード**：「医師別の当直一覧」をExcelで、「作成した当直案」をCSVでダウンロードできます。
 
 **途中で中断するとき**は、画面右上の「💾 作業を途中保存する」を押してください。スクロールしても右上に付いてくるので、いつでも押せます（管理用パスワードが必要です）。
@@ -2586,7 +2586,7 @@ st.markdown("""
    すりガラス風にして、下を流れる内容が透けて重ならないようにする */
 [data-testid="stHeader"]{background:rgba(255,255,255,.94) !important;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
   border-bottom:1px solid #e3e7ed;box-shadow:0 2px 10px rgba(16,24,40,.06)}
-/* 右下のリンクで移動したとき、画面上部の帯（ボタンの並ぶ所）に見出しが隠れないよう、少し上に余白を取って止める */
+/* 下の帯のリンクで移動したとき、画面上部の帯（ボタンの並ぶ所）に見出しが隠れないよう、少し上に余白を取って止める */
 #sec-staff,#sec-ng,#sec-create,#sec-result{scroll-margin-top:5.5rem}
 /* 折りたたみ式の項目（確定当直）も、同じ帯の見た目にする */
 .st-key-fixed_section{margin:2.6rem 0 .4rem}
@@ -2624,52 +2624,49 @@ else:
 # 画面右上の帯に「前回の作業の続きから始める」「作業を途中保存する」を置く
 work_save_floating()
 
-# --- 画面右下に固定する「当直案を作成」ボタン ---
+# --- 画面の下に固定する帯（フッター）：「当直案を作成」ボタンと結果、移動リンク ---
 # 条件を直す → 作成し直す、を行ったり来たりせずに繰り返せるように、どこまでスクロールしていても押せるようにする。
-# 結果（未決定の枠の数）もここに出し、各項目へすぐ移動できるリンクも置く。
+# 上の帯は「保存」、下の帯は「作成」と役割を分ける。
 st.markdown("""
 <style>
-.st-key-create_bar{position:fixed;right:1.2rem;bottom:3.6rem;z-index:1000001;width:250px !important;
-  background:#fff;border:1px solid #cfd6e0;border-radius:14px;padding:10px 12px;box-shadow:0 8px 24px rgba(16,24,40,.18);gap:8px !important}
-.st-key-create_bar > div,.st-key-create_bar [data-testid="stElementContainer"],.st-key-create_bar .stButton,
-.st-key-create_bar [data-testid="stMarkdownContainer"],.st-key-create_bar [data-testid="stMarkdown"]{width:100% !important;max-width:100% !important;height:auto !important}
-.st-key-create_bar button{width:100% !important;min-height:2.6rem;font-weight:800}
+.st-key-create_bar{position:fixed;left:0;right:0;bottom:0;z-index:1000001;width:auto !important;height:64px !important;min-height:0 !important;
+  display:flex !important;flex-direction:row !important;align-items:center !important;gap:14px !important;
+  padding:0 9rem 0 1.5rem;background:rgba(255,255,255,.96);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+  border-top:1px solid #e3e7ed;box-shadow:0 -2px 10px rgba(16,24,40,.06);overflow:visible !important}
+.st-key-create_bar > div{width:auto !important;flex:0 0 auto !important;margin:0 !important}
+.st-key-create_bar [data-testid="stElementContainer"],.st-key-create_bar [data-testid="stMarkdownContainer"],
+.st-key-create_bar [data-testid="stMarkdown"]{margin:0 !important;width:auto !important}
+/* 並び：左に移動リンク、右に結果と作成ボタン */
+.st-key-create_bar > div:has(.cb-box){order:1;flex:1 1 auto !important}
+.st-key-create_bar > div:has(button){order:2}
+.st-key-create_bar button{min-height:2.7rem;padding:0 1.6rem;font-size:1rem;font-weight:800;white-space:nowrap}
 .st-key-create_bar p{margin:0}
-.cb-box{display:flex;flex-direction:column;gap:6px}
-.st-key-create_bar .st-key-create_bar_swap button{min-height:1.5rem !important;padding:0 6px !important;font-size:.75rem !important;font-weight:600 !important;
-  background:transparent !important;border:0 !important;color:#7a8494 !important;box-shadow:none !important}
-.st-key-create_bar .st-key-create_bar_swap button:hover{color:#2f4a6d !important;text-decoration:underline}
-/* Streamlit の文章部品は下に負の余白（-1rem）が付くため、パネルの外にはみ出す。ここでは打ち消す */
-.st-key-create_bar [data-testid="stMarkdownContainer"],.st-key-create_bar [data-testid="stMarkdown"],
-.st-key-create_bar [data-testid="stElementContainer"]{margin:0 !important}
-.st-key-create_bar{height:auto !important;min-height:0 !important;overflow:visible !important;padding-bottom:12px !important}
-.cb-res{font-size:.85rem;font-weight:700;line-height:1.4}
+.cb-box{display:flex;flex-direction:row;align-items:center;gap:14px;width:100%}
+.cb-res{margin-left:auto;font-size:.9rem;font-weight:800;line-height:1.4;white-space:nowrap}
 .cb-res.ok{color:#2f8a5b}.cb-res.bad{color:#c2410c}.cb-res.wait{color:#566174}
-.cb-nav{display:flex;gap:6px;flex-wrap:wrap;font-size:.8rem}
-.cb-nav a{flex:1;text-align:center;text-decoration:none;color:#2f4a6d !important;background:#eef3f8;border-radius:6px;padding:3px 6px;white-space:nowrap}
+.cb-nav{display:flex;gap:6px;font-size:.82rem;order:-1}
+.cb-nav a{text-decoration:none;color:#2f4a6d !important;background:#eef3f8;border-radius:6px;padding:4px 10px;white-space:nowrap}
 .cb-nav a:hover{background:#dde7f2}
-@media (max-width:600px){.st-key-create_bar{right:.5rem;bottom:3.2rem;width:200px !important;padding:7px 8px}.cb-nav{font-size:.72rem}}
+/* 下の帯に最後の内容が隠れないよう、ページの下に余白を取る */
+[data-testid="stMainBlockContainer"],.block-container{padding-bottom:6.5rem !important}
+@media (max-width:600px){
+  .st-key-create_bar{height:58px !important;padding:0 .6rem;gap:8px !important}
+  .st-key-create_bar button{padding:0 .9rem;font-size:.9rem}
+  .cb-nav{display:none}.cb-res{font-size:.75rem;white-space:normal}
+}
 </style>""", unsafe_allow_html=True)
 create_bar_request = False
 
 
 def create_bar_show(result_html=""):
-    """右下のパネルの、結果の1行と移動リンクをまとめて表示する（1つの部品にして、表示のずれを防ぐ）。"""
+    """下の帯の、移動リンクと結果の1行をまとめて表示する（1つの部品にして、表示のずれを防ぐ）。"""
     res_anchor = "#sec-result" if "generated_df" in st.session_state else "#sec-create"
     CREATE_BAR_SLOT.markdown(
-        f"<div class='cb-box'>{result_html}<div class='cb-nav'><a href='#sec-staff' target='_self'>医師条件</a>"
-        f"<a href='#sec-ng' target='_self'>NG日</a><a href='{res_anchor}' target='_self'>結果</a></div></div>",
+        f"<div class='cb-box'><div class='cb-nav'><a href='#sec-staff' target='_self'>医師条件</a>"
+        f"<a href='#sec-ng' target='_self'>NG日</a><a href='{res_anchor}' target='_self'>結果</a></div>{result_html}</div>",
         unsafe_allow_html=True)
 
 
-def _toggle_create_bar_side():
-    st.session_state["create_bar_left"] = not st.session_state.get("create_bar_left", False)
-
-
-if st.session_state.get("create_bar_left"):
-    # 「⇄」で左下に移したとき
-    st.markdown("<style>.st-key-create_bar{left:1.2rem !important;right:auto !important}"
-                "@media (max-width:600px){.st-key-create_bar{left:.5rem !important}}</style>", unsafe_allow_html=True)
 with st.container(key="create_bar"):
     if st.button("🚀 当直案を作成", key="create_bar_button", type="primary"):
         create_bar_request = True
@@ -2683,8 +2680,6 @@ with st.container(key="create_bar"):
         create_bar_show(_last)
     else:
         create_bar_show()
-    st.button("⇄ 左右の位置を入れ替える" if not st.session_state.get("create_bar_left") else "⇄ 右下に戻す",
-              key="create_bar_swap", on_click=_toggle_create_bar_side)
 
 if "sel_year" not in st.session_state:
     st.session_state["sel_year"] = default_year
@@ -3450,8 +3445,7 @@ if len(staff_df) > 0:
     with create_button_container:
         # 作成ボタンは画面の端の「🚀 当直案を作成」1つだけにする（同じ働きのボタンが2つあると迷うため）
         create_clicked = create_bar_request
-        _side = "左下" if st.session_state.get("create_bar_left") else "右下"
-        st.markdown(f"<div class='create-guide'>🚀 当直案は、画面{_side}の<b>「当直案を作成」</b>ボタンで作ります"
+        st.markdown("<div class='create-guide'>🚀 当直案は、画面のいちばん下の帯にある<b>「当直案を作成」</b>ボタンで作ります"
                     "<span>（どこまでスクロールしていても押せます）</span></div>", unsafe_allow_html=True)
         st.caption("※ 押すたびに、同じ条件でも違うパターンの当直表を作ります。気に入った案は、下のボタンからダウンロードしてください（作成した当直案は途中保存には含まれません）。")
     if create_clicked:
@@ -3502,7 +3496,7 @@ if len(staff_df) > 0:
         matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday,
                                                      comments=remote_comments_safe(year, month))
         missing_total = sum(len(info['shortage']) for info in matrix_days)
-        # 右下の「当直案を作成」ボタンの下に、結果のまとめを出す
+        # 下の帯の「当直案を作成」ボタンの横に、結果のまとめを出す
         _t = remote_now()[-8:-3]
         _summary = (f"<div class='cb-res bad'>⚠ {_t} 作成：未決定 {missing_total}枠</div>" if missing_total
                     else f"<div class='cb-res ok'>✅ {_t} 作成：全枠決定</div>")
