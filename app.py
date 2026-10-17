@@ -1989,7 +1989,7 @@ WORK_SAVE_FLOAT_CSS = """
 <style>
 /* 画面いちばん上の帯（右上に Fork・⋮ がある白い帯）の空いている所に置く。表や入力欄には重ならない */
 .st-key-work_save_float {
-    position: fixed; top: 0.45rem; right: 15rem; z-index: 1000002;
+    position: fixed; top: 0.45rem; left: 1rem; right: auto; z-index: 1000002;
     width: auto !important; max-width: 60vw;
     display: flex !important; flex-direction: row !important; align-items: center; gap: 10px;
     background: transparent;
@@ -1999,7 +1999,7 @@ WORK_SAVE_FLOAT_CSS = """
 .st-key-work_save_float p { margin: 0; white-space: nowrap; }
 .work-save-note { font-size: 0.85rem; color: #1b7f3b; font-weight: 600; }
 /* 保存済みの表示はボタンの左に置く（右側には、Streamlit の「実行中」の表示が出るため） */
-.st-key-work_save_float > div:has(.work-save-note) { order: -1; }
+.st-key-work_save_float > div:has(.work-save-note) { order: 3; }
 .work-save-note.busy { color: #566174; }
 .work-save-note.bad { color: #c92336; }
 /* スマートフォン：右上のStreamlitのアイコンと重ならないよう左に寄せ、ボタンの文字を短くする */
@@ -2008,8 +2008,8 @@ WORK_SAVE_FLOAT_CSS = """
     .st-key-work_save_float button { padding: 0.1rem 0.55rem; min-height: 2rem; }
     .st-key-work_save_float > div:nth-child(1) button p,
     .st-key-work_save_float > div:nth-child(2) button p { font-size: 0 !important; }
-    .st-key-work_save_float > div:nth-child(1) button p::after { content: "📂 続きから"; font-size: 0.8rem; }
-    .st-key-work_save_float > div:nth-child(2) button p::after { content: "💾 途中保存"; font-size: 0.8rem; }
+    .st-key-work_save_float > div:nth-child(1) button p::after { content: "💾 途中保存"; font-size: 0.8rem; }
+    .st-key-work_save_float > div:nth-child(2) button p::after { content: "📂 続きから"; font-size: 0.8rem; }
     .work-save-note { display: none; }
 }
 </style>
@@ -2030,6 +2030,20 @@ def work_save_floating():
             st.error(msg[1])
     has_popover = hasattr(st, "popover")
     with st.container(key="work_save_float"):
+        # 並び：いちばん左に「作業を途中保存する」、その右に「前回の作業の続きから始める」
+        # --- 作業を途中保存する ---
+        logged_in = bool(st.session_state.get("remote_admin_ok"))
+        if logged_in:
+            if st.button("💾 作業を途中保存する", key="work_save_button", type="primary"):
+                work_save_request = True
+        else:
+            # パスワード未入力のときは、押すと入力欄が開くボタンにする
+            box = st.popover("💾 作業を途中保存する") if has_popover \
+                else st.expander("💾 作業を途中保存する", expanded=False)
+            with box:
+                st.caption("途中保存には管理用パスワードが必要です。")
+                admin_logged_in("work_save_pw")
+
         # --- 前回の作業の続きから始める（押すと小さな枠が開く） ---
         box = st.popover("📂 前回の作業の続きから始める") if has_popover \
             else st.expander("📂 前回の作業の続きから始める", expanded=False)
@@ -2043,33 +2057,23 @@ def work_save_floating():
                     st.caption("年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位が、"
                                "途中保存したときの状態に戻ります。今の画面の入力内容は置き換わります。")
                 else:
-                    st.caption("まだ途中保存された作業はありません。隣の「💾 作業を途中保存する」で保存できます。")
+                    st.caption("まだ途中保存された作業はありません。左の「💾 作業を途中保存する」で保存できます。")
             else:
                 st.caption("読み込みには管理用パスワードが必要です。")
 
-        # --- 作業を途中保存する ---
-        if st.session_state.get("remote_admin_ok"):
-            if st.button("💾 作業を途中保存する", key="work_save_button", type="primary"):
-                work_save_request = True
+        # --- 保存・読み込みの結果（ボタンの右に1行） ---
+        if logged_in:
             WORK_SAVE_SLOT = st.empty()
             if msg and msg[0] == "success":
                 WORK_SAVE_SLOT.markdown("<span class='work-save-note'>✅ 前回の作業を読み込みました</span>", unsafe_allow_html=True)
             elif st.session_state.get("work_save_note"):
                 WORK_SAVE_SLOT.markdown(f"<span class='work-save-note'>✅ {st.session_state['work_save_note']} 途中保存しました</span>", unsafe_allow_html=True)
             if st.session_state.pop("work_save_toast", False):
-                st.toast("途中保存しました。次回は画面右上の「📂 前回の作業の続きから始める」から読み込めます。", icon="💾")
+                st.toast("途中保存しました。次回は画面上の「📂 前回の作業の続きから始める」から読み込めます。", icon="💾")
             _dirty = st.session_state.pop("work_save_dirty", None)
             if _dirty:
                 st.toast(f"{'・'.join(_dirty)}先生のカレンダーに、反映していない変更があります。"
                          "この変更は途中保存に含まれていません。「反映する」を押してから、もう一度途中保存してください。", icon="⚠️")
-        else:
-            # パスワード未入力のときは、押すと入力欄が開くボタンにする
-            box = st.popover("💾 作業を途中保存する") if has_popover \
-                else st.expander("💾 作業を途中保存する", expanded=False)
-            with box:
-                st.caption("途中保存には管理用パスワードが必要です。")
-                admin_logged_in("work_save_pw")
-
 
 def doctor_entry_page(key):
     """専用URLで開いた先生用の画面。その先生のNG日だけを入力・保存できる。"""
@@ -2496,9 +2500,9 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
    結果（未決定の枠の数）もボタンの横に出るので、条件を直しては作り直す作業が、その場でくり返せます。
 7. **結果を確認してダウンロード**：「医師別の当直一覧」をExcelで、「作成した当直案」をCSVでダウンロードできます。
 
-**途中で中断するとき**は、画面右上の「💾 作業を途中保存する」を押してください。スクロールしても右上に付いてくるので、いつでも押せます（管理用パスワードが必要です）。
+**途中で中断するとき**は、画面左上の「💾 作業を途中保存する」を押してください。スクロールしても右上に付いてくるので、いつでも押せます（管理用パスワードが必要です）。
 年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位がまとめて途中保存され、
-次回は画面右上の「📂 前回の作業の続きから始める」で元に戻せます。途中保存は、ボタンを押したときだけ行われます（当直案の作成では保存されません）。
+次回は画面左上の「📂 前回の作業の続きから始める」で元に戻せます。途中保存は、ボタンを押したときだけ行われます（当直案の作成では保存されません）。
 
         """)
     with tab_ng:
@@ -2653,9 +2657,9 @@ st.markdown("""
 .st-key-create_bar > div{width:auto !important;flex:0 0 auto !important;margin:0 !important}
 .st-key-create_bar [data-testid="stElementContainer"],.st-key-create_bar [data-testid="stMarkdownContainer"],
 .st-key-create_bar [data-testid="stMarkdown"]{margin:0 !important;width:auto !important}
-/* 並び：左に移動リンク、右に結果と作成ボタン */
-.st-key-create_bar > div:has(.cb-box){order:1;flex:1 1 auto !important}
-.st-key-create_bar > div:has(button){order:2}
+/* 並び：いちばん左に作成ボタン、その右に移動リンク、右端に結果 */
+.st-key-create_bar > div:has(button){order:1}
+.st-key-create_bar > div:has(.cb-box){order:2;flex:1 1 auto !important}
 .st-key-create_bar button{min-height:2.7rem;padding:0 1.6rem;font-size:1rem;font-weight:800;white-space:nowrap}
 .st-key-create_bar p{margin:0}
 .cb-box{display:flex;flex-direction:row;align-items:center;gap:14px;width:100%}
@@ -2667,10 +2671,8 @@ st.markdown("""
 /* 下の帯に最後の内容が隠れないよう、ページの下に余白を取る */
 [data-testid="stMainBlockContainer"],.block-container{padding-bottom:6.5rem !important}
 @media (max-width:600px){
-  /* スマートフォン：右下にはStreamlitのマークが出るので、作成ボタンを左に置き、右側を空ける */
+  /* スマートフォン：右下にはStreamlitのマークが出るので、右側を空ける */
   .st-key-create_bar{height:58px !important;padding:0 7.5rem 0 .6rem;gap:8px !important}
-  .st-key-create_bar > div:has(button){order:1 !important}
-  .st-key-create_bar > div:has(.cb-box){order:2 !important}
   .st-key-create_bar button{padding:0 .9rem;font-size:.9rem}
   .cb-nav{display:none}.cb-res{margin-left:0;font-size:.75rem;white-space:normal}
 }
@@ -3139,7 +3141,7 @@ with st.expander("NGの種類・一括操作について", expanded=False):
 チェックを戻すと、元のNG指定がそのまま復活します。
 
 **「NG日を反映する」は、今開いている画面の計算条件に入れる操作です。**
-次回も続きから使う場合は、画面右上の「💾 作業を途中保存する」を押してください。
+次回も続きから使う場合は、画面左上の「💾 作業を途中保存する」を押してください。
     """)
 
 ng_layout = st.radio("NGカレンダーの表示", ["月間カレンダー", "1日〜月末を横一列"], horizontal=True, key="ng_calendar_layout")
