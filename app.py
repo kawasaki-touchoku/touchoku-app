@@ -3212,7 +3212,7 @@ if not valid_staff.empty:
     def ng_doctor_label(name):
         count = sum(
             1 for d in range(1, num_days + 1)
-            if effective_ng(st.session_state.get(f"ng_{name}_{year}_{month}_{d}", "OK"), day_is_holiday[d]) != "OK"
+            if d not in locked_days and effective_ng(st.session_state.get(f"ng_{name}_{year}_{month}_{d}", "OK"), day_is_holiday[d]) != "OK"
         )
         mark = "　💬" if name in doctor_comments or doctor_notes.get(name) else ""
         return (f"{name}（NG {count}日）" if count else f"{name}（NGなし）") + mark
@@ -3300,7 +3300,8 @@ if not valid_staff.empty:
                             st.markdown("📝 **医師条件の備考**")
                             st.text(note)
                 # 保存値は書き換えず、その日に実際に効く内容だけを表示する
-                shown = {d: effective_ng(st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"], day_is_holiday[d]) for d in range(1, num_days + 1)}
+                # 「NG入力なし」の日は、別の方法で当番を決めるのでNGとして扱わない
+                shown = {d: "OK" if d in locked_days else effective_ng(st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"], day_is_holiday[d]) for d in range(1, num_days + 1)}
 
                 saved_strs = []
                 for d, val in shown.items():
@@ -3322,10 +3323,13 @@ if not valid_staff.empty:
                         "options": options, "value": shown[d],
                         "warning": pm_duty_restricted(dt, hard_days, year, month, custom_holidays, next_month_special_holiday),
                         "kind": "saturday" if dt.weekday() == 5 and not jpholiday.is_holiday(dt) and d not in custom_holidays else ("holiday" if hol else "weekday"),
+                        "locked": d in locked_days,
                     })
                 revision = hashlib.sha256(json.dumps([year, month, doc_name, ng_layout, component_days], ensure_ascii=False).encode()).hexdigest()
                 component_key = f"ng_editor_{'row' if ng_horizontal else 'month'}_{doc_name}_{year}_{month}"
                 st.markdown("<div style='color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:6px;padding:8px 10px;font-size:0.9rem;font-weight:600;'>⚠は、翌日PMにdutyがあるため、原則としてその日の宿直を外すことを示します。翌日が休日の場合は⚠を表示せず、この制限の対象外になります。</div>", unsafe_allow_html=True)
+                if locked_days:
+                    st.caption("灰色の日（" + "・".join(f"{d}日" for d in sorted(locked_days)) + "）は、いちばん上のカレンダーで「NG入力なし」にした日です。NGは入力できず、当直案の計算でもNGとして扱いません。")
                 response = horizontal_ng_component(HORIZONTAL_NG_HTML)(
                     days=component_days, mode="row" if ng_horizontal else "month",
                     offset=datetime.date(year, month, 1).weekday(), doctor=doc_name,
@@ -3374,6 +3378,8 @@ if not valid_staff.empty:
         ng_items = []
         for d in range(1, num_days + 1):
             val = st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", "OK")
+            if d in locked_days:
+                continue   # 「NG入力なし」の日のNGは計算に使わない
             if val == "全NG":
                 ng_items.append(str(d))
             elif val != "OK":
