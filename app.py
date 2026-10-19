@@ -303,6 +303,8 @@ body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI"
 .half.none:hover{background:repeating-linear-gradient(135deg,#fafbfc 0 6px,#f3f5f8 6px 7px)}
 .st .m{display:none}
 .slot{height:34px;flex:none}
+.cell.locked{background:#f1f3f6 !important;border:1px dashed #c3cad5 !important}
+.locked-note{height:69px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12px;font-weight:700;color:#8a94a6;line-height:1.4}
 #note{margin:8px 2px;font-size:12px;color:var(--sub);min-height:16px}
 #apply{background:#ff4b4b;color:#fff;border:0;border-radius:8px;padding:11px 18px;font:700 14px system-ui,sans-serif;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08)}
 /* 反映していない変更があるときは、ボタンを目立たせる */
@@ -327,6 +329,7 @@ body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI"
  .month .pm small{font-size:7.5px;white-space:normal;max-width:30px;overflow-wrap:anywhere}
  .month .seg{border-radius:6px}
  .month .slot{height:30px}
+ .month .locked-note{height:61px;font-size:10px}
  .month .half{height:30px;font-size:10px;gap:0;flex-direction:column;line-height:1.1}
  .month .half .st{font-size:9.5px}
  .month .st .w,.month .none .w{display:none}.month .st .m,.month .none .m{display:inline}
@@ -383,6 +386,10 @@ window.addEventListener('message',(event)=>{
       const half=(which,label)=>{let h=document.createElement('div');h.className='half '+which;h.tabIndex=0;h.setAttribute('role','button');
         h.setAttribute('aria-label',d.day+'日の'+label);h.innerHTML='<span class="lb">'+label+'</span><span class="st"></span>';
         h.onclick=()=>toggle(which);h.onkeydown=(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle(which)}};return h};
+      if(d.locked){   // 年末年始など、先生がNGを入力できない日
+        cell.classList.add('locked');cell.append(date,flag);
+        let ln=document.createElement('div');ln.className='locked-note';ln.innerHTML='別途<br>決定';cell.append(ln);strip.append(cell);return;
+      }
       let seg=document.createElement('div');seg.className='seg';
       if(holiday)seg.append(half('day','日直'));
       seg.append(half('night','宿直'));
@@ -1799,8 +1806,8 @@ def ng_text_summary(text, year, month, holidays):
     return "、".join(parts)
 
 
-def ng_calendar_days(year, month, holidays, next_month_special_holiday, pm_weekdays, values_by_day):
-    """NGカレンダー部品に渡す日ごとのデータを作る。"""
+def ng_calendar_days(year, month, holidays, next_month_special_holiday, pm_weekdays, values_by_day, locked_days=()):
+    """NGカレンダー部品に渡す日ごとのデータを作る。locked_days の日は、先生がNGを入力できない（年末年始など）。"""
     days = []
     for d in range(1, calendar.monthrange(year, month)[1] + 1):
         dt = datetime.date(year, month, d)
@@ -1811,7 +1818,10 @@ def ng_calendar_days(year, month, holidays, next_month_special_holiday, pm_weekd
             "value": effective_ng(values_by_day.get(d, "OK"), hol),
             "warning": pm_duty_restricted(dt, pm_weekdays, year, month, holidays, next_month_special_holiday),
             "kind": "saturday" if dt.weekday() == 5 and not jpholiday.is_holiday(dt) and d not in holidays else ("holiday" if hol else "weekday"),
+            "locked": d in locked_days,
         })
+        if d in locked_days:
+            days[-1]["value"] = "OK"
     return days
 
 
@@ -1932,12 +1942,14 @@ def work_state_restore():
         return
     y, m = int(data["year"]), int(data["month"])
     for key in list(st.session_state.keys()):
-        if key.startswith(("ng_", "hol_", "next_month_special_holiday_", "shortage_priority_")):
+        if key.startswith(("ng_", "hol_", "lock_", "next_month_special_holiday_", "shortage_priority_")):
             del st.session_state[key]
     st.session_state["sel_year"] = y
     st.session_state["sel_month"] = m
     for d in data.get("holidays", []):
         st.session_state[f"hol_{y}_{m}_{int(d)}"] = True
+    for d in data.get("locked", []):
+        st.session_state[f"lock_{y}_{m}_{int(d)}"] = True
     st.session_state[f"next_month_special_holiday_{y}_{m}"] = bool(data.get("next_special"))
     for slot, rank in (data.get("priority") or {}).items():
         st.session_state[f"shortage_priority_{slot}"] = int(rank)
@@ -2155,7 +2167,10 @@ def doctor_entry_page(key):
     layout = st.radio("表示", ["月間カレンダー", "1日〜月末を横一列"], horizontal=True, key="remote_layout")
     pm_weekdays = pm_duty_weekdays(tokens[doctor].get("翌日PM duty", ""))
     values = parse_ng_dict(saved_text, year, month)
-    days = ng_calendar_days(year, month, holidays, next_special, pm_weekdays, values)
+    locked_days = set(parse_holiday_list(settings.get("入力不可日", "")))
+    days = ng_calendar_days(year, month, holidays, next_special, pm_weekdays, values, locked_days)
+    if locked_days:
+        st.caption("灰色の日（" + "・".join(f"{d}日" for d in sorted(locked_days)) + "）は、別の方法で当番を決めるため、NGは入力できません。")
     revision = hashlib.sha256(json.dumps([year, month, doctor, layout, days], ensure_ascii=False).encode()).hexdigest()
     component_key = f"remote_ng_{'row' if layout != '月間カレンダー' else 'month'}_{year}_{month}"
     response = horizontal_ng_component(HORIZONTAL_NG_HTML)(
@@ -2177,8 +2192,10 @@ def doctor_entry_page(key):
                 st.error("受付が締め切られたため、保存できませんでした。担当者に直接ご連絡ください。")
                 return
             # 画面で選べない日（平日の日NGなど）の過去の値は、そのまま残す
-            merged = dict(values)
+            merged = {d: v for d, v in values.items() if d not in locked_days}   # 入力できない日のNGは残さない
             for d, (v, item) in enumerate(zip(new_values, days), 1):
+                if d in locked_days:
+                    continue
                 if v != item["value"]:
                     if v == "OK":
                         merged.pop(d, None)
@@ -2275,7 +2292,7 @@ def import_remote_ng(year, month, submissions, mode="merge"):
     st.session_state["remote_import_message"] = f"{len(submissions)}名分のNG日を、{how}取り込みました。"
 
 
-def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_special_holiday, day_is_holiday):
+def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_special_holiday, day_is_holiday, locked_days=()):
     """管理者用：受付の開始・締め切り、専用URL、提出状況、取り込み。"""
     # 管理用パスワードが必要な欄であることが一目で分かるように、紺色の枠で囲み、上に印を付ける
     st.markdown("""
@@ -2335,12 +2352,19 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
 
         # --- 受付の開始・締め切り ---
         deadline = st.text_input("先生方に表示する締め切り日（例：10月25日）", value=settings.get("締め切り日", "") if active == month_key else "", key="remote_deadline")
+        _n_days = calendar.monthrange(year, month)[1]
+        _saved_locked = [d for d in parse_holiday_list(settings.get("入力不可日", "")) if d <= _n_days] if active == month_key else []
+        locked_sel = sorted(locked_days)
+        locked_text = ",".join(map(str, locked_sel))
+        if locked_sel:
+            st.caption("先生がNGを入力できない日（上のカレンダーの「NG入力なし」）：" + "・".join(f"{month}/{d}" for d in locked_sel))
         c1, c2, c3 = st.columns(3)
         if c1.button(f"{year}年{month}月の受付を開始する", key="remote_open", use_container_width=True,
                      help="上で設定した年月・特別休日で受付を始めます。先生の名簿と専用URLも更新します。"):
             remote_sync_doctors(doctor_rows)
             remote_save_settings(**{"受付中の年月": month_key, "特別休日": ",".join(map(str, sorted(custom_holidays))),
-                                    "翌月1日特別休日": bool(next_month_special_holiday), "締め切り": False, "締め切り日": deadline})
+                                    "翌月1日特別休日": bool(next_month_special_holiday), "締め切り": False, "締め切り日": deadline,
+                                    "入力不可日": locked_text})
             st.rerun()
         if active == month_key:
             if not closed and c2.button("🔒 締め切る（先生側の編集を止める）", key="remote_close", use_container_width=True):
@@ -2352,11 +2376,14 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
             if c3.button("締め切り日・休日設定を更新", key="remote_update", use_container_width=True,
                          help="受付中に「休日にする」や締め切り日を変えた場合に押します。"):
                 remote_save_settings(**{"特別休日": ",".join(map(str, sorted(custom_holidays))),
-                                        "翌月1日特別休日": bool(next_month_special_holiday), "締め切り日": deadline})
+                                        "翌月1日特別休日": bool(next_month_special_holiday), "締め切り日": deadline,
+                                        "入力不可日": locked_text})
                 st.rerun()
             saved_holidays = parse_holiday_list(settings.get("特別休日", ""))
             if saved_holidays != sorted(custom_holidays):
                 st.warning("上のカレンダーの「休日にする」が、受付開始時の設定と違います。先生側の画面に反映するには「締め切り日・休日設定を更新」を押してください。")
+            if sorted(locked_sel) != sorted(_saved_locked):
+                st.warning("上のカレンダーの「NG入力なし」が、先生側の画面とまだ違います。反映するには「締め切り日・休日設定を更新」を押してください。")
 
         # --- 専用URL ---
         st.markdown("##### 🔗 先生ごとの専用URL（固定）")
@@ -2417,7 +2444,15 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
         flash = st.session_state.pop("remote_import_message", None)
         if flash:
             st.success(flash)
-        importable = {name: r for name, r in submissions.items() if name in {n for n, _ in doctor_rows}}
+        _locked_now = set(parse_holiday_list(settings.get("入力不可日", ""))) if active == month_key else set()
+
+        def _drop_locked(r):
+            # 先生がNGを入力できない日（年末年始など）のNGは取り込まない
+            if not _locked_now:
+                return r
+            kept = {d: v for d, v in parse_ng_dict(r.get("NG日", ""), year, month).items() if d not in _locked_now}
+            return {**r, "NG日": ng_dict_to_text(kept)}
+        importable = {name: _drop_locked(r) for name, r in submissions.items() if name in {n for n, _ in doctor_rows}}
         if importable:
             mode = "replace"   # 取り込むと、その先生のNG日は提出内容に置き換わる
             changes = []
@@ -2497,7 +2532,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 
 NG日の欄にある「📨 先生方からのNG日入力（専用URL）」を開き、管理用パスワードを入れて使います。
 
-1. **受付を開始**：締め切り日を書いて「受付を開始する」を押します。
+1. **受付を開始**：締め切り日を書いて「受付を開始する」を押します。年末年始など別の方法で当番を決める日は、先にいちばん上のカレンダーで「NG入力なし」にチェックしておくと、先生側のカレンダーで灰色になり、NGを押せなくなります。
 2. **URLを配る（初回だけ）**：「配布用カード（QRコード付き）」を印刷して、各先生に渡します。URLは毎月同じなので、翌月からは「入力が始まりました」と伝えるだけです。
 3. **先生が入力**：先生はスマートフォンのカメラでQRコードを読み取り、入れない日の「日直」「宿直」のボタンを押してNGにし、「NG日とコメントを保存する」を押します。管理者へのコメントも書けます。締め切りまでは何度でも直せて、最後に保存した内容が採用されます。
    アプリは12時間ほど誰も開かないと休止し、英語の画面（Zzzz…）が出ます。青いボタン「Yes, get this app back up!」を押して1分ほど待つと開きます（配布用カードにも書いてあります）。
@@ -2707,9 +2742,11 @@ st.divider()
 
 st.subheader(f"📅 平日に日直を設ける日（特別休日） - {month}月")
 st.caption("年末年始やお盆など、平日でも日直が必要な日を指定します。チェックした日は、日直・宿直ともに休日回数の集計対象になります。")
+st.caption("「NG入力なし」にチェックした日は、先生の専用URLの画面で灰色になり、NGを入力できなくなります（年末年始など、別の方法で当番を決める日に使います）。")
 
 cal_matrix = calendar.monthcalendar(year, month)
 custom_holidays = []
+locked_days = []   # 先生がNGを入力できない日（年末年始など）
 
 # 特別休日カレンダーの見た目。key を付けたコンテナ（st-key-〜）を起点に指定しているので、
 # 他の部品には影響しない。
@@ -2726,7 +2763,7 @@ st.markdown("""
  flex:none !important;
 }
 .st-key-special_holiday_calendar [class*="st-key-special_day_"] {
- height:112px !important; min-height:112px !important;
+ height:138px !important; min-height:138px !important;
  border:1px solid #d6dce5; border-radius:7px;
  padding:8px 3px !important; gap:6px !important;
  box-sizing:border-box;
@@ -2751,7 +2788,7 @@ st.markdown("""
 @media(max-width:600px) {
  .st-key-special_holiday_calendar [data-testid="stHorizontalBlock"] {gap:3px !important}
  .st-key-special_holiday_calendar [class*="st-key-special_day_"] {
-  height:100px !important; min-height:100px !important; padding:6px 1px !important;
+  height:128px !important; min-height:128px !important; padding:6px 1px !important;
  }
  .st-key-special_holiday_calendar [data-testid="stCheckbox"] label p {font-size:10px}
  .st-key-special_holiday_calendar [data-testid="stCheckbox"] label {gap:1px}
@@ -2799,6 +2836,10 @@ with st.container(key="special_holiday_calendar"):
                     else:
                         if st.checkbox("休日にする", key=f"hol_{year}_{month}_{day}"):
                             custom_holidays.append(day)
+                    # 年末年始など、別の方法で当番を決める日（先生側でNGを入力できなくする）
+                    if st.checkbox("NG入力なし", key=f"lock_{year}_{month}_{day}",
+                                   help="先生の専用URLの画面で、この日のNGを入力できなくします（年末年始など、別の方法で当番を決める日）。"):
+                        locked_days.append(day)
 
 next_month_first = datetime.date(year, month, calendar.monthrange(year, month)[1]) + datetime.timedelta(days=1)
 next_month_first_label = f"{next_month_first.year}/{next_month_first.month}/1（{WEEKDAYS_JA[next_month_first.weekday()]}）"
@@ -3149,7 +3190,7 @@ if not valid_staff.empty:
     remote_admin_panel(
         year, month,
         [(str(r["先生の名前"]), clean_text(r.get("翌日PM duty", ""))) for _, r in valid_staff.iterrows()],
-        custom_holidays, next_month_special_holiday, day_is_holiday,
+        custom_holidays, next_month_special_holiday, day_is_holiday, locked_days,
     )
     # 医師の選択はタブではなく選択欄にする。
     # （タブは表示の切り替えなどで画面が作り直されると先頭の医師に戻ってしまい、入力ミスの原因になるため）
@@ -3402,6 +3443,7 @@ st.caption("現在の優先順位：" + " ＞ ".join("・".join(g) for g in prio
 work_snapshot = {
     "year": year, "month": month,
     "holidays": sorted(int(d) for d in custom_holidays),
+    "locked": sorted(int(d) for d in locked_days),
     "next_special": bool(next_month_special_holiday),
     "multi": [[f"{d}日", s, int(c)] for (d, s), c in multi_slots_dict.items()],
     "fixed_csv": edited_fixed_df.to_csv(index=False),
