@@ -1134,7 +1134,8 @@ def add_type_cap(model, worked, forced_vars, cap, bound):
     model.Add(sum(worked) <= cap + extra)
 
 
-def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_special_holiday=False, shortage_priority=None):
+def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_special_holiday=False, shortage_priority=None, locked_days=()):
+    locked_days = set(locked_days)   # 「別途決定」の日：別の方法で当番を決めるので、ここでは割り当てない（確定当直だけ残す）
     _, num_days = calendar.monthrange(target_year, target_month)
     days = range(1, num_days + 1)
 
@@ -1192,6 +1193,8 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
         hard_weekdays[doc] = pm_duty_weekdays(row.get('翌日PM duty', ''))
         ng_days_dict[doc] = parse_ng_dict(row.get(NG_COLUMN, ''), target_year, target_month)
         req_days[doc], req_specific[doc] = parse_requests(row.get(REQUEST_COLUMN, ''), target_year, target_month)
+        req_days[doc] = [d for d in req_days[doc] if d not in locked_days]
+        req_specific[doc] = [(d, s) for d, s in req_specific[doc] if d not in locked_days]
         req_priority[doc] = safe_int(row.get('希望優先度(数字が大きいほど優先)'), 1)
         min_intervals[doc] = safe_int(row.get('最低空ける日数'), 5)
         min_shifts_total[doc] = safe_int(row.get('月間最小回数'), 0)
@@ -1230,6 +1233,8 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
 
     def required_count(d, s):
         fixed_docs_count = sum(1 for doc in doctors if (d, s) in absolute_req_specific[doc])
+        if d in locked_days:
+            return fixed_docs_count
         return max(multi_slots_dict.get((d, s), 1), fixed_docs_count)
 
     def total_cap(doc):
@@ -1251,6 +1256,13 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
             for d in days:
                 fixed_count = sum(1 for sd, _ in absolute_req_specific[doc] if sd == d)
                 model.Add(sum(x[(d, doc, s)] for s in daily_active_shifts[d]) <= max(1, fixed_count))
+
+            # 「別途決定」の日は、確定当直以外は入れない
+            for d in locked_days:
+                if d in days:
+                    for s in daily_active_shifts[d]:
+                        if (d, s) not in absolute_req_specific[doc] and d not in absolute_req_days[doc]:
+                            model.Add(x[(d, doc, s)] == 0)
 
             # NG日（全NG / 日NG / 宿NG）
             for d, ng_type in ng_days_dict[doc].items():
@@ -1457,7 +1469,7 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
     return None, False, reasons, None, None
 
 
-def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_special_holiday=False, shortage_priority=None):
+def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_special_holiday=False, shortage_priority=None, locked_days=()):
     staff_df, errors = validate_staff_inputs(staff_df, target_year, target_month)
     fixed_df, fixed_errors = validate_fixed_inputs(fixed_df, staff_df.get('先生の名前', pd.Series(dtype=str)).tolist(), target_year, target_month, custom_holidays)
     errors += fixed_errors
@@ -1470,7 +1482,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             if not is_holiday_date(dt, target_year, target_month, custom_holidays):
                 errors.append(f'{d}日の日直増員：先に特別休日を指定してください。')
     if errors: return None, False, errors, None, None
-    result, success, warnings, past, future = _generate_shift_core(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority)
+    result, success, warnings, past, future = _generate_shift_core(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority, locked_days)
     if result is not None:
         warnings += audit_schedule(result, staff_df, target_year, target_month, custom_holidays, multi_slots_dict, past, future, next_month_special_holiday)
         success = not any('⚠️不足' in str(v) for s in ALL_SHIFT_TYPES for v in result[s])
@@ -2357,7 +2369,7 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
         locked_sel = sorted(locked_days)
         locked_text = ",".join(map(str, locked_sel))
         if locked_sel:
-            st.caption("先生がNGを入力できない日（上のカレンダーの「NG入力なし」）：" + "・".join(f"{month}/{d}" for d in locked_sel))
+            st.caption("先生がNGを入力できない日（上のカレンダーの「別途決定」）：" + "・".join(f"{month}/{d}" for d in locked_sel))
         c1, c2, c3 = st.columns(3)
         if c1.button(f"{year}年{month}月の受付を開始する", key="remote_open", use_container_width=True,
                      help="上で設定した年月・特別休日で受付を始めます。先生の名簿と専用URLも更新します。"):
@@ -2383,7 +2395,7 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
             if saved_holidays != sorted(custom_holidays):
                 st.warning("上のカレンダーの「休日にする」が、受付開始時の設定と違います。先生側の画面に反映するには「締め切り日・休日設定を更新」を押してください。")
             if sorted(locked_sel) != sorted(_saved_locked):
-                st.warning("上のカレンダーの「NG入力なし」が、先生側の画面とまだ違います。反映するには「締め切り日・休日設定を更新」を押してください。")
+                st.warning("上のカレンダーの「別途決定」が、先生側の画面とまだ違います。反映するには「締め切り日・休日設定を更新」を押してください。")
 
         # --- 専用URL ---
         st.markdown("##### 🔗 先生ごとの専用URL（固定）")
@@ -2532,7 +2544,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 
 NG日の欄にある「📨 先生方からのNG日入力（専用URL）」を開き、管理用パスワードを入れて使います。
 
-1. **受付を開始**：締め切り日を書いて「受付を開始する」を押します。年末年始など別の方法で当番を決める日は、先にいちばん上のカレンダーで「NG入力なし」にチェックしておくと、先生側のカレンダーで灰色になり、NGを押せなくなります。
+1. **受付を開始**：締め切り日を書いて「受付を開始する」を押します。年末年始など別の方法で当番を決める日は、先にいちばん上のカレンダーで「別途決定」にチェックしておくと、先生側のカレンダーで灰色になり、NGを押せなくなります（当直案でもその日は決めません）。
 2. **URLを配る（初回だけ）**：「配布用カード（QRコード付き）」を印刷して、各先生に渡します。URLは毎月同じなので、翌月からは「入力が始まりました」と伝えるだけです。
 3. **先生が入力**：先生はスマートフォンのカメラでQRコードを読み取り、入れない日の「日直」「宿直」のボタンを押してNGにし、「NG日とコメントを保存する」を押します。管理者へのコメントも書けます。締め切りまでは何度でも直せて、最後に保存した内容が採用されます。
    アプリは12時間ほど誰も開かないと休止し、英語の画面（Zzzz…）が出ます。青いボタン「Yes, get this app back up!」を押して1分ほど待つと開きます（配布用カードにも書いてあります）。
@@ -2742,7 +2754,7 @@ st.divider()
 
 st.subheader(f"📅 平日に日直を設ける日（特別休日） - {month}月")
 st.caption("年末年始やお盆など、平日でも日直が必要な日を指定します。チェックした日は、日直・宿直ともに休日回数の集計対象になります。")
-st.caption("「NG入力なし」にチェックした日は、先生の専用URLの画面で灰色になり、NGを入力できなくなります（年末年始など、別の方法で当番を決める日に使います）。")
+st.caption("「別途決定」にチェックした日は、このアプリでは当直を決めません（年末年始など、別の方法で当番を決める日に使います）。先生の専用URLの画面でも灰色になり、NGを入力できなくなります。確定当直に入れた分だけは当直案に表示されます。")
 
 cal_matrix = calendar.monthcalendar(year, month)
 custom_holidays = []
@@ -2837,8 +2849,8 @@ with st.container(key="special_holiday_calendar"):
                         if st.checkbox("休日にする", key=f"hol_{year}_{month}_{day}"):
                             custom_holidays.append(day)
                     # 年末年始など、別の方法で当番を決める日（先生側でNGを入力できなくする）
-                    if st.checkbox("NG入力なし", key=f"lock_{year}_{month}_{day}",
-                                   help="先生の専用URLの画面で、この日のNGを入力できなくします（年末年始など、別の方法で当番を決める日）。"):
+                    if st.checkbox("別途決定", key=f"lock_{year}_{month}_{day}",
+                                   help="年末年始など、別の方法で当番を決める日です。この日は当直案を作らず、先生の専用URLの画面でもNGを入力できなくなります。"):
                         locked_days.append(day)
 
 next_month_first = datetime.date(year, month, calendar.monthrange(year, month)[1]) + datetime.timedelta(days=1)
@@ -2903,6 +2915,8 @@ for _, row in edited_multi_df.iterrows():
 # ==========================================
 shift_counts = {s: 0 for s in NIGHT_SHIFTS + DAY_SHIFTS}
 for d in range(1, num_days + 1):
+    if d in locked_days:
+        continue   # 「別途決定」の日は別の方法で決めるので、このアプリの枠数に数えない
     is_hol = is_holiday_date(datetime.date(year, month, d), year, month, custom_holidays)
     for s in NIGHT_SHIFTS:
         shift_counts[s] += multi_slots_dict.get((d, s), 1)
@@ -3300,7 +3314,7 @@ if not valid_staff.empty:
                             st.markdown("📝 **医師条件の備考**")
                             st.text(note)
                 # 保存値は書き換えず、その日に実際に効く内容だけを表示する
-                # 「NG入力なし」の日は、別の方法で当番を決めるのでNGとして扱わない
+                # 「別途決定」の日は、別の方法で当番を決めるのでNGとして扱わない
                 shown = {d: "OK" if d in locked_days else effective_ng(st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"], day_is_holiday[d]) for d in range(1, num_days + 1)}
 
                 saved_strs = []
@@ -3329,7 +3343,7 @@ if not valid_staff.empty:
                 component_key = f"ng_editor_{'row' if ng_horizontal else 'month'}_{doc_name}_{year}_{month}"
                 st.markdown("<div style='color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:6px;padding:8px 10px;font-size:0.9rem;font-weight:600;'>⚠は、翌日PMにdutyがあるため、原則としてその日の宿直を外すことを示します。翌日が休日の場合は⚠を表示せず、この制限の対象外になります。</div>", unsafe_allow_html=True)
                 if locked_days:
-                    st.caption("灰色の日（" + "・".join(f"{d}日" for d in sorted(locked_days)) + "）は、いちばん上のカレンダーで「NG入力なし」にした日です。NGは入力できず、当直案の計算でもNGとして扱いません。")
+                    st.caption("灰色の日（" + "・".join(f"{d}日" for d in sorted(locked_days)) + "）は、いちばん上のカレンダーで「別途決定」にした日です。NGは入力できず、当直案でもこの日の当直は決めません（確定当直に入れた分だけ表示されます）。")
                 response = horizontal_ng_component(HORIZONTAL_NG_HTML)(
                     days=component_days, mode="row" if ng_horizontal else "month",
                     offset=datetime.date(year, month, 1).weekday(), doctor=doc_name,
@@ -3379,7 +3393,7 @@ if not valid_staff.empty:
         for d in range(1, num_days + 1):
             val = st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", "OK")
             if d in locked_days:
-                continue   # 「NG入力なし」の日のNGは計算に使わない
+                continue   # 「別途決定」の日のNGは計算に使わない
             if val == "全NG":
                 ng_items.append(str(d))
             elif val != "OK":
@@ -3488,7 +3502,7 @@ if fixed_input_errors:
     if create_bar_request:
         create_bar_show("<div class='cb-res bad'>⚠ 確定当直の入力に誤りがあります。赤い表示を確認してください。</div>")
     st.stop()
-current_signature = input_signature(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority)
+current_signature = (input_signature(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority), tuple(sorted(locked_days)))
 if 'generated_df' in st.session_state and st.session_state.get('generated_signature') != current_signature:
     for key in ['generated_df', 'past_worked_dates', 'future_worked_dates', 'generated_warnings', 'generated_signature', 'generated_year', 'generated_month']:
         st.session_state.pop(key, None)
@@ -3509,7 +3523,7 @@ if len(staff_df) > 0:
     if create_clicked:
         with st.spinner("当直案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
             try:
-                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority)
+                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority, locked_days)
 
                 if df_result is not None:
                     st.session_state['generated_signature'] = current_signature
@@ -3620,6 +3634,8 @@ if len(staff_df) > 0:
             return ''
 
         with table_container:
+            if locked_days:
+                st.caption("「別途決定」にした日（" + "・".join(f"{month}/{d}" for d in sorted(locked_days)) + "）は、このアプリでは当直を決めていません（確定当直に入れた分だけ表示）。")
             # 表の中身はデータとして渡す。部品（一時ファイル）は1つのまま増えない。
             horizontal_ng_component(HOVER_TABLE_HTML)(
                 table=hover_schedule_data(df_result, shift_columns, doctors_list, color_highlighted_doctor),
