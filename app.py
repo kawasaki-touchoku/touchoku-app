@@ -2315,6 +2315,14 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
 .admin-badge.on{background:#2f8a5b}
 .admin-note{font-size:.85rem;color:#3b4a63;margin-left:8px}
 </style>""", unsafe_allow_html=True)
+    # 上のカレンダー（休日にする・別途決定）を、この画面で今まさに変えたかどうか。
+    # 開いた直後（まだ何も設定していない状態）で先生側の設定を消してしまわないよう、
+    # 変えたときだけ自動で先生側に反映する。
+    _cal_now = (year, month, tuple(sorted(custom_holidays)), tuple(sorted(locked_days)), bool(next_month_special_holiday))
+    _cal_prev = st.session_state.get("remote_cal_prev")
+    # 年月を切り替えただけのときは「変えた」とみなさない
+    cal_changed = _cal_prev is not None and _cal_prev[:2] == _cal_now[:2] and _cal_prev != _cal_now
+    st.session_state["remote_cal_prev"] = _cal_now
     logged_in = bool(st.session_state.get("remote_admin_ok"))
     box = st.container(key="remote_admin_box")
     with box:
@@ -2332,6 +2340,16 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
             st.error("管理用パスワード（admin_password）が設定されていません。Secretsに追加してください。")
             return
         if not st.session_state.get("remote_admin_ok"):
+            # ログインしていないと、上のカレンダーの「休日にする」「別途決定」は先生側に届かないので知らせる
+            try:
+                _st = remote_settings()
+                if _st.get("受付中の年月", "") == f"{year}-{month}" and (
+                        parse_holiday_list(_st.get("入力不可日", "")) != sorted(locked_days)
+                        or parse_holiday_list(_st.get("特別休日", "")) != sorted(custom_holidays)):
+                    st.warning("上のカレンダーの「休日にする」「別途決定」が、先生側の画面とまだ違います。"
+                               "管理用パスワードを入れて「締め切り日・休日設定を更新」を押すと反映されます。")
+            except Exception:
+                pass
             st.info("🔒 この欄は**管理者専用**です。受付の開始・締め切り、専用URLや配布用カードの作成、提出されたNG日の取り込みができます。"
                     "使うには、管理用パスワードを入力してください。")
             pw = st.text_input("管理用パスワード", type="password", key="remote_admin_pw")
@@ -2386,16 +2404,27 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
                 remote_save_settings(**{"締め切り": False})
                 st.rerun()
             if c3.button("締め切り日・休日設定を更新", key="remote_update", use_container_width=True,
-                         help="受付中に「休日にする」や締め切り日を変えた場合に押します。"):
+                         help="受付中に締め切り日を変えた場合に押します（上のカレンダーの「休日にする」「別途決定」は自動で反映されます）。"):
                 remote_save_settings(**{"特別休日": ",".join(map(str, sorted(custom_holidays))),
                                         "翌月1日特別休日": bool(next_month_special_holiday), "締め切り日": deadline,
                                         "入力不可日": locked_text})
                 st.rerun()
+            # 上のカレンダーの「休日にする」「別途決定」を変えたら、先生側の画面にも自動で反映する
             saved_holidays = parse_holiday_list(settings.get("特別休日", ""))
-            if saved_holidays != sorted(custom_holidays):
-                st.warning("上のカレンダーの「休日にする」が、受付開始時の設定と違います。先生側の画面に反映するには「締め切り日・休日設定を更新」を押してください。")
-            if sorted(locked_sel) != sorted(_saved_locked):
-                st.warning("上のカレンダーの「別途決定」が、先生側の画面とまだ違います。反映するには「締め切り日・休日設定を更新」を押してください。")
+            saved_next = settings.get("翌月1日特別休日", "") == "True"
+            cal_differs = saved_holidays != sorted(custom_holidays) or sorted(locked_sel) != sorted(_saved_locked) \
+                    or saved_next != bool(next_month_special_holiday)
+            if cal_differs and not cal_changed:
+                st.warning("上のカレンダーの「休日にする」「別途決定」が、先生側の画面と違います。"
+                           "いまの内容を先生側に反映するには「締め切り日・休日設定を更新」を押してください。")
+            elif cal_differs:
+                try:
+                    remote_save_settings(**{"特別休日": ",".join(map(str, sorted(custom_holidays))),
+                                            "翌月1日特別休日": bool(next_month_special_holiday),
+                                            "入力不可日": locked_text})
+                    st.toast("上のカレンダーの「休日にする」「別途決定」を、先生側の画面に反映しました。")
+                except Exception as e:
+                    st.warning(f"先生側の画面に休日・別途決定を反映できませんでした。「締め切り日・休日設定を更新」を押してください。詳細：{e}")
 
         # --- 専用URL ---
         st.markdown("##### 🔗 先生ごとの専用URL（固定）")
