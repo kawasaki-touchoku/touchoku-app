@@ -306,6 +306,10 @@ body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI"
 .cell.locked{background:#f1f3f6 !important;border:1px dashed #c3cad5 !important}
 .locked-note{height:69px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12px;font-weight:700;color:#8a94a6;line-height:1.4}
 #note{margin:8px 2px;font-size:12px;color:var(--sub);min-height:16px}
+/* 先生用画面：まとめて全日NG／すべてOKにするボタン */
+#bulk{display:none;gap:8px;justify-content:flex-end;margin:0 2px 10px}
+#bulk button{background:#fff;color:var(--ink);border:1px solid #c9d2de;border-radius:8px;padding:8px 14px;font:700 13px system-ui,sans-serif;cursor:pointer}
+#bulk button:hover{background:#f5f7fa}
 #apply{background:#ff4b4b;color:#fff;border:0;border-radius:8px;padding:11px 18px;font:700 14px system-ui,sans-serif;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08)}
 /* 反映していない変更があるときは、ボタンを目立たせる */
 #apply.dirty{background:#e8590c;box-shadow:0 0 0 3px #ffd8a8;animation:pulse 1.6s ease-in-out infinite}
@@ -337,8 +341,8 @@ body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI"
 }
 </style><body>
 
-<div id="strip" class="strip" aria-label="NG日カレンダー"></div><div id="note"></div><div id="commentBox"><label for="comment">管理者へのコメント・要望 <small>（任意）</small></label><textarea id="comment" maxlength="500"></textarea></div><button id="apply" type="button">NG日を反映する</button><script>
-let version=null,days=[],draft=[];let mode='row';let frameHeight=0;
+<div id="bulk"><button type="button" id="allNg">全日NGにする</button><button type="button" id="allOk">すべてOKに戻す</button></div><div id="strip" class="strip" aria-label="NG日カレンダー"></div><div id="note"></div><div id="commentBox"><label for="comment">管理者へのコメント・要望 <small>（任意）</small></label><textarea id="comment" maxlength="500"></textarea></div><button id="apply" type="button">NG日を反映する</button><script>
+let version=null,days=[],draft=[],cells=[];let mode='row';let frameHeight=0;
 function send(type,data={}){window.parent.postMessage({isStreamlitMessage:true,type,...data},'*')}
 function resize(){let h=document.body.scrollHeight+10;if(h!==frameHeight){frameHeight=h;send('streamlit:setFrameHeight',{height:h})}}
 function combine(dayNg,nightNg){return dayNg&&nightNg?'全NG':dayNg?'日NG':nightNg?'宿NG':'OK'}
@@ -359,8 +363,9 @@ window.addEventListener('message',(event)=>{
   // 先生用画面だけ、保存ボタンの上にコメント欄を出す（保存済みのコメントが変わったときだけ書き換える）
   if(a.comment_enabled){document.getElementById('commentBox').style.display='block';
     if(a.comment!==commentBase){commentBase=a.comment||'';document.getElementById('comment').value=commentBase}}
+  if(a.bulk_buttons)document.getElementById('bulk').style.display='flex';
   if(a.version!==version){
-    version=a.version;mode=a.mode||'row';days=a.days;draft=days.map(d=>d.value);sentDirty=false;
+    version=a.version;mode=a.mode||'row';days=a.days;draft=days.map(d=>d.value);sentDirty=false;cells=[];
     let strip=document.getElementById('strip');
     strip.replaceChildren();
     strip.className='strip '+(mode==='month'?'month':'');
@@ -396,7 +401,7 @@ window.addEventListener('message',(event)=>{
       cell.append(date,flag);
       // 平日は日直がないので上段を空け、宿直ボタンの位置を休日とそろえる
       if(!holiday){let sp=document.createElement('div');sp.className='slot';cell.append(sp)}
-      cell.append(seg);paint(cell,d.value);strip.append(cell);
+      cell.append(seg);paint(cell,d.value);strip.append(cell);cells[i]=cell;
     });
     if(mode==='month'){let blanks=(7-(a.offset+days.length)%7)%7;for(let i=0;i<blanks;i++){let el=document.createElement('div');el.className='blank';strip.append(el)}}
     document.getElementById('note').textContent=mode==='month'?'':'左右へスクロールして選べます。';
@@ -424,6 +429,10 @@ function updateDirty(initial){
     send('streamlit:setComponentValue',{value:{kind:'dirty',dirty:sentDirty,version,token:Date.now().toString()+'-'+Math.random()},dataType:'json'});
   }
 }
+// まとめて変更（「別途決定」の日は変えない）。保存ボタンを押すまでは保存されない
+function setAll(ng){days.forEach((d,i)=>{if(d.locked||!cells[i])return;
+  const v=ng?(d.options.includes('全NG')?'全NG':'宿NG'):'OK';draft[i]=v;paint(cells[i],v)});updateDirty()}
+document.getElementById('allNg').onclick=()=>setAll(true);document.getElementById('allOk').onclick=()=>setAll(false);
 document.getElementById('apply').onclick=()=>{
   if(reportDirty&&!draft.some((v,i)=>v!==days[i].value))return;   // 変更がなければ何もしない
   send('streamlit:setComponentValue',{value:{kind:'apply',version,values:draft,comment:document.getElementById('comment').value,token:Date.now().toString()+'-'+Math.random()},dataType:'json'});
@@ -2188,7 +2197,7 @@ def doctor_entry_page(key):
         days=days, mode="row" if layout != "月間カレンダー" else "month",
         offset=datetime.date(year, month, 1).weekday(), doctor=doctor,
         button_label="NG日とコメントを保存する", pending_word="保存",
-        comment_enabled=True, comment=saved_comment,
+        comment_enabled=True, comment=saved_comment, bulk_buttons=True,
         version=revision, key=component_key, default=None,
     )
     seen_key = component_key + "_last_token"
