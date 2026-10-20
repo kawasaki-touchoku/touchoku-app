@@ -1698,8 +1698,8 @@ def qr_svg(text, size_mm=38):
 
 def remote_qr_cards_html(cards):
     """
-    先生ごとの専用URLを、A4・1人1枚の三つ折り用紙にした印刷用HTMLを作る。
-    片面印刷のまま点線で三つ折りにすると、宛名だけが外に出て、QRコードと説明は内側に隠れる。封筒に入れて配る。
+    先生ごとの専用URLを、A4・1人1枚の案内書類にした印刷用HTMLを作る。
+    ふつうの書類の体裁のまま、点線で三つ折りにできる（折り目に文字やQRコードがかからない配置）。
     cards: [(先生, 専用URL)]
     """
     import html as _html
@@ -1708,75 +1708,74 @@ def remote_qr_cards_html(cards):
         n = _html.escape(name)
         pages.append(f"""
 <section class="sheet">
-  <div class="panel cover">
-    <div class="cover-title">当直NG日入力用URL</div>
-    <div class="cover-name">{n} 先生</div>
+  <div class="panel p1">
+    <div class="to">{n} 先生</div>
+    <h1>当直NG日入力用URLのご案内</h1>
+    <p class="lead">毎月の当直表を作成するため、当直に入れない日（NG日）を、スマートフォンから入力していただくようお願いいたします。中のQRコード（またはURL）が、<b>{n} 先生専用</b>の入力ページです。</p>
   </div>
   <div class="fold"></div>
-  <div class="panel qr">
-    <div class="qr-name">{n} 先生 専用</div>
-    <div class="qr-body">
-      {qr_svg(url, size_mm=58)}
+  <div class="panel p2">
+    <div class="qrbox">
+      {qr_svg(url, size_mm=48)}
       <div class="qr-side">
-        <div class="big">スマートフォンの<br>カメラで読み取る</div>
-        <div class="small">QRコードにカメラを向けると、<br>NG日の入力ページが開きます。</div>
-        <div class="wake"><b>英語の画面（Zzzz…）が出たら</b><br>青いボタン「<b>Yes, get this app back up!</b>」を押して、<br>1分ほどお待ちください。</div>
+        <div class="big">スマートフォンのカメラで<br>QRコードを読み取ってください</div>
+        <div class="small">QRコードにカメラを向けると、NG日の入力ページが開きます。</div>
+        <div class="url-label">URL</div>
+        <div class="url">{_html.escape(url)}</div>
       </div>
     </div>
-    <div class="url">{_html.escape(url)}</div>
   </div>
   <div class="fold"></div>
-  <div class="panel howto">
-    <div class="howto-title">入力のしかた</div>
+  <div class="panel p3">
+    <h2>入力のしかた</h2>
     <ol>
-      <li>QRコードを読み取り、入力ページを開く</li>
-      <li>入れない日の「日直」「宿直」のボタンを押して、NGにする</li>
-      <li>「NG日とコメントを保存する」を押す</li>
-      <li>「✅ 保存しました」が出れば完了</li>
+      <li>QRコードを読み取り、入力ページを開きます。</li>
+      <li>入れない日の「日直」「宿直」のボタンを押して、NGにします。<br>
+          <span class="sub">休日は「日直」と「宿直」を別々に指定します。終日入れない日は両方押してください。</span></li>
+      <li>「NG日とコメントを保存する」を押し、「✅ 保存しました」と出れば完了です。</li>
     </ol>
-    <div class="change">休日は「日直」と「宿直」を<b>別々に</b>指定します。終日入れない日は<b>両方</b>押してください。</div>
+    <h2>ご注意</h2>
     <ul>
-      <li><b>このURLは毎月同じです。</b>ブックマークしておくと便利です。</li>
-      <li>締め切りまでは何度でも修正でき、<b>最後に保存した内容</b>が採用されます。</li>
-      <li>このURLは<b>先生専用</b>です。他の方に渡さないでください。なくした場合は担当者へご連絡ください。</li>
+      <li><b>このURLは毎月同じです。</b>締め切りまでは何度でも修正でき、<b>最後に保存した内容</b>が採用されます。</li>
+      <li>英語の画面（Zzzz…）が出たら、青いボタン「Yes, get this app back up!」を押して1分ほどお待ちください。</li>
+      <li>このURLは<b>先生専用</b>です。他の方には渡さないでください。紛失した場合は担当者までご連絡ください。</li>
     </ul>
   </div>
 </section>""")
-    return f"""<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>当直NG日入力 配布用カード</title>
+    return f"""<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>当直NG日入力用URLのご案内</title>
 <style>
 @page {{ size: A4 portrait; margin: 0; }}
 * {{ box-sizing: border-box; }}
-body {{ margin: 0; font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif; color: #1f2a37; background: #e9edf2; }}
-.bar {{ padding: 12px 16px; background: #eef3f8; border-bottom: 1px solid #cfd8e3; font-size: 14px; line-height: 1.6; }}
+body {{ margin: 0; font-family: "Hiragino Mincho ProN", "Yu Mincho", "MS Mincho", serif; color: #111; background: #e9edf2; }}
+.bar {{ padding: 12px 16px; background: #eef3f8; border-bottom: 1px solid #cfd8e3; font-size: 14px; line-height: 1.6;
+        font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif; }}
 .bar button {{ font-size: 15px; padding: 8px 18px; margin-right: 12px; cursor: pointer; }}
-.sheet {{ width: 210mm; height: 297mm; margin: 8mm auto; background: #fff; display: flex; flex-direction: column;
-         box-shadow: 0 1px 4px rgba(0,0,0,.15); break-after: page; page-break-after: always; overflow: hidden; }}
-.panel {{ height: 98mm; padding: 10mm 16mm; position: relative; }}
-.fold {{ height: 1.5mm; border-top: 1.2px dashed #8a94a6; position: relative; }}
-.fold span {{ position: absolute; right: 12mm; top: -3.2mm; background: #fff; padding: 0 2mm; font-size: 9pt; color: #6b7686; }}
-.cover {{ display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }}
-.seal {{ border: 2.5px solid #b42332; color: #b42332; font-weight: 700; font-size: 20pt; padding: 1mm 6mm; border-radius: 2mm; letter-spacing: .3em; }}
-.cover-title {{ margin-top: 6mm; font-size: 14pt; color: #4a5568; }}
-.cover-name {{ margin-top: 3mm; font-size: 30pt; font-weight: 700; }}
-.cover-note {{ margin-top: 4mm; font-size: 11pt; color: #b42332; }}
-.qr-name {{ font-size: 15pt; font-weight: 700; margin-bottom: 4mm; text-align: center; }}
-.qr-body {{ display: flex; align-items: center; justify-content: center; gap: 7mm; }}
-.qr-side {{ max-width: 92mm; }}
-.qr-side .big {{ font-size: 17pt; font-weight: 700; line-height: 1.4; }}
-.qr-side .small {{ margin-top: 4mm; font-size: 11.5pt; line-height: 1.6; color: #374151; }}
-.qr-side .wake {{ margin-top: 4mm; padding: 2mm 3mm; border: 1px solid #e3b341; background: #fff8e1; border-radius: 1.5mm;
-                 font-size: 9.5pt; line-height: 1.55; color: #5b4300; }}
-.url {{ position: absolute; left: 30mm; right: 30mm; bottom: 6mm; text-align: center; font-size: 7.5pt; color: #6b7280; word-break: break-all; font-family: monospace; }}
-.howto-title {{ font-size: 15pt; font-weight: 700; margin-bottom: 2mm; }}
-.howto ol {{ margin: 0 0 3mm 6mm; padding-left: 5mm; font-size: 12.5pt; line-height: 1.75; }}
-.howto .change {{ margin: 0 0 2.5mm; padding: 1.5mm 3mm; border: 1.5px solid #8a94a6; background: #f4f6f9; border-radius: 1.5mm; font-size: 10.5pt; line-height: 1.5; color: #3b2a1a; }}
-.howto ul {{ margin: 0; padding-left: 5mm; font-size: 10.5pt; line-height: 1.65; color: #374151; }}
+.sheet {{ width: 210mm; height: 297mm; margin: 8mm auto; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.15);
+         break-after: page; page-break-after: always; overflow: hidden; font-size: 10.5pt; line-height: 1.7; }}
+/* A4の縦297mmを3等分（99mm）。折り目の近くには何も置かない */
+.panel {{ height: 99mm; padding: 0 22mm; display: flex; flex-direction: column; justify-content: center; }}
+.fold {{ height: 0; border-top: 0.8px dashed #8a94a6; margin: 0 6mm; }}
+.p1 {{ justify-content: flex-start; padding-top: 16mm; }}
+.to {{ font-size: 15pt; border-bottom: 1px solid #111; align-self: flex-start; padding: 0 4mm 0.5mm 0; }}
+h1 {{ margin: 9mm 0 6mm; text-align: center; font-size: 17pt; font-weight: 700; letter-spacing: .05em; }}
+h2 {{ margin: 0 0 1.5mm; font-size: 12pt; font-weight: 700; border-left: 3px solid #111; padding-left: 2.5mm; line-height: 1.4; }}
+h2 + ol {{ margin-bottom: 4mm; }}
+.lead {{ margin: 0; text-indent: 1em; font-size: 11pt; line-height: 1.8; }}
+.qrbox {{ padding: 6mm 8mm; border: 1px solid #555; display: flex; align-items: center; gap: 9mm; }}
+.qr-side .big {{ font-size: 13pt; font-weight: 700; line-height: 1.6; }}
+.qr-side .small {{ margin-top: 2mm; font-size: 10pt; }}
+.url-label {{ margin-top: 3mm; font-size: 9pt; color: #444; }}
+.url {{ font-size: 8.5pt; word-break: break-all; font-family: monospace; color: #333; line-height: 1.4; }}
+ol, ul {{ margin: 0; padding-left: 7mm; }}
+li {{ margin: .4mm 0; }}
+.sub {{ font-size: 9pt; color: #444; }}
 @media print {{ body {{ background: #fff; }} .bar {{ display: none; }} .sheet {{ margin: 0; box-shadow: none; }} }}
 </style></head><body>
 <div class="bar"><button onclick="window.print()">🖨️ 印刷する</button>
-A4・縦・<b>片面</b>で印刷してください（{len(cards)}名分・1人1枚）。印刷の設定で「倍率：100%（実際のサイズ）」「余白：なし」を選ぶと、折り線の位置が正しくなります。</div>
+A4・縦・片面で印刷してください（{len(cards)}名分・1人1枚）。印刷の設定で「倍率：100%（実際のサイズ）」「余白：なし」を選ぶと、折り線の位置が正しくなります。上の点線は外側へ、下の点線は内側へ折ると、宛名が表に出て、QRコードは内側に隠れます。</div>
 {''.join(pages)}
 </body></html>"""
+
 
 def remote_latest_submissions(month_key):
     """その年月の、先生ごとの最新の提出 {先生: {"NG日":…, "保存日時":…}}"""
@@ -2350,7 +2349,7 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
                                "管理用パスワードを入れて「締め切り日・休日設定を更新」を押すと反映されます。")
             except Exception:
                 pass
-            st.info("🔒 この欄は**管理者専用**です。受付の開始・締め切り、専用URLや配布用カードの作成、提出されたNG日の取り込みができます。"
+            st.info("🔒 この欄は**管理者専用**です。受付の開始・締め切り、専用URLや配布用の案内書類の作成、提出されたNG日の取り込みができます。"
                     "使うには、管理用パスワードを入力してください。")
             pw = st.text_input("管理用パスワード", type="password", key="remote_admin_pw")
             if pw:
@@ -2368,7 +2367,7 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
             st.error(f"スプレッドシートを読み込めませんでした。接続設定を確認してください。詳細：{e}")
             return
 
-        st.caption("毎月の流れ：① 受付を開始する → ② URL・配布用カードを配る（初回のみ）→ ③ 提出状況を確認 → ④ 締め切る → ⑤ 提出されたNG日を取り込む")
+        st.caption("毎月の流れ：① 受付を開始する → ② URLの案内書類を配る（初回のみ）→ ③ 提出状況を確認 → ④ 締め切る → ⑤ 提出されたNG日を取り込む")
         month_key = f"{year}-{month}"
         active = settings.get("受付中の年月", "")
         closed = settings.get("締め切り", "") == "True"
@@ -2440,19 +2439,19 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
                          column_config={"専用URL": st.column_config.LinkColumn("専用URL（右上のアイコンでコピーできます）")})
             st.download_button("📥 URL一覧をCSVでダウンロード", pd.DataFrame(url_rows).to_csv(index=False).encode("utf-8-sig"),
                                file_name="NG日入力_専用URL一覧.csv", mime="text/csv", key="remote_url_csv")
-            # 紙で配る用：QRコード付きカード（A4に8人分、点線で切り離す）
-            card_targets = st.multiselect("配布用カードを作る先生（URLを作り直した先生だけ印刷する場合などは絞り込めます）",
+            # 紙で配る用：QRコード付きの案内書類（A4・1人1枚）
+            card_targets = st.multiselect("案内書類を作る先生（URLを作り直した先生だけ印刷する場合などは絞り込めます）",
                                           [r["先生"] for r in url_rows], default=[r["先生"] for r in url_rows], key="remote_card_targets")
             if card_targets:
                 url_by_name = {r["先生"]: r["専用URL"] for r in url_rows}
                 try:
-                    st.download_button(f"🖨️ 配布用カード（QRコード付き・{len(card_targets)}名分）をダウンロード",
+                    st.download_button(f"🖨️ 配布用の案内書類（QRコード付き・{len(card_targets)}名分）をダウンロード",
                                        remote_qr_cards_html([(n, url_by_name[n]) for n in card_targets]).encode("utf-8"),
-                                       file_name="NG日入力_配布用カード.html", mime="text/html", key="remote_qr_cards", type="primary")
+                                       file_name="当直NG日入力用URLのご案内.html", mime="text/html", key="remote_qr_cards", type="primary")
                     st.caption("ダウンロードしたファイルを開くとブラウザに表示されるので、「印刷する」を押してA4・片面で印刷します（1人1枚）。"
-                               "点線で三つ折りにすると宛名だけが外に出て、QRコードは内側に隠れます。封筒に入れて各先生に渡してください。")
+                               "点線で三つ折りにすると（上の線は外側へ、下の線は内側へ折る）、宛名と題名が表に出て、QRコードは内側に隠れます。封筒に入れて各先生に渡してください。")
                 except ImportError:
-                    st.error("カードを作るには、requirements.txt に「reportlab」の1行を追加してください。")
+                    st.error("案内書類を作るには、requirements.txt に「reportlab」の1行を追加してください。")
             if st.checkbox("URLを作り直す（URLが漏れてしまった場合）", key="remote_regen_open"):
                 target = st.selectbox("作り直す先生", [r["先生"] for r in url_rows], key="remote_regen_target")
                 st.caption("作り直すと、古いURLは使えなくなります。新しいURLをその先生に送り直してください。")
@@ -2574,9 +2573,9 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 NG日の欄にある「📨 先生方からのNG日入力（専用URL）」を開き、管理用パスワードを入れて使います。
 
 1. **受付を開始**：締め切り日を書いて「受付を開始する」を押します。年末年始など別の方法で当番を決める日は、先にいちばん上のカレンダーで「別途決定」にチェックしておくと、先生側のカレンダーで灰色になり、NGを押せなくなります（当直案でもその日は決めません）。
-2. **URLを配る（初回だけ）**：「配布用カード（QRコード付き）」を印刷して、各先生に渡します。URLは毎月同じなので、翌月からは「入力が始まりました」と伝えるだけです。
+2. **URLを配る（初回だけ）**：「配布用の案内書類（QRコード付き）」を印刷して、各先生に渡します。URLは毎月同じなので、翌月からは「入力が始まりました」と伝えるだけです。
 3. **先生が入力**：先生はスマートフォンのカメラでQRコードを読み取り、入れない日の「日直」「宿直」のボタンを押してNGにし、「NG日とコメントを保存する」を押します。管理者へのコメントも書けます。締め切りまでは何度でも直せて、最後に保存した内容が採用されます。
-   アプリは12時間ほど誰も開かないと休止し、英語の画面（Zzzz…）が出ます。青いボタン「Yes, get this app back up!」を押して1分ほど待つと開きます（配布用カードにも書いてあります）。
+   アプリは12時間ほど誰も開かないと休止し、英語の画面（Zzzz…）が出ます。青いボタン「Yes, get this app back up!」を押して1分ほど待つと開きます（案内書類にも書いてあります）。
 4. **提出状況を確認**：管理画面の表で、提出済み・未提出・コメントを確認できます。
 5. **締め切る**：「締め切る」を押すと、先生側は編集できなくなります。
 6. **取り込む**：「提出されたNG日を取り込む」を押すと、全員分が下のNGカレンダーに入ります。その先生のNG日は、提出内容に置き換わります。取り込んだあとも個別に直せます。
@@ -2617,7 +2616,7 @@ NG日の欄にある「📨 先生方からのNG日入力（専用URL）」を�
         st.markdown("""
 - **「不足」や「未決定」が出る**：NG日・回数の上限・勤務間隔の条件が厳しすぎる可能性があります。月間最大回数を増やす、勤務間隔を短くするなどして、画面下の帯の「🚀 当直案を作成」でもう一度作成してください。
 - **アプリを開くと入力した内容が消えている**：しばらく使わないとアプリがリセットされます。画面左上の「📂 前回の作業の続きから始める」で、途中保存した内容を読み込んでください。先生方の提出内容と専用URLはスプレッドシートに残っているので、消えません。
-- **先生から「URLが無効」と言われた**：URLを作り直していないか確認してください。カードをなくした場合は、管理画面の「URLを作り直す」で新しいカードを印刷します。
+- **先生から「URLが無効」と言われた**：URLを作り直していないか確認してください。案内書類をなくした場合は、管理画面の「URLを作り直す」で新しい案内書類を印刷します。
 - **先生のNG日が当直案に反映されていない**：管理画面で「提出されたNG日を取り込む」を押したか確認してください。
 - **アプリが起動しない・エラーが出る**：表示されたエラーの内容を控えて、管理担当者に連絡してください。
         """)
