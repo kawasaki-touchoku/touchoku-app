@@ -2545,10 +2545,16 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
             if changes:
                 st.markdown("**取り込むと変わる先生**")
                 st.dataframe(pd.DataFrame(changes), hide_index=True, use_container_width=True)
-                st.button(f"⬇️ 提出されたNG日を取り込む（{len(changes)}名分）", key="remote_import", type="primary",
-                          on_click=import_remote_ng, args=(year, month, {n: importable[n] for n in [c["先生"] for c in changes]}, mode))
+                changed_names = [c["先生"] for c in changes]
+                # 取り込む先生を選べる（はじめは全員。対象の先生が変わったら選び直しになる）
+                sel_key = "remote_import_targets_" + hashlib.sha256("|".join(changed_names).encode()).hexdigest()[:12]
+                targets = st.multiselect("取り込む先生（×で外せます）", changed_names, default=changed_names, key=sel_key)
+                targets = [n for n in (targets or []) if n in changed_names]
+                st.button(f"⬇️ 選んだ先生のNG日を取り込む（{len(targets)}名分）", key="remote_import", type="primary",
+                          disabled=not targets,
+                          on_click=import_remote_ng, args=(year, month, {n: importable[n] for n in targets}, mode))
                 st.caption("取り込むと、その先生のNG日は提出内容に置き換わります（CSVなどで入れていたNGは消えます）。"
-                           "提出していない先生のNG日は変わりません。取り込んだあとも、下のカレンダーで個別に直せます。")
+                           "選ばなかった先生や、提出していない先生のNG日は変わりません。取り込んだあとも、下のカレンダーで個別に直せます。")
             else:
                 st.caption("提出内容は、すべてアプリに取り込み済みです。")
         # --- 取り込みの取り消し ---
