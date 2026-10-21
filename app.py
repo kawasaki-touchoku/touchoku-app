@@ -3550,6 +3550,47 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 section_banner("🎯", "当直案の作成・確認", "不足時の優先順位を確認して、当直案を作ります", anchor="sec-create")
+
+# --- 先生方のコメント・備考の一覧（当直案を作る前後にまとめて見られるように） ---
+def comment_note_rows(staff, year, month):
+    comments = imported_comments(year, month)
+    note_cols = [c for c in staff.columns if str(c).strip().startswith("備考")]
+    rows = []
+    for _, r in staff.iterrows():
+        name = clean_text(r.get("先生の名前", ""))
+        if not name:
+            continue
+        note = "\n".join(clean_text(r.get(c, "")) for c in note_cols
+                         if clean_text(r.get(c, "")) and clean_text(r.get(c, "")).lower() not in ("nan", "none"))
+        comment, at = comments.get(name, ("", ""))
+        if comment or note:
+            rows.append((name, comment, at, note))
+    return rows
+
+_cn_rows = comment_note_rows(staff_df, year, month)
+# 見出しの文字は固定にする（文字が変わると、開いている欄が閉じてしまうため）
+with st.expander("💬 先生方のコメント・備考の一覧", expanded=False):
+    if _cn_rows:
+        st.caption(f"{len(_cn_rows)}名分。コメントは、URLから提出されたNG日を取り込んだ先生の分だけ表示します。備考は医師条件の「備考」列です。")
+        _parts = []
+        for n, c, t, no in _cn_rows:
+            empty = "<span class='e'>—</span>"
+            c_html = html_escape(c).replace("\n", "<br>") if c else empty
+            if c and t:
+                c_html += "<div class='t'>" + html_escape(t) + "</div>"
+            no_html = html_escape(no).replace("\n", "<br>") if no else empty
+            _parts.append("<tr><td class='n'>" + html_escape(n) + "</td><td>" + c_html + "</td><td>" + no_html + "</td></tr>")
+        _body = "".join(_parts)
+        st.markdown(
+            "<style>.cn-table{width:100%;border-collapse:collapse;font-size:.92rem}"
+            ".cn-table th,.cn-table td{border:1px solid rgba(128,144,160,.35);padding:6px 9px;vertical-align:top;text-align:left;overflow-wrap:anywhere}"
+            ".cn-table th{background:rgba(128,144,160,.12);white-space:nowrap}.cn-table td.n{white-space:nowrap;font-weight:700}"
+            ".cn-table .t{font-size:.78rem;color:#7a8494;margin-top:2px}.cn-table .e{color:#b0b7c3}</style>"
+            "<table class='cn-table'><thead><tr><th>先生</th><th>💬 先生からのコメント</th><th>📝 備考</th></tr></thead>"
+            f"<tbody>{_body}</tbody></table>", unsafe_allow_html=True)
+    else:
+        st.caption("表示するコメント・備考はありません。コメントは、URLから提出されたNG日を取り込むと表示されます。")
+
 st.subheader("🎯 人数が足りないときに優先して埋める枠（任意）")
 st.info("全員の条件を満たす当直表が作れない場合に、どの枠から優先して埋めるかを決めます。数字が小さいほど優先し、同じ数字の枠は同順位として扱います。")
 st.caption("人数が足りている月は、この設定は結果に影響しません。初期設定は、A宿直・B宿直・A日直・B日直が1、外来宿直が2、外来日直が3です。")
