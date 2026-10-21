@@ -3941,13 +3941,17 @@ if len(staff_df) > 0:
             st.error("⚠ 当直が多い先生がいます（表の右端の赤いマス。基準はすぐ上の「アラートの基準」で変えられます）\n\n" + "\n\n".join("・" + a for a in _alerts))
         st.markdown(duty_matrix_html(matrix_days, matrix_rows, year, month, alert_limits), unsafe_allow_html=True)
         try:
-            st.download_button(
-                label="📥 この一覧をExcelでダウンロード（印刷用）",
-                data=duty_matrix_xlsx(matrix_days, matrix_rows, year, month, alert_limits),
-                file_name=f"当直一覧_{year}年{month}月.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary",
-            )
+            # 上下の帯の赤いボタン（途中保存・当直案を作成）と見分けやすいよう、Excelらしい緑にする
+            st.markdown("<style>.st-key-xlsx_download button{background:#1d6f42 !important;border:1px solid #1d6f42 !important;color:#fff !important;font-weight:700}"
+                        ".st-key-xlsx_download button:hover{background:#155a35 !important;border-color:#155a35 !important}"
+                        ".st-key-xlsx_download button p{color:#fff !important}</style>", unsafe_allow_html=True)
+            with st.container(key="xlsx_download"):
+                st.download_button(
+                    label="📥 この一覧をExcelでダウンロード（印刷用）",
+                    data=duty_matrix_xlsx(matrix_days, matrix_rows, year, month, alert_limits),
+                    file_name=f"当直一覧_{year}年{month}月.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
         except ImportError:
             st.error("Excelでダウンロードするには、Excelを扱う部品（openpyxl）が必要です。requirements.txt に「openpyxl」の1行を追加してください。")
 
