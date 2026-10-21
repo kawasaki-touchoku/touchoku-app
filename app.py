@@ -639,6 +639,26 @@ def shortage_slots(days):
     return [s for s in RESULT_COLUMNS[2:] if s in used]
 
 
+# 当直が多すぎる先生を目立たせる基準（この回数以上でアラート）
+MATRIX_COUNT_ALERTS = {'night': 4, 'holiday': 3}
+MATRIX_ALERT_LABELS = {'night': '宿直', 'holiday': '休日'}
+
+
+def count_is_alert(key, value):
+    limit = MATRIX_COUNT_ALERTS.get(key)
+    return limit is not None and isinstance(value, (int, float)) and value >= limit
+
+
+def count_alert_messages(rows):
+    """アラートになる先生の一覧（表の上に出す文）。"""
+    messages = []
+    for key, limit in MATRIX_COUNT_ALERTS.items():
+        hits = [f"{r['name']}（{r[key]}回）" for r in rows if count_is_alert(key, r.get(key))]
+        if hits:
+            messages.append(f"{MATRIX_ALERT_LABELS[key]}{limit}回以上：" + "、".join(hits))
+    return messages
+
+
 def count_cell_css(key, is_head):
     head_bg, body_bg = MATRIX_COUNT_GROUP_COLORS[key]
     css = f"background:{head_bg if is_head else body_bg};"
@@ -719,6 +739,7 @@ def duty_matrix_html(days, rows, year, month):
     legend.append('<span><i>💬📝</i>メモ欄：先生からのコメント・備考（カーソルを合わせると全文）</span>')
     legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>翌日PM duty（宿直を外す日）</span>')
     legend.append('<span><i style="color:#c0392b;border-color:#c0392b">⚠️ 未決定</i>赤線の下：当直が決まっていない枠</span>')
+    legend.append('<span><i style="color:#c0392b;background:#ffd8d8;border-color:#e03131">⚠</i>右端の赤いマス：宿直4回以上・休日3回以上</span>')
     legend.append('</div>')
 
     head = ['<tr><th class="nm">名前</th><th class="pmcol">翌日<br>PM duty</th><th class="memo">メモ</th>']
@@ -746,7 +767,11 @@ def duty_matrix_html(days, rows, year, month):
                 tr.append(f'<td class="{col}"><div class="cell pm"></div></td>')
             else:
                 tr.append(f'<td{td_class}></td>')
-        tr.append(''.join(f'<td class="sum" style="{count_cell_css(key, False)}">{row[key]}</td>' for key, _ in MATRIX_COUNT_COLUMNS) + '</tr>')
+        tr.append(''.join(
+            (f'<td class="sum" style="{count_cell_css(key, False)}background:#ffd8d8;color:#c0392b;font-weight:800;box-shadow:inset 0 0 0 2px #e03131" '
+             f'title="{MATRIX_ALERT_LABELS[key]}が{MATRIX_COUNT_ALERTS[key]}回以上です">⚠{row[key]}</td>')
+            if count_is_alert(key, row[key]) else f'<td class="sum" style="{count_cell_css(key, False)}">{row[key]}</td>'
+            for key, _ in MATRIX_COUNT_COLUMNS) + '</tr>')
         body.append(''.join(tr))
     # 当直が決まっていない枠：枠ごとに1行、その枠の色で表示
     for k, slot in enumerate(shortage_slots(days)):
@@ -817,6 +842,7 @@ def duty_matrix_xlsx(days, rows, year, month):
         if c.font is None or not c.font.bold:
             c.font = Font(bold=True)
     group_side = Side(style='medium', color='7B8698')
+    red_side = Side(style='medium', color='E03131')
     wish_side = Side(style='thick', color=MATRIX_WISH_FRAME.lstrip('#').upper())
     wish_border = Border(left=wish_side, right=wish_side, top=wish_side, bottom=wish_side)
 
@@ -871,6 +897,11 @@ def duty_matrix_xlsx(days, rows, year, month):
                 ws.cell(row=r_idx, column=first_day_col + i).border = wish_border
         for j, (key, _) in enumerate(MATRIX_COUNT_COLUMNS):
             style_count_cell(ws.cell(row=r_idx, column=sum_col + j), key, False)
+            if count_is_alert(key, row[key]):
+                # 宿直・休日の回数が多い先生は赤で目立たせる
+                ac = ws.cell(row=r_idx, column=sum_col + j)
+                ac.fill = fill('#FFD8D8'); ac.font = Font(bold=True, color='C0392B')
+                ac.border = Border(left=red_side, right=red_side, top=red_side, bottom=red_side)
         # 同じ日に2つ当直がある医師の行は、2段で表示できる高さにする
         max_lines = max([slot_label(cell['text'], '\n').count('\n') + 1 for cell in row['cells'] if cell['type'] == 'shift'] or [1])
         ws.row_dimensions[r_idx].height = max(20, 11 * max_lines + 6)
@@ -915,6 +946,9 @@ def duty_matrix_xlsx(days, rows, year, month):
     ws.cell(row=legend_row + 2, column=3, value='翌日PM duty（宿直を外す日）')
     ws.cell(row=legend_row + 3, column=2, value='⚠️ 未決定').font = Font(bold=True, color='C0392B')
     ws.cell(row=legend_row + 3, column=3, value='赤線の下：当直が決まっていない枠')
+    alert_legend = ws.cell(row=legend_row + 5, column=2, value='⚠')
+    alert_legend.fill = fill('#FFD8D8'); alert_legend.font = Font(bold=True, color='C0392B'); alert_legend.alignment = center
+    ws.cell(row=legend_row + 5, column=3, value='右端の赤いマス：宿直4回以上・休日3回以上')
 
     ws.column_dimensions['A'].width = 14
     ws.column_dimensions['B'].width = 12
@@ -3731,6 +3765,9 @@ if len(staff_df) > 0:
         create_bar_show(st.session_state["create_bar_summary"])
         if missing_total:
             st.warning(f"当直が決まっていない枠が{missing_total}枠あります。表の一番下（赤線の下）で確認できます。")
+        _alerts = count_alert_messages(matrix_rows)
+        if _alerts:
+            st.error("⚠ 当直が多い先生がいます（表の右端の赤いマス）\n\n" + "\n\n".join("・" + a for a in _alerts))
         st.markdown(duty_matrix_html(matrix_days, matrix_rows, year, month), unsafe_allow_html=True)
         try:
             st.download_button(
