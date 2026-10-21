@@ -2305,11 +2305,39 @@ def import_remote_ng(year, month, submissions, mode="merge"):
     for doctor, r in submissions.items():
         submitted = parse_ng_dict(r.get("NG日", ""), year, month)
         result, base = planned_import(doctor, year, month, submitted, mode)
+        # 取り消せるように、最初に取り込む前のNG日を覚えておく（取り込み直しても、いちばん最初の状態に戻せる）
+        undo_key = f"ng_import_undo_{doctor}_{year}_{month}"
+        if undo_key not in st.session_state:
+            before = {d: st.session_state.get(f"ng_{doctor}_{year}_{month}_{d}", "OK") for d in range(1, num_days + 1)}
+            st.session_state[undo_key] = {d: v for d, v in before.items() if v != "OK"}
         for d in range(1, num_days + 1):
             st.session_state[f"ng_{doctor}_{year}_{month}_{d}"] = result.get(d, "OK")
         st.session_state[f"ng_import_last_{doctor}_{year}_{month}"] = (result, base)
     how = "管理者の入力と合わせて" if mode == "merge" else "先生の提出内容に置き換えて"
     st.session_state["remote_import_message"] = f"{len(submissions)}名分のNG日を、{how}取り込みました。"
+
+
+def import_undo_doctors(year, month, names):
+    """URLからの取り込みを取り消せる先生（取り込む前の状態を覚えている先生）。"""
+    return [n for n in names if f"ng_import_undo_{n}_{year}_{month}" in st.session_state]
+
+
+def undo_remote_import(year, month, names):
+    """URLから取り込んだNG日を取り消し、取り込む前のNG日に戻す。"""
+    num_days = calendar.monthrange(year, month)[1]
+    done = []
+    for name in names:
+        before = st.session_state.pop(f"ng_import_undo_{name}_{year}_{month}", None)
+        if before is None:
+            continue
+        for d in range(1, num_days + 1):
+            st.session_state[f"ng_{name}_{year}_{month}_{d}"] = before.get(d, "OK")
+        st.session_state.pop(f"ng_import_last_{name}_{year}_{month}", None)
+        st.session_state.pop(f"ng_dirty::{name}", None)
+        done.append(name)
+    if done:
+        st.toast(f"↩️ {'、'.join(done)} 先生のNG日を、URLから取り込む前の状態に戻しました。" if len(done) <= 3
+                 else f"↩️ {len(done)}名分のNG日を、URLから取り込む前の状態に戻しました。")
 
 
 def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_special_holiday, day_is_holiday, locked_days=()):
@@ -2523,6 +2551,20 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
                            "提出していない先生のNG日は変わりません。取り込んだあとも、下のカレンダーで個別に直せます。")
             else:
                 st.caption("提出内容は、すべてアプリに取り込み済みです。")
+        # --- 取り込みの取り消し ---
+        undoable = import_undo_doctors(year, month, [n for n, _ in doctor_rows])
+        if undoable:
+            with st.container(border=True):
+                st.markdown("**↩️ 取り込みを取り消す**")
+                st.caption("URLから取り込んだNG日を取り消して、取り込む前のNG日（CSVや手入力の分）に戻します。"
+                           "取り込んだあとにカレンダーで手直しした分も元に戻ります。先生の提出内容そのものは消えないので、もう一度取り込めます。")
+                cu1, cu2 = st.columns([3, 2])
+                undo_target = cu1.selectbox("取り消す先生", undoable, key="remote_undo_target", label_visibility="collapsed")
+                cu2.button("この先生の取り込みを取り消す", key="remote_undo_one", use_container_width=True,
+                           on_click=undo_remote_import, args=(year, month, [undo_target]))
+                if len(undoable) > 1:
+                    st.button(f"取り込んだ{len(undoable)}名全員の取り込みを取り消す", key="remote_undo_all",
+                              on_click=undo_remote_import, args=(year, month, undoable))
         unknown = [name for name in submissions if name not in {n for n, _ in doctor_rows}]
         if unknown:
             st.caption(f"名簿にない先生の提出（取り込み対象外）：{'、'.join(unknown)}")
@@ -3363,6 +3405,12 @@ if not valid_staff.empty:
                     st.success(f"✅ **反映済みのNG日:** {', '.join(saved_strs)}")
                 else:
                     st.info("💡 **現在、反映されているNG日はありません**")
+                if import_undo_doctors(year, month, [doc_name]):
+                    cu1, cu2 = st.columns([3, 1.6])
+                    cu1.caption("このNG日には、先生がURLから提出した内容が取り込まれています。"
+                                "取り消すと、取り込む前のNG日に戻ります（取り込み後に手直しした分も戻ります）。")
+                    cu2.button("↩️ 取り込みを取り消す", key=f"undo_import_{doc_name}_{year}_{month}", use_container_width=True,
+                               on_click=undo_remote_import, args=(year, month, [doc_name]))
 
                 component_days = []
                 for d in range(1, num_days + 1):
