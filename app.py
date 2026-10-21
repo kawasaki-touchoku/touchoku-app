@@ -2561,7 +2561,8 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
                 if result != now:
                     changes.append({"先生": name,
                                     "今のNG日（アプリ）": ng_text_summary(ng_dict_to_text(now), year, month, custom_holidays) or "なし",
-                                    "取り込むNG日（提出）": ng_text_summary(r.get("NG日", ""), year, month, custom_holidays) or "なし"})
+                                    "取り込むNG日（提出）": ng_text_summary(r.get("NG日", ""), year, month, custom_holidays) or "なし",
+                                    "コメント": str(r.get("コメント", "")).strip()})
             if changes:
                 st.markdown("**取り込むと変わる先生**")
                 st.dataframe(pd.DataFrame(changes), hide_index=True, use_container_width=True)
