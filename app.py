@@ -2029,11 +2029,17 @@ const a = document.getElementById('dl'); a.href = url; a.download = `NG日_${D.y
 # ==========================================
 # 作業の途中保存と復元（スプレッドシートの saved_state シートに保存）
 # ==========================================
+WORK_STATE_CHUNK = 40000   # スプレッドシートの1つのマスに入る文字数（上限5万字）より少なめに区切る
+
+
 def work_state_save(snapshot):
     text = json.dumps(snapshot, ensure_ascii=False)
-    if len(text) > 45000:
+    if len(text) > WORK_STATE_CHUNK * 20:
         raise ValueError("保存する内容が大きすぎます（医師の人数や確定当直の行数を確認してください）。")
-    remote_rewrite("saved_state", [["保存日時", remote_now()], ["内容", text]])
+    # 長いときは「内容」「内容2」「内容3」…と複数のマスに分けて保存する
+    chunks = [text[i:i + WORK_STATE_CHUNK] for i in range(0, len(text), WORK_STATE_CHUNK)] or [""]
+    rows = [["保存日時", remote_now()]] + [["内容" if i == 0 else f"内容{i + 1}", c] for i, c in enumerate(chunks)]
+    remote_rewrite("saved_state", rows)
 
 
 def work_state_info():
@@ -2044,8 +2050,13 @@ def work_state_info():
         return None, None
     if not rows.get("内容"):
         return None, None
+    text = rows["内容"]
+    n = 2
+    while rows.get(f"内容{n}"):   # 複数のマスに分けて保存した分をつなげる
+        text += rows[f"内容{n}"]
+        n += 1
     try:
-        return rows.get("保存日時", ""), json.loads(rows["内容"])
+        return rows.get("保存日時", ""), json.loads(text)
     except ValueError:
         return None, None
 
