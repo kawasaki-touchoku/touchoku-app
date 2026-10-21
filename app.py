@@ -1641,7 +1641,7 @@ DEFAULT_APP_URL = "https://touchoku-app.streamlit.app"
 REMOTE_SHEETS = {
     "tokens": ["先生", "キー", "翌日PM duty", "作成日時"],
     "settings": ["項目", "値"],
-    "submissions": ["年月", "先生", "NG日", "保存日時", "コメント"],
+    "submissions": ["年月", "先生", "NG日", "保存日時", "コメント", "種別"],   # 種別：管理者がリセットした行は「リセット」
     "saved_state": ["項目", "値"],   # 作業の途中保存（年月・休日・医師条件・確定当直など）
 }
 
@@ -1882,7 +1882,13 @@ def remote_latest_submissions(month_key):
     for r in remote_read("submissions"):
         if r.get("年月") == month_key and r.get("先生"):
             latest[r["先生"]] = r   # 後ろの行ほど新しい
-    return latest
+    # 最後が管理者のリセットなら、その先生は「未提出」に戻す（履歴は残る）
+    return {name: r for name, r in latest.items() if r.get("種別", "") != "リセット"}
+
+
+def remote_reset_submission(month_key, name):
+    """先生の提出をリセットする（未提出に戻す）。行は消さずに「リセット」の行を足すので、履歴に残る。"""
+    remote_append("submissions", [month_key, name, "", remote_now(), "", "リセット"])
 
 
 def remote_doctor_url(key):
@@ -2689,12 +2695,28 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
         if unknown:
             st.caption(f"名簿にない先生の提出（取り込み対象外）：{'、'.join(unknown)}")
 
+        # --- 先生の提出のリセット ---
+        if submissions and st.checkbox("先生の提出をリセットする（入力をやり直してもらう場合など）", key="remote_reset_open"):
+            reset_names = list(submissions)
+            reset_target = st.selectbox("リセットする先生", reset_names, key="remote_reset_target")
+            st.caption("リセットすると、その先生は「未提出」に戻り、先生のURLの画面もNG日・コメントが空の状態になります。"
+                       "これまでの提出は「変更の履歴」に残ります。すでにアプリに取り込んだNG日は変わらないので、"
+                       "必要なら「↩️ 取り込みを取り消す」も使ってください。")
+            def _do_reset(name):
+                remote_reset_submission(month_key, name)
+                st.session_state["remote_reset_confirm"] = False   # 確認のチェックを外しておく（続けて押してしまわないように）
+                st.session_state["remote_import_message"] = f"{name} 先生の提出をリセットしました（未提出に戻しました）。"
+            if st.checkbox(f"{reset_target} 先生の提出をリセットしてよい", key="remote_reset_confirm"):
+                st.button(f"🗑️ {reset_target} 先生の提出をリセットする", key="remote_reset_do",
+                          on_click=_do_reset, args=(reset_target,))
+
         # （この欄自体が折りたたみの中にあるため、履歴はチェックボックスで開く）
         if st.checkbox("変更の履歴を表示（だれが・いつ・どう変えたか）", key="remote_history_open"):
             history = [r for r in remote_read("submissions") if r.get("年月") == month_key]
             if history:
                 st.dataframe(pd.DataFrame([{"保存日時": r.get("保存日時", ""), "先生": r.get("先生", ""),
-                                            "NG日": ng_text_summary(r.get("NG日", ""), year, month, custom_holidays) or "NG日なし",
+                                            "NG日": "（管理者がリセット）" if r.get("種別", "") == "リセット"
+                                            else (ng_text_summary(r.get("NG日", ""), year, month, custom_holidays) or "NG日なし"),
                                             "コメント": r.get("コメント", "")}
                                            for r in reversed(history)]), hide_index=True, use_container_width=True)
             else:
