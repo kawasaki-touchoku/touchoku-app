@@ -962,8 +962,9 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
     # 凡例：見本のマスは表と同じ幅の日付の列に、表と同じ見た目で置き、説明はその右に書く
     legend_row = last_row + 2
     one_line = Alignment(horizontal='center', vertical='center', wrap_text=False, shrink_to_fit=True)
-    ws.cell(row=legend_row, column=1, value='凡例').font = Font(bold=True)
-    ws.cell(row=legend_row, column=2, value='当直の枠（色）')
+    middle = Alignment(vertical='center')   # 説明の文字は、見本のマスと高さをそろえて上下中央にする
+    lg = ws.cell(row=legend_row, column=1, value='凡例'); lg.font = Font(bold=True); lg.alignment = middle
+    ws.cell(row=legend_row, column=2, value='当直の枠（色）').alignment = middle
     for k, (label, (bg, fg)) in enumerate(MATRIX_SHIFT_COLORS.items()):
         c = ws.cell(row=legend_row, column=first_day_col + k * 2, value=label)
         c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#')); c.alignment = one_line; c.border = border
@@ -971,7 +972,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
 
     def legend_line(offset, text):
         r = legend_row + offset
-        ws.cell(row=r, column=first_day_col + 1, value=text)
+        ws.cell(row=r, column=first_day_col + 1, value=text).alignment = middle
         ws.row_dimensions[r].height = 20
         sample = ws.cell(row=r, column=first_day_col)
         sample.border = border; sample.alignment = one_line
