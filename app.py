@@ -979,6 +979,13 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
     # 当直が決まっていない枠：枠ごとに1行、その枠の色で表示
     last_row = header_row + len(rows)
     red = Side(style='medium', color='C0392B')
+    # 表と「未決定」の行の境目は、マスの枠線ではなく、細い赤い行で区切る
+    # （マスに赤線を付けると、Excelで未決定の枠をドラッグして移したときに赤線までついて行くため）
+    if shortage_slots(days):
+        last_row += 1
+        for col in range(1, sum_col + n_counts):
+            ws.cell(row=last_row, column=col).fill = fill('#C0392B')
+        ws.row_dimensions[last_row].height = 4
     for k, slot in enumerate(shortage_slots(days)):
         last_row += 1
         bg, fg = MATRIX_SHIFT_COLORS[slot]
@@ -987,17 +994,20 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
         for i, info in enumerate(days):
             count = sum(x['count'] for x in info['shortage'] if x['slot'] == slot)
             c = ws.cell(row=last_row, column=first_day_col + i)
-            c.border = Border(left=thin, right=thin, bottom=thin, top=red if k == 0 else thin)
+            c.border = border
             if count:
                 slot_total += 1
                 c.value = slot + ('' if count == 1 else f'×{count}')
                 c.fill = fill(bg); c.font = Font(bold=True, size=xlsx_label_size(c.value), color=fg.lstrip('#'))
                 ws.cell(row=header_row, column=first_day_col + i).fill = fill('#FDE2E0')
             c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=False, shrink_to_fit=True)
-        ws.cell(row=last_row, column=sum_col + n_counts - 1, value=f"{slot_total}枠").font = Font(bold=True, color='C0392B')
+        # 残りの枠の数も式にする（Excelで枠を表の中へ移すと、自動で減る）
+        rng = f"{get_column_letter(first_day_col)}{last_row}:{get_column_letter(first_day_col + len(days) - 1)}{last_row}"
+        ws.cell(row=last_row, column=sum_col + n_counts - 1,
+                value=f'=COUNTIF({rng},"*直*")&"枠"').font = Font(bold=True, color='C0392B')
         for col in list(range(1, first_day_col)) + list(range(sum_col, sum_col + n_counts)):
             c = ws.cell(row=last_row, column=col)
-            c.border = Border(left=thin, right=thin, bottom=thin, top=red if k == 0 else thin)
+            c.border = border
             c.alignment = center if col > 1 else Alignment(vertical='center')
         ws.row_dimensions[last_row].height = 24
 
