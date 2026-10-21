@@ -817,6 +817,13 @@ def html_escape(text):
     return html.escape(str(text))
 
 
+def xlsx_label_size(label):
+    """Excelのマスに入れる枠名の文字の大きさ。「外来宿直」など4文字以上は小さめにして、マスの幅に必ず収める
+    （Excelの「縮小して全体を表示」だけに頼ると、表示によっては左どなりのマスに文字がはみ出すことがあるため）。"""
+    longest = max((len(x) for x in str(label).split("\n")), default=0)
+    return 6.5 if longest >= 4 else 8
+
+
 def duty_matrix_xlsx(days, rows, year, month, alerts=None):
     """一覧表をExcelファイル（印刷向けの書式付き）にする。"""
     from openpyxl import Workbook
@@ -884,12 +891,12 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
             memo.comment = Comment("\n".join(full), "当直作成アプリ", width=260, height=120)
         for i, (info, cell) in enumerate(zip(days, row['cells'])):
             # 当直が1つの日は1行で入れる（「外来宿直」も改行しない。幅に入らない分は文字を少し小さくして収める）
-            label = (cell['text'] if '/' not in str(cell['text']) else slot_label(cell['text'], '\n')) if cell['type'] == 'shift' \
-                else slot_label(cell['text'], '\n')
+            # 同じ日に2つ当直がある日は、枠名を1つずつ改行する（「外来宿直」の途中では改行しない）
+            label = str(cell['text']).replace('/', '\n') if cell['type'] == 'shift' else slot_label(cell['text'], '\n')
             c = ws.cell(row=r_idx, column=first_day_col + i, value=label or None)
             if cell['type'] == 'shift':
                 bg, fg = MATRIX_SHIFT_COLORS.get(cell['shift'], ('#EEEEEE', '#000000'))
-                c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#'))
+                c.fill = fill(bg); c.font = Font(bold=True, size=xlsx_label_size(label), color=fg.lstrip('#'))
             elif cell['type'] == 'ng':
                 c.font = Font(bold=True, color='C0392B')
                 if cell.get('pm'):
@@ -930,7 +937,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
                 ws.cell(row=r_idx, column=first_day_col + i).alignment = Alignment(
                     horizontal='center', vertical='center', wrap_text=False, shrink_to_fit=True)
         # 同じ日に2つ当直がある医師の行だけ、2段で表示できる高さにする
-        max_lines = max([slot_label(cell['text'], '\n').count('\n') + 1 for cell in row['cells']
+        max_lines = max([str(cell['text']).count('/') + 1 for cell in row['cells']
                          if cell['type'] == 'shift' and '/' in str(cell['text'])] or [1])
         ws.row_dimensions[r_idx].height = max(20, 11 * max_lines + 6)
 
@@ -949,7 +956,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
             if count:
                 slot_total += 1
                 c.value = slot + ('' if count == 1 else f'×{count}')
-                c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#'))
+                c.fill = fill(bg); c.font = Font(bold=True, size=xlsx_label_size(c.value), color=fg.lstrip('#'))
                 ws.cell(row=header_row, column=first_day_col + i).fill = fill('#FDE2E0')
             c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=False, shrink_to_fit=True)
         ws.cell(row=last_row, column=sum_col + n_counts - 1, value=f"{slot_total}枠").font = Font(bold=True, color='C0392B')
@@ -967,7 +974,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
     ws.cell(row=legend_row, column=2, value='当直の枠（色）').alignment = middle
     for k, (label, (bg, fg)) in enumerate(MATRIX_SHIFT_COLORS.items()):
         c = ws.cell(row=legend_row, column=first_day_col + k * 2, value=label)
-        c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#')); c.alignment = one_line; c.border = border
+        c.fill = fill(bg); c.font = Font(bold=True, size=xlsx_label_size(label), color=fg.lstrip('#')); c.alignment = one_line; c.border = border
     ws.row_dimensions[legend_row].height = 20
 
     def legend_line(offset, text):
