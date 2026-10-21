@@ -2698,17 +2698,23 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
         # --- 先生の提出のリセット ---
         if submissions and st.checkbox("先生の提出をリセットする（入力をやり直してもらう場合など）", key="remote_reset_open"):
             reset_names = list(submissions)
-            reset_target = st.selectbox("リセットする先生", reset_names, key="remote_reset_target")
+            # 選択肢（提出済みの先生）が変わったら選び直しになるよう、名前の組み合わせで欄を分ける
+            reset_key = "remote_reset_targets_" + hashlib.sha256("|".join(reset_names).encode()).hexdigest()[:12]
+            reset_targets = [n for n in (st.multiselect("リセットする先生（複数選べます）", reset_names, key=reset_key) or [])
+                             if n in reset_names]
             st.caption("リセットすると、その先生は「未提出」に戻り、先生のURLの画面もNG日・コメントが空の状態になります。"
                        "これまでの提出は「変更の履歴」に残ります。すでにアプリに取り込んだNG日は変わらないので、"
                        "必要なら「↩️ 取り込みを取り消す」も使ってください。")
-            def _do_reset(name):
-                remote_reset_submission(month_key, name)
+
+            def _do_reset(names):
+                for name in names:
+                    remote_reset_submission(month_key, name)
                 st.session_state["remote_reset_confirm"] = False   # 確認のチェックを外しておく（続けて押してしまわないように）
-                st.session_state["remote_import_message"] = f"{name} 先生の提出をリセットしました（未提出に戻しました）。"
-            if st.checkbox(f"{reset_target} 先生の提出をリセットしてよい", key="remote_reset_confirm"):
-                st.button(f"🗑️ {reset_target} 先生の提出をリセットする", key="remote_reset_do",
-                          on_click=_do_reset, args=(reset_target,))
+                st.session_state["remote_import_message"] = f"{'、'.join(names)} 先生の提出をリセットしました（未提出に戻しました）。"
+            if reset_targets:
+                if st.checkbox(f"選んだ{len(reset_targets)}名（{'、'.join(reset_targets)}）の提出をリセットしてよい", key="remote_reset_confirm"):
+                    st.button(f"🗑️ {len(reset_targets)}名の提出をリセットする", key="remote_reset_do",
+                              on_click=_do_reset, args=(reset_targets,))
 
         # （この欄自体が折りたたみの中にあるため、履歴はチェックボックスで開く）
         if st.checkbox("変更の履歴を表示（だれが・いつ・どう変えたか）", key="remote_history_open"):
