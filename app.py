@@ -2128,11 +2128,11 @@ WORK_SAVE_FLOAT_CSS = """
 .st-key-work_save_float > div { width: auto !important; flex: 0 0 auto !important; }
 .st-key-work_save_float button { min-height: 2.2rem; padding: 0.2rem 0.9rem; font-weight: 700; white-space: nowrap; }
 .st-key-work_save_float p { margin: 0; white-space: nowrap; }
-.work-save-note { font-size: 0.85rem; color: #1b7f3b; font-weight: 600; }
+.work-save-note { font-size: 0.85rem; color: #8ff0b6; font-weight: 700; }
 /* 保存済みの表示はボタンの左に置く（右側には、Streamlit の「実行中」の表示が出るため） */
 .st-key-work_save_float > div:has(.work-save-note) { order: 3; }
-.work-save-note.busy { color: #566174; }
-.work-save-note.bad { color: #c92336; }
+.work-save-note.busy { color: #e3e9f1; }
+.work-save-note.bad { color: #ffb3b3; }
 /* スマートフォン：右上のStreamlitのアイコンと重ならないよう左に寄せ、ボタンの文字を短くする */
 @media (max-width: 640px) {
     .st-key-work_save_float { left: 0.5rem; right: auto; top: 0.55rem; max-width: calc(100vw - 6rem); gap: 6px; }
@@ -2878,8 +2878,13 @@ st.markdown("""
 .sec-banner.first{margin-top:.6rem}
 /* 画面上部の帯（ボタンの並ぶ所）：下の画面との境目が分かるよう、細い線とごく薄い影を付ける。
    すりガラス風にして、下を流れる内容が透けて重ならないようにする */
-[data-testid="stHeader"]{background:rgba(255,255,255,.94) !important;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
-  border-bottom:1px solid #e3e7ed;box-shadow:0 2px 10px rgba(16,24,40,.06)}
+[data-testid="stHeader"]{background:linear-gradient(90deg,#24405f 0%,#35597f 100%) !important;
+  border-bottom:3px solid #f2b84b;box-shadow:0 3px 12px rgba(16,24,40,.22)}
+/* 紺色の帯の上でも見えるよう、右上のStreamlitのアイコンや「実行中」の表示を白にする */
+[data-testid="stHeader"] button,[data-testid="stHeader"] a,[data-testid="stHeader"] [data-testid="stToolbar"],
+[data-testid="stHeader"] [data-testid="stStatusWidget"],[data-testid="stHeader"] [data-testid="stStatusWidget"] *{color:#fff !important}
+[data-testid="stHeader"] svg{fill:currentColor}
+[data-testid="stDecoration"]{display:none}
 /* 下の帯のリンクで移動したとき、画面上部の帯（ボタンの並ぶ所）に見出しが隠れないよう、少し上に余白を取って止める */
 #sec-staff,#sec-ng,#sec-create,#sec-result{scroll-margin-top:5.5rem}
 .sec-banner[id]{scroll-margin-top:5.5rem}
@@ -2926,8 +2931,8 @@ st.markdown("""
 <style>
 .st-key-create_bar{position:fixed;left:0;right:0;bottom:0;z-index:1000001;width:auto !important;height:64px !important;min-height:0 !important;
   display:flex !important;flex-direction:row !important;align-items:center !important;gap:14px !important;
-  padding:0 9rem 0 1rem;background:rgba(255,255,255,.96);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
-  border-top:1px solid #e3e7ed;box-shadow:0 -2px 10px rgba(16,24,40,.06);overflow:visible !important}
+  padding:0 9rem 0 1rem;background:linear-gradient(90deg,#24405f 0%,#35597f 100%);
+  border-top:3px solid #f2b84b;box-shadow:0 -3px 12px rgba(16,24,40,.22);overflow:visible !important}
 .st-key-create_bar > div{width:auto !important;flex:0 0 auto !important;margin:0 !important}
 .st-key-create_bar [data-testid="stElementContainer"],.st-key-create_bar [data-testid="stMarkdownContainer"],
 .st-key-create_bar [data-testid="stMarkdown"]{margin:0 !important;width:auto !important}
@@ -2939,11 +2944,13 @@ st.markdown("""
 .st-key-create_bar button p{margin:0;letter-spacing:.01em}
 .st-key-create_bar p{margin:0}
 .cb-box{display:flex;flex-direction:row;align-items:center;gap:14px;width:100%}
-.cb-res{margin-left:auto;font-size:.9rem;font-weight:800;line-height:1.4;white-space:nowrap}
-.cb-res.ok{color:#2f8a5b}.cb-res.bad{color:#c2410c}.cb-res.wait{color:#566174}
+.cb-res{margin-left:auto;font-size:.92rem;font-weight:800;line-height:1.4;white-space:nowrap;padding:4px 12px;border-radius:999px;background:rgba(255,255,255,.12)}
+.cb-res.ok{color:#8ff0b6}.cb-res.bad{color:#ffd08a}.cb-res.wait{color:#e3e9f1}
 .cb-nav{display:flex;gap:6px;font-size:.82rem;order:-1}
-.cb-nav a{text-decoration:none;color:#2f4a6d !important;background:#eef3f8;border-radius:6px;padding:4px 10px;white-space:nowrap}
-.cb-nav a:hover{background:#dde7f2}
+.cb-nav a{text-decoration:none;color:#fff !important;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.28);border-radius:6px;padding:4px 10px;white-space:nowrap}
+.cb-nav a:hover{background:rgba(255,255,255,.26)}
+/* 作成ボタンは紺の帯の上で目立つよう、白い縁取りを付ける */
+.st-key-create_bar button{box-shadow:0 0 0 2px rgba(255,255,255,.85),0 2px 8px rgba(0,0,0,.25)}
 /* 下の帯に最後の内容が隠れないよう、ページの下に余白を取る */
 [data-testid="stMainBlockContainer"],.block-container{padding-bottom:6.5rem !important}
 @media (max-width:600px){
