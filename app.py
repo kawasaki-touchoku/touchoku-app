@@ -639,24 +639,34 @@ def shortage_slots(days):
     return [s for s in RESULT_COLUMNS[2:] if s in used]
 
 
-# 当直が多すぎる先生を目立たせる基準（この回数以上でアラート）
-MATRIX_COUNT_ALERTS = {'night': 4, 'holiday': 3}
-MATRIX_ALERT_LABELS = {'night': '宿直', 'holiday': '休日'}
+# 当直が多すぎる先生を目立たせる基準（この回数以上でアラート。0はアラートなし）。画面で変えられる
+MATRIX_COUNT_ALERTS = {'night': 4, 'day': 0, 'ward': 0, 'outpatient': 0, 'weekday': 0, 'holiday': 3}
+MATRIX_ALERT_LABELS = {'night': '宿直', 'day': '日直', 'ward': '病棟', 'outpatient': '外来', 'weekday': '平日', 'holiday': '休日', 'total': '合計'}
 
 
-def count_is_alert(key, value):
-    limit = MATRIX_COUNT_ALERTS.get(key)
-    return limit is not None and isinstance(value, (int, float)) and value >= limit
+def count_is_alert(key, value, alerts=None):
+    limit = (MATRIX_COUNT_ALERTS if alerts is None else alerts).get(key) or 0
+    return limit > 0 and isinstance(value, (int, float)) and value >= limit
 
 
-def count_alert_messages(rows):
+def count_alert_messages(rows, alerts=None):
     """アラートになる先生の一覧（表の上に出す文）。"""
+    alerts = MATRIX_COUNT_ALERTS if alerts is None else alerts
     messages = []
-    for key, limit in MATRIX_COUNT_ALERTS.items():
-        hits = [f"{r['name']}（{r[key]}回）" for r in rows if count_is_alert(key, r.get(key))]
+    for key, _ in MATRIX_COUNT_COLUMNS:
+        if not alerts.get(key):
+            continue
+        hits = [f"{r['name']}（{r[key]}回）" for r in rows if count_is_alert(key, r.get(key), alerts)]
         if hits:
-            messages.append(f"{MATRIX_ALERT_LABELS[key]}{limit}回以上：" + "、".join(hits))
+            messages.append(f"{MATRIX_ALERT_LABELS[key]}{alerts[key]}回以上：" + "、".join(hits))
     return messages
+
+
+def count_alert_text(alerts=None):
+    """凡例用：「宿直4回以上・休日3回以上」"""
+    alerts = MATRIX_COUNT_ALERTS if alerts is None else alerts
+    parts = [f"{MATRIX_ALERT_LABELS[k]}{alerts[k]}回以上" for k, _ in MATRIX_COUNT_COLUMNS if alerts.get(k)]
+    return "・".join(parts)
 
 
 def count_cell_css(key, is_head):
@@ -692,7 +702,7 @@ def memo_cell_html(row, tip_up=False):
             f'<div class="full">{full}</div></details><div class="tip{up}">{full}</div></td>')
 
 
-def duty_matrix_html(days, rows, year, month):
+def duty_matrix_html(days, rows, year, month, alerts=None):
     def head_color(info):
         return MATRIX_HOLIDAY_HEAD if info['kind'] == 'holiday' else (MATRIX_SATURDAY_HEAD if info['kind'] == 'saturday' else '#243247')
 
@@ -739,7 +749,8 @@ def duty_matrix_html(days, rows, year, month):
     legend.append('<span><i>💬📝</i>メモ欄：先生からのコメント・備考（カーソルを合わせると全文）</span>')
     legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>翌日PM duty（宿直を外す日）</span>')
     legend.append('<span><i style="color:#c0392b;border-color:#c0392b">⚠️ 未決定</i>赤線の下：当直が決まっていない枠</span>')
-    legend.append('<span><i style="color:#c0392b;background:#ffd8d8;border-color:#e03131">⚠</i>右端の赤いマス：宿直4回以上・休日3回以上</span>')
+    if count_alert_text(alerts):
+        legend.append('<span><i style="color:#c0392b;background:#ffd8d8;border-color:#e03131">⚠</i>右端の赤いマス：' + count_alert_text(alerts) + '</span>')
     legend.append('</div>')
 
     head = ['<tr><th class="nm">名前</th><th class="pmcol">翌日<br>PM duty</th><th class="memo">メモ</th>']
@@ -769,8 +780,8 @@ def duty_matrix_html(days, rows, year, month):
                 tr.append(f'<td{td_class}></td>')
         tr.append(''.join(
             (f'<td class="sum" style="{count_cell_css(key, False)}background:#ffd8d8;color:#c0392b;font-weight:800;box-shadow:inset 0 0 0 2px #e03131" '
-             f'title="{MATRIX_ALERT_LABELS[key]}が{MATRIX_COUNT_ALERTS[key]}回以上です">⚠{row[key]}</td>')
-            if count_is_alert(key, row[key]) else f'<td class="sum" style="{count_cell_css(key, False)}">{row[key]}</td>'
+             f'title="{MATRIX_ALERT_LABELS[key]}が{(alerts or MATRIX_COUNT_ALERTS).get(key)}回以上です">⚠{row[key]}</td>')
+            if count_is_alert(key, row[key], alerts) else f'<td class="sum" style="{count_cell_css(key, False)}">{row[key]}</td>'
             for key, _ in MATRIX_COUNT_COLUMNS) + '</tr>')
         body.append(''.join(tr))
     # 当直が決まっていない枠：枠ごとに1行、その枠の色で表示
@@ -806,7 +817,7 @@ def html_escape(text):
     return html.escape(str(text))
 
 
-def duty_matrix_xlsx(days, rows, year, month):
+def duty_matrix_xlsx(days, rows, year, month, alerts=None):
     """一覧表をExcelファイル（印刷向けの書式付き）にする。"""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -897,7 +908,7 @@ def duty_matrix_xlsx(days, rows, year, month):
                 ws.cell(row=r_idx, column=first_day_col + i).border = wish_border
         for j, (key, _) in enumerate(MATRIX_COUNT_COLUMNS):
             style_count_cell(ws.cell(row=r_idx, column=sum_col + j), key, False)
-            if count_is_alert(key, row[key]):
+            if count_is_alert(key, row[key], alerts):
                 # 宿直・休日の回数が多い先生は赤で目立たせる
                 ac = ws.cell(row=r_idx, column=sum_col + j)
                 ac.fill = fill('#FFD8D8'); ac.font = Font(bold=True, color='C0392B')
@@ -946,9 +957,10 @@ def duty_matrix_xlsx(days, rows, year, month):
     ws.cell(row=legend_row + 2, column=3, value='翌日PM duty（宿直を外す日）')
     ws.cell(row=legend_row + 3, column=2, value='⚠️ 未決定').font = Font(bold=True, color='C0392B')
     ws.cell(row=legend_row + 3, column=3, value='赤線の下：当直が決まっていない枠')
-    alert_legend = ws.cell(row=legend_row + 5, column=2, value='⚠')
-    alert_legend.fill = fill('#FFD8D8'); alert_legend.font = Font(bold=True, color='C0392B'); alert_legend.alignment = center
-    ws.cell(row=legend_row + 5, column=3, value='右端の赤いマス：宿直4回以上・休日3回以上')
+    if count_alert_text(alerts):
+        alert_legend = ws.cell(row=legend_row + 5, column=2, value='⚠')
+        alert_legend.fill = fill('#FFD8D8'); alert_legend.font = Font(bold=True, color='C0392B'); alert_legend.alignment = center
+        ws.cell(row=legend_row + 5, column=3, value='右端の赤いマス：' + count_alert_text(alerts))
 
     ws.column_dimensions['A'].width = 14
     ws.column_dimensions['B'].width = 12
@@ -2008,6 +2020,9 @@ def work_state_restore():
     for name, cv in (data.get("comments") or {}).items():
         if isinstance(cv, (list, tuple)) and cv and str(cv[0]).strip():
             st.session_state[f"ng_import_comment_{name}_{y}_{m}"] = (str(cv[0]), str(cv[1]) if len(cv) > 1 else "")
+    for k, v in (data.get("alerts") or {}).items():
+        if k in MATRIX_COUNT_ALERTS:
+            st.session_state[f"alert_{k}"] = int(v)
     for slot, rank in (data.get("priority") or {}).items():
         st.session_state[f"shortage_priority_{slot}"] = int(rank)
     st.session_state["restored_state"] = data
@@ -2674,7 +2689,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 7. **結果を確認してダウンロード**：「医師別の当直一覧」をExcelで、「作成した当直案」をCSVでダウンロードできます。
 
 **途中で中断するとき**は、画面左上の「💾 作業を途中保存する」を押してください。画面の上の帯にあるので、スクロールしていてもいつでも押せます（管理用パスワードが必要です）。
-年月・休日と別途決定の日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位がまとめて途中保存され、
+年月・休日と別途決定の日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位・アラートの基準がまとめて途中保存され、
 次回は画面左上の「📂 前回の作業の続きから始める」で元に戻せます。途中保存は、ボタンを押したときだけ行われます（当直案の作成では保存されません）。
 
         """)
@@ -3657,6 +3672,7 @@ work_snapshot = {
     "staff_csv": staff_df.to_csv(index=False),
     "priority": {k: int(v) for k, v in shortage_priority.items()},
     "comments": {n: list(v) for n, v in imported_comments(year, month).items()},
+    "alerts": {k: int(st.session_state.get(f"alert_{k}", v) or 0) for k, v in MATRIX_COUNT_ALERTS.items()},
 }
 # 右上の途中保存ボタンが押されていたら、ここで（全部の入力を読み終えてから）保存する
 if work_save_request:
@@ -3765,14 +3781,30 @@ if len(staff_df) > 0:
         create_bar_show(st.session_state["create_bar_summary"])
         if missing_total:
             st.warning(f"当直が決まっていない枠が{missing_total}枠あります。表の一番下（赤線の下）で確認できます。")
-        _alerts = count_alert_messages(matrix_rows)
+        # アラートの基準（この回数以上で赤く表示）。0はアラートなし
+        for _k, _v in MATRIX_COUNT_ALERTS.items():
+            if f"alert_{_k}" not in st.session_state:
+                st.session_state[f"alert_{_k}"] = _v
+
+        def _reset_alerts():
+            for _k2, _v2 in MATRIX_COUNT_ALERTS.items():
+                st.session_state[f"alert_{_k2}"] = _v2
+
+        with st.expander("⚠ アラートの基準（回数が多い先生を赤く表示）", expanded=False):
+            st.caption("それぞれの回数がこの数以上の先生を、表の右端で赤く表示します。0にすると、その項目はアラートを出しません。")
+            _acols = st.columns(len(MATRIX_COUNT_ALERTS))
+            for _col, _k in zip(_acols, MATRIX_COUNT_ALERTS):
+                _col.number_input(f"{MATRIX_ALERT_LABELS[_k]}（回以上）", min_value=0, max_value=31, step=1, key=f"alert_{_k}")
+            st.button("初期設定に戻す（宿直4回以上・休日3回以上）", key="alert_reset", on_click=_reset_alerts)
+        alert_limits = {_k: int(st.session_state.get(f"alert_{_k}", _v) or 0) for _k, _v in MATRIX_COUNT_ALERTS.items()}
+        _alerts = count_alert_messages(matrix_rows, alert_limits)
         if _alerts:
-            st.error("⚠ 当直が多い先生がいます（表の右端の赤いマス）\n\n" + "\n\n".join("・" + a for a in _alerts))
-        st.markdown(duty_matrix_html(matrix_days, matrix_rows, year, month), unsafe_allow_html=True)
+            st.error("⚠ 当直が多い先生がいます（表の右端の赤いマス。基準はすぐ上の「アラートの基準」で変えられます）\n\n" + "\n\n".join("・" + a for a in _alerts))
+        st.markdown(duty_matrix_html(matrix_days, matrix_rows, year, month, alert_limits), unsafe_allow_html=True)
         try:
             st.download_button(
                 label="📥 この一覧をExcelでダウンロード（印刷用）",
-                data=duty_matrix_xlsx(matrix_days, matrix_rows, year, month),
+                data=duty_matrix_xlsx(matrix_days, matrix_rows, year, month, alert_limits),
                 file_name=f"当直一覧_{year}年{month}月.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary",
