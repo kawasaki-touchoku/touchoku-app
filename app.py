@@ -828,6 +828,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
     """一覧表をExcelファイル（印刷向けの書式付き）にする。"""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.formatting.rule import CellIsRule
     from openpyxl.comments import Comment
     from openpyxl.utils import get_column_letter
 
@@ -852,6 +853,35 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
         c.font = Font(bold=True, color=color.lstrip('#'))
     sum_col = first_day_col + len(days)
     n_counts = len(MATRIX_COUNT_COLUMNS)
+    # 休日の列の目印（回数の式で使う。印刷には出ないよう、この行は隠す）
+    flag_row = header_row - 1
+    for i, info in enumerate(days):
+        ws.cell(row=flag_row, column=first_day_col + i, value='休' if info['holiday'] else '平')
+    ws.row_dimensions[flag_row].hidden = True
+    first_letter = get_column_letter(first_day_col)
+    last_letter = get_column_letter(first_day_col + len(days) - 1)
+    count_letter = {key: get_column_letter(sum_col + j) for j, (key, _) in enumerate(MATRIX_COUNT_COLUMNS)}
+
+    def count_formula(key, r):
+        """その先生の行の回数を数える式。枠名（A宿直など）は1つに「直」が1つ、「宿直」「日直」「外来」も1回ずつ入る。"""
+        rng = f"{first_letter}{r}:{last_letter}{r}"
+        def occurrences(word):
+            return f'SUMPRODUCT((LEN({rng})-LEN(SUBSTITUTE({rng},"{word}","")))/{len(word)})'
+        c = {k: f"{v}{r}" for k, v in count_letter.items()}
+        if key == 'night':
+            return "=" + occurrences("宿直")
+        if key == 'day':
+            return "=" + occurrences("日直")
+        if key == 'outpatient':
+            return "=" + occurrences("外来")
+        if key == 'ward':
+            return f"={c['night']}+{c['day']}-{c['outpatient']}"
+        if key == 'holiday':
+            flags = f"{first_letter}${flag_row}:{last_letter}${flag_row}"
+            return f'=SUMPRODUCT((LEN({rng})-LEN(SUBSTITUTE({rng},"直","")))*({flags}="休"))'
+        if key == 'weekday':
+            return f"={c['night']}+{c['day']}-{c['holiday']}"
+        return f"={c['night']}+{c['day']}"   # total
     for j, (_, label) in enumerate(MATRIX_COUNT_COLUMNS):
         ws.cell(row=header_row, column=sum_col + j, value=label)
     for col in range(1, sum_col + n_counts):
@@ -913,7 +943,8 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
             if nxt.value in (None, ""):
                 nxt.value = " "
         for j, (key, _) in enumerate(MATRIX_COUNT_COLUMNS):
-            ws.cell(row=r_idx, column=sum_col + j, value=row[key]).font = Font(bold=True)
+            # 回数は式にする（Excelでマスに枠名を書き足したり消したりすると、右の回数も自動で変わる）
+            ws.cell(row=r_idx, column=sum_col + j, value=count_formula(key, r_idx)).font = Font(bold=True)
         for col in range(1, sum_col + n_counts):
             c = ws.cell(row=r_idx, column=col)
             c.border = border
@@ -926,11 +957,15 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
                 ws.cell(row=r_idx, column=first_day_col + i).border = wish_border
         for j, (key, _) in enumerate(MATRIX_COUNT_COLUMNS):
             style_count_cell(ws.cell(row=r_idx, column=sum_col + j), key, False)
-            if count_is_alert(key, row[key], alerts):
-                # 宿直・休日の回数が多い先生は赤で目立たせる
-                ac = ws.cell(row=r_idx, column=sum_col + j)
-                ac.fill = fill('#FFD8D8'); ac.font = Font(bold=True, color='C0392B')
-                ac.border = Border(left=red_side, right=red_side, top=red_side, bottom=red_side)
+            # アラート（回数が多い先生を赤く）は条件付き書式にする（Excelで直した回数にも合わせて色が変わる）
+            limit = (MATRIX_COUNT_ALERTS if alerts is None else alerts).get(key) or 0
+            if limit > 0:
+                ref = f"{get_column_letter(sum_col + j)}{r_idx}"
+                ws.conditional_formatting.add(ref, CellIsRule(
+                    operator='greaterThanOrEqual', formula=[str(limit)],
+                    fill=PatternFill(start_color='FFD8D8', end_color='FFD8D8', fill_type='solid'),
+                    font=Font(bold=True, color='C0392B'),
+                    border=Border(left=red_side, right=red_side, top=red_side, bottom=red_side)))
         # 1行で入れた当直のマスは、折り返さずに縮小して収める（行が縦長にならないように）
         for i, cell in enumerate(row['cells']):
             if cell['type'] == 'shift' and '/' not in str(cell['text']):
