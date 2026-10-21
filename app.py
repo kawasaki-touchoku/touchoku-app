@@ -1489,7 +1489,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         elif s in DAY_SHIFTS:
             dt = datetime.date(target_year, target_month, d)
             if not is_holiday_date(dt, target_year, target_month, custom_holidays):
-                errors.append(f'{d}日の日直増員：先に特別休日を指定してください。')
+                errors.append(f'{d}日の日直増員：先にカレンダーでその日を「休日にする」にしてください。')
     if errors: return None, False, errors, None, None
     result, success, warnings, past, future = _generate_shift_core(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority, locked_days)
     if result is not None:
@@ -2072,7 +2072,7 @@ def work_save_floating():
                     st.write(f"保存日時：**{saved_at}**")
                     st.write(f"{saved['year']}年{saved['month']}月の作業")
                     st.button("この作業を読み込む", key="work_restore", type="primary", on_click=work_state_restore)
-                    st.caption("年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位が、"
+                    st.caption("年月・休日と別途決定の日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位が、"
                                "途中保存したときの状態に戻ります。今の画面の入力内容は置き換わります。")
                 else:
                     st.caption("まだ途中保存された作業はありません。左の「💾 作業を途中保存する」で保存できます。")
@@ -2398,7 +2398,7 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
             st.caption("先生がNGを入力できない日（上のカレンダーの「別途決定」）：" + "・".join(f"{month}/{d}" for d in locked_sel))
         c1, c2, c3 = st.columns(3)
         if c1.button(f"{year}年{month}月の受付を開始する", key="remote_open", use_container_width=True,
-                     help="上で設定した年月・特別休日で受付を始めます。先生の名簿と専用URLも更新します。"):
+                     help="上で設定した年月・休日・別途決定の日で受付を始めます。先生の名簿と専用URLも更新します。"):
             remote_sync_doctors(doctor_rows)
             remote_save_settings(**{"受付中の年月": month_key, "特別休日": ",".join(map(str, sorted(custom_holidays))),
                                     "翌月1日特別休日": bool(next_month_special_holiday), "締め切り": False, "締め切り日": deadline,
@@ -2561,7 +2561,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
         st.markdown("""
 **毎月の作業は、画面の上から順に進めれば完了します。**
 
-1. **年月・休日を設定**：作る年月を選びます。平日に日直を置く日（年末年始など）は「休日にする」にチェックします。
+1. **年月・休日を設定**：作る年月を選びます。病院独自の休みなど、平日でも土日祝と同じ扱いにする日は「休日にする」に、年末年始など別の方法で当番を決める日は「別途決定」にチェックします。
 2. **確定当直を入力（任意）**：「📅 先月今月来月の確定当直」の帯を押して開き、担当が決まっている当直や先月末の当直を入れます。月初の勤務間隔の確認に使われます。
 3. **医師条件を読み込む**：途中保存から続ける場合は不要です。初めての場合や、手元の「医師条件CSV」を使う場合はアップロードします。
 4. **NG日を集める**：「🚫 先生ごとのNG日設定」で行います。先生方に専用URLから入力してもらい、管理画面で取り込みます（「NG日の集め方」のタブを参照）。
@@ -2571,7 +2571,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 7. **結果を確認してダウンロード**：「医師別の当直一覧」をExcelで、「作成した当直案」をCSVでダウンロードできます。
 
 **途中で中断するとき**は、画面左上の「💾 作業を途中保存する」を押してください。画面の上の帯にあるので、スクロールしていてもいつでも押せます（管理用パスワードが必要です）。
-年月・特別休日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位がまとめて途中保存され、
+年月・休日と別途決定の日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位がまとめて途中保存され、
 次回は画面左上の「📂 前回の作業の続きから始める」で元に戻せます。途中保存は、ボタンを押したときだけ行われます（当直案の作成では保存されません）。
 
         """)
@@ -2704,7 +2704,7 @@ def section_banner(icon, title, sub="", tag="", first=False, anchor=""):
 # ==========================================
 # 1. 上部ダッシュボード：年月と休日の設定
 # ==========================================
-section_banner("📅", "年月・休日・必要人数の設定", "作る月・平日に日直を置く日・1枠の人数を決めます", "必須", first=True)
+section_banner("📅", "年月・休日・必要人数の設定", "作る月・休日と別途決定の日・1枠の人数を決めます", "必須", first=True)
 st.info("作成する年月を選んでください。土日祝日は自動で休日扱いになります。平日にも日直を設けたい場合は、その日の「休日にする」にチェックを入れます。")
 
 today = datetime.date.today()
@@ -2789,9 +2789,9 @@ restored_state = st.session_state.get("restored_state")
 
 st.divider()
 
-st.subheader(f"📅 平日に日直を設ける日（特別休日） - {month}月")
-st.caption("年末年始やお盆など、平日でも日直が必要な日を指定します。チェックした日は、日直・宿直ともに休日回数の集計対象になります。")
-st.caption("「別途決定」にチェックした日は、このアプリでは当直を決めません（年末年始など、別の方法で当番を決める日に使います）。先生の専用URLの画面でも灰色になり、NGを入力できなくなります。確定当直に入れた分だけは当直案に表示されます。")
+st.subheader(f"📅 休日と別途決定の日の設定 - {month}月")
+st.caption("**休日にする**：病院独自の休みなど、平日でも土日祝と同じ扱いにする日です。日直の枠ができ、日直・宿直とも休日回数に数えます。")
+st.caption("**別途決定**：年末年始など、別の方法で当番を決める日です。このアプリでは当直を決めず、先生の専用URLの画面でも灰色になってNGを入力できません。確定当直に入れた分だけは当直案に表示されます。")
 
 cal_matrix = calendar.monthcalendar(year, month)
 custom_holidays = []
@@ -2901,7 +2901,7 @@ if next_month_first.weekday() >= 5 or jpholiday.is_holiday(next_month_first):
     next_month_special_holiday = False
 else:
     next_month_special_holiday = st.checkbox(
-        f"翌月1日 {next_month_first_label} は病院独自の休み（特別休日）",
+        f"翌月1日 {next_month_first_label} は病院独自の休み",
         key=f"next_month_special_holiday_{year}_{month}",
         help="平日でも病院が休みの場合だけチェックしてください。休みなら、月末の宿直は「翌日PM duty」の制限を受けません。"
     )
@@ -3052,7 +3052,7 @@ with st.expander("回数・勤務間隔の数え方", expanded=False):
 | 最低空ける日数 | 勤務と次の勤務の間に空ける日数です。5日なら、10日の次は16日以降です。 |
 | 月間最小回数 | できるだけ確保したい回数です。条件によっては、この回数に届かないことがあります。 |
 | 月間最大回数 | 日直と宿直を合わせた月間の上限です。 |
-| 休日最大回数 | 土日祝日・特別休日に担当する日直と宿直の合計上限です。 |
+| 休日最大回数 | 土日祝日と「休日にする」にした日に担当する、日直と宿直の合計上限です。 |
 | 各枠の上限 | A宿直など、それぞれの枠を担当する月間の上限です。 |
 
 1つの枠を1回と数えます。確定指定により同じ日に日直と宿直を担当する場合は2回です。
@@ -3150,7 +3150,7 @@ edited_df = st.data_editor(
         "最低空ける日数": st.column_config.NumberColumn("最低空ける日数", help="勤務間の空き日数。5日なら10日の次は16日以降。確定勤務と追加勤務の間隔も守ります。確定勤務同士の違反は警告します。"),
         "月間最小回数": st.column_config.NumberColumn("月間最小回数（目標）", help="できるだけ確保したい回数です。条件によっては未達になります。月間最大回数以下にしてください。"),
         "月間最大回数": st.column_config.NumberColumn("月間最大回数", help="日直・宿直を合わせた上限です。確定指定がある場合は例外があります。"),
-        "休日最大回数": st.column_config.NumberColumn("休日最大回数", help="土日祝・特別休日の日直と宿直の合計上限です。1枠を1回と数えます。"),
+        "休日最大回数": st.column_config.NumberColumn("休日最大回数", help="土日祝と「休日にする」にした日の、日直と宿直の合計上限です。1枠を1回と数えます。"),
         **{s + "上限": st.column_config.NumberColumn(s + "上限", help=s + cap_help) for s in ALL_SHIFT_TYPES},
         NG_COLUMN: None,
         REQUEST_COLUMN: st.column_config.TextColumn(
@@ -3442,7 +3442,7 @@ if not valid_staff.empty:
 st.divider()
 st.markdown("### 📂 医師条件をCSVでダウンロード（手元にファイルで残す場合）")
 st.write("医師名・回数・勤務間隔・希望日・NG日・備考をCSVファイルとしてパソコンなどにダウンロードします。このファイルは「医師条件」のアップロード欄から読み込めます。")
-st.caption("ダウンロードの前に、各医師の「NG日を反映する」を押してください。対象年月・特別休日・増員設定・確定済み当直・生成結果・色分けとそのメモは、このCSVには含まれません。"
+st.caption("ダウンロードの前に、各医師の「NG日を反映する」を押してください。対象年月・休日と別途決定の日・増員設定・確定済み当直・生成結果・色分けとそのメモは、このCSVには含まれません。"
            "続きから作業するだけなら、CSVではなく「💾 途中保存」を使うほうが簡単です。")
 
 # ダウンロードするCSVも、画面と同じく「先生の名前 → 備考 → その他」の順にそろえる（読み込みは列名で行うので、古い並びのCSVもそのまま使える）
