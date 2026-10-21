@@ -2091,6 +2091,11 @@ def work_state_restore():
     st.session_state["uploader_gen"] = st.session_state.get("uploader_gen", 0) + 1
     st.session_state.pop("last_uploaded_file_id", None)
     st.session_state["work_state_message"] = ("success", f"{saved_at} に保存した作業（{y}年{m}月）を読み込みました。")
+    # 読み込んだことは、上の帯のボタンの右に1か所だけ出す（次に途中保存するまで表示しておく）
+    st.session_state["work_restore_note"] = f"{str(saved_at)[5:16]} 保存分（{y}年{m}月）を読み込みました"
+    st.session_state.pop("work_save_note", None)
+    # 読み込んだあとは「続きから」の小さな枠を閉じる（見出しを目に見えない形で変えると、閉じた状態で作り直される）
+    st.session_state["work_restore_gen"] = st.session_state.get("work_restore_gen", 0) + 1
 
 
 def admin_logged_in(widget_key):
@@ -2154,11 +2159,8 @@ def work_save_floating():
         return
     st.markdown(WORK_SAVE_FLOAT_CSS, unsafe_allow_html=True)
     msg = st.session_state.pop("work_state_message", None)
-    if msg:
-        if msg[0] == "success":
-            st.toast(msg[1], icon="📂")
-        else:
-            st.error(msg[1])
+    if msg and msg[0] != "success":
+        st.error(msg[1])
     has_popover = hasattr(st, "popover")
     with st.container(key="work_save_float"):
         # 並び：いちばん左に「作業を途中保存する」、その右に「前回の作業の続きから始める」
@@ -2176,8 +2178,9 @@ def work_save_floating():
                 admin_logged_in("work_save_pw")
 
         # --- 前回の作業の続きから始める（押すと小さな枠が開く） ---
-        box = st.popover("📂 前回の作業の続きから始める") if has_popover \
-            else st.expander("📂 前回の作業の続きから始める", expanded=False)
+        _restore_label = "📂 前回の作業の続きから始める" + "\u200b" * st.session_state.get("work_restore_gen", 0)
+        box = st.popover(_restore_label) if has_popover \
+            else st.expander(_restore_label, expanded=False)
         with box:
             if admin_logged_in("work_restore_pw"):
                 saved_at, saved = work_state_info()
@@ -2195,8 +2198,8 @@ def work_save_floating():
         # --- 保存・読み込みの結果（ボタンの右に1行） ---
         if logged_in:
             WORK_SAVE_SLOT = st.empty()
-            if msg and msg[0] == "success":
-                WORK_SAVE_SLOT.markdown("<span class='work-save-note'>✅ 前回の作業を読み込みました</span>", unsafe_allow_html=True)
+            if st.session_state.get("work_restore_note"):
+                WORK_SAVE_SLOT.markdown(f"<span class='work-save-note'>📂 {st.session_state['work_restore_note']}</span>", unsafe_allow_html=True)
             elif st.session_state.get("work_save_note"):
                 WORK_SAVE_SLOT.markdown(f"<span class='work-save-note'>✅ {st.session_state['work_save_note']} 途中保存しました</span>", unsafe_allow_html=True)
             if st.session_state.pop("work_save_toast", False):
@@ -3770,6 +3773,7 @@ if work_save_request:
     try:
         work_state_save(work_snapshot)
         st.session_state["work_save_note"] = remote_now()[-8:-3]
+        st.session_state.pop("work_restore_note", None)
         st.session_state["work_save_toast"] = True
         # カレンダーで押したまま反映していない変更は、途中保存に入らないので知らせる
         st.session_state["work_save_dirty"] = [
