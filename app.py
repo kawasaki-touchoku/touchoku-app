@@ -948,10 +948,10 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
             c.border = Border(left=thin, right=thin, bottom=thin, top=red if k == 0 else thin)
             if count:
                 slot_total += 1
-                c.value = slot_label(slot, '\n') + ('' if count == 1 else f'×{count}')
+                c.value = slot + ('' if count == 1 else f'×{count}')
                 c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#'))
                 ws.cell(row=header_row, column=first_day_col + i).fill = fill('#FDE2E0')
-            c.alignment = center
+            c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=False, shrink_to_fit=True)
         ws.cell(row=last_row, column=sum_col + n_counts - 1, value=f"{slot_total}枠").font = Font(bold=True, color='C0392B')
         for col in list(range(1, first_day_col)) + list(range(sum_col, sum_col + n_counts)):
             c = ws.cell(row=last_row, column=col)
@@ -959,25 +959,44 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
             c.alignment = center if col > 1 else Alignment(vertical='center')
         ws.row_dimensions[last_row].height = 24
 
+    # 凡例：見本のマスは表と同じ幅の日付の列に、表と同じ見た目で置き、説明はその右に書く
     legend_row = last_row + 2
+    one_line = Alignment(horizontal='center', vertical='center', wrap_text=False, shrink_to_fit=True)
     ws.cell(row=legend_row, column=1, value='凡例').font = Font(bold=True)
-    items = [(s, bg, fg) for s, (bg, fg) in MATRIX_SHIFT_COLORS.items()]
-    for k, (label, bg, fg) in enumerate(items):
-        c = ws.cell(row=legend_row, column=2 + k * 2, value=label)
-        c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#')); c.alignment = center; c.border = border
-    ws.cell(row=legend_row + 1, column=2, value='×').font = Font(bold=True, color='C0392B')
-    wish_legend = ws.cell(row=legend_row + 4, column=2)
-    wish_legend.border = wish_border; wish_legend.alignment = center; wish_legend.font = Font(bold=True)
-    ws.cell(row=legend_row + 4, column=3, value='茶色の枠：希望日が通った当直')
-    ws.cell(row=legend_row + 1, column=3, value='当直NG（宿×＝宿直NG、日×＝日直NG）')
-    ws.cell(row=legend_row + 2, column=2).fill = PM_FILL
-    ws.cell(row=legend_row + 2, column=3, value='翌日PM duty（宿直を外す日）')
-    ws.cell(row=legend_row + 3, column=2, value='⚠️ 未決定').font = Font(bold=True, color='C0392B')
-    ws.cell(row=legend_row + 3, column=3, value='赤線の下：当直が決まっていない枠')
+    ws.cell(row=legend_row, column=2, value='当直の枠（色）')
+    for k, (label, (bg, fg)) in enumerate(MATRIX_SHIFT_COLORS.items()):
+        c = ws.cell(row=legend_row, column=first_day_col + k * 2, value=label)
+        c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#')); c.alignment = one_line; c.border = border
+    ws.row_dimensions[legend_row].height = 20
+
+    def legend_line(offset, text):
+        r = legend_row + offset
+        ws.cell(row=r, column=first_day_col + 1, value=text)
+        ws.row_dimensions[r].height = 20
+        sample = ws.cell(row=r, column=first_day_col)
+        sample.border = border; sample.alignment = one_line
+        return sample
+
+    s1 = legend_line(1, '×：その日の当直NG　　宿×：休日の宿直だけNG　　日×：休日の日直だけNG')
+    s1.value = '×'; s1.font = Font(bold=True, color='C0392B')
+    legend_line(2, '翌日PM duty（その日の宿直を外す日）').fill = PM_FILL
+    legend_line(3, '薄い赤の列：土日祝・休日にした日').fill = fill('#FDF1F1')
+    s4 = legend_line(4, '茶色の太い枠：希望日が通った当直')
+    # 枠が見えやすいよう、淡い色の枠名を見本にする
+    sample_slot = 'B日直' if 'B日直' in MATRIX_SHIFT_COLORS else next(iter(MATRIX_SHIFT_COLORS))
+    first_bg, first_fg = MATRIX_SHIFT_COLORS[sample_slot]
+    s4.value = sample_slot; s4.fill = fill(first_bg)
+    s4.font = Font(bold=True, size=8, color=first_fg.lstrip('#')); s4.border = wish_border
+    s5 = legend_line(5, '赤線より下の「⚠️ 未決定」の行：当直が決まっていない枠（その枠の色で表示）')
+    s5.border = Border(left=thin, right=thin, bottom=thin, top=red)
+    s5.value = '未決定'; s5.font = Font(bold=True, size=8, color='C0392B')
+    s6 = legend_line(6, 'メモ：💬＝先生からのコメント、📝＝備考（セルにカーソルを乗せると全文。「メモ全文」シートにも一覧）')
+    s6.value = '💬📝'; s6.border = Border()
     if count_alert_text(alerts):
-        alert_legend = ws.cell(row=legend_row + 5, column=2, value='⚠')
-        alert_legend.fill = fill('#FFD8D8'); alert_legend.font = Font(bold=True, color='C0392B'); alert_legend.alignment = center
-        ws.cell(row=legend_row + 5, column=3, value='右端の赤いマス：' + count_alert_text(alerts))
+        s7 = legend_line(7, '右端の赤い枠の回数：' + count_alert_text(alerts))
+        s7.value = next(v for k, v in alerts.items() if v) if alerts else 4
+        s7.fill = fill('#FFD8D8'); s7.font = Font(bold=True, color='C0392B')
+        s7.border = Border(left=red_side, right=red_side, top=red_side, bottom=red_side)
 
     ws.column_dimensions['A'].width = 14
     ws.column_dimensions['B'].width = 12
