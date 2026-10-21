@@ -871,7 +871,10 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
         ws.cell(row=r_idx, column=2, value=row['pm_duty'])
         if row.get('comment') or row.get('note'):
             # セルには短く表示し、全文はセルのコメント（マウスを乗せると表示）と「メモ全文」シートに入れる
-            memo = ws.cell(row=r_idx, column=3, value=memo_preview(row, length=4))
+            # セルにはメモの全文を1行で入れる（表示はセルの幅で切れるが、文字はすべて残る。コピーや検索もできる）
+            icons = ("💬" if row.get('comment') else "") + ("📝" if row.get('note') else "")
+            one_line = " ／ ".join(t.replace("\r", "").replace("\n", " ") for t in (row.get('comment'), row.get('note')) if t)
+            memo = ws.cell(row=r_idx, column=3, value=icons + one_line)
             memo.font = Font(size=8)
             full = []
             if row.get('comment'):
@@ -894,14 +897,19 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
                 c.fill = PM_FILL
             elif info['holiday']:
                 c.fill = fill('#FDF1F1')
+        if row.get('comment') or row.get('note'):
+            # 右どなりの日付のマスが空だと、メモの長い文字が当直表の上にはみ出して見えるので、空白を1つ入れて止める
+            nxt = ws.cell(row=r_idx, column=first_day_col)
+            if nxt.value in (None, ""):
+                nxt.value = " "
         for j, (key, _) in enumerate(MATRIX_COUNT_COLUMNS):
             ws.cell(row=r_idx, column=sum_col + j, value=row[key]).font = Font(bold=True)
         for col in range(1, sum_col + n_counts):
             c = ws.cell(row=r_idx, column=col)
             c.border = border
             c.alignment = center if col > 1 else Alignment(vertical='center')
-        # メモ欄は1行で表示（折り返すと行が高くなるため、はみ出す分は縮小）
-        ws.cell(row=r_idx, column=3).alignment = Alignment(horizontal='left', vertical='center', shrink_to_fit=True)
+        # メモ欄は1行で表示（折り返すと行が高くなるため折り返さない。はみ出す分はセルの幅で切れて見える）
+        ws.cell(row=r_idx, column=3).alignment = Alignment(horizontal='left', vertical='center', wrap_text=False)
         # 希望日が通った当直をオレンジの太線で囲む
         for i, cell in enumerate(row['cells']):
             if cell.get('wish'):
