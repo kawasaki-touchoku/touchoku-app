@@ -1971,6 +1971,9 @@ def work_state_restore():
     for d in data.get("locked", []):
         st.session_state[f"lock_{y}_{m}_{int(d)}"] = True
     st.session_state[f"next_month_special_holiday_{y}_{m}"] = bool(data.get("next_special"))
+    for name, cv in (data.get("comments") or {}).items():
+        if isinstance(cv, (list, tuple)) and cv and str(cv[0]).strip():
+            st.session_state[f"ng_import_comment_{name}_{y}_{m}"] = (str(cv[0]), str(cv[1]) if len(cv) > 1 else "")
     for slot, rank in (data.get("priority") or {}).items():
         st.session_state[f"shortage_priority_{slot}"] = int(rank)
     st.session_state["restored_state"] = data
@@ -2241,6 +2244,16 @@ def doctor_entry_page(key):
     st.caption("このページのURLは、先生専用です。ほかの方には共有しないでください。")
 
 
+def imported_comments(year, month):
+    """
+    アプリに取り込んだ先生のコメント {先生: (コメント, 保存日時)}。
+    提出されただけでまだ取り込んでいないコメントは含めない（アプリをリセットしたら消え、途中保存から戻せる）。
+    """
+    prefix, suffix = "ng_import_comment_", f"_{year}_{month}"
+    return {k[len(prefix):-len(suffix)]: tuple(v) for k, v in st.session_state.items()
+            if k.startswith(prefix) and k.endswith(suffix) and v and str(v[0]).strip()}
+
+
 def remote_comments_safe(year, month):
     """
     その年月に先生方が専用URLから書いたコメント {先生: (コメント, 保存日時)}。
@@ -2313,6 +2326,12 @@ def import_remote_ng(year, month, submissions, mode="merge"):
         for d in range(1, num_days + 1):
             st.session_state[f"ng_{doctor}_{year}_{month}_{d}"] = result.get(d, "OK")
         st.session_state[f"ng_import_last_{doctor}_{year}_{month}"] = (result, base)
+        # 先生のコメントも、取り込んだときだけアプリ（医師別の当直一覧など）に表示する
+        comment = str(r.get("コメント", "")).strip()
+        if comment:
+            st.session_state[f"ng_import_comment_{doctor}_{year}_{month}"] = (comment, r.get("保存日時", ""))
+        else:
+            st.session_state.pop(f"ng_import_comment_{doctor}_{year}_{month}", None)
     how = "管理者の入力と合わせて" if mode == "merge" else "先生の提出内容に置き換えて"
     st.session_state["remote_import_message"] = f"{len(submissions)}名分のNG日を、{how}取り込みました。"
 
@@ -2333,6 +2352,7 @@ def undo_remote_import(year, month, names):
         for d in range(1, num_days + 1):
             st.session_state[f"ng_{name}_{year}_{month}_{d}"] = before.get(d, "OK")
         st.session_state.pop(f"ng_import_last_{name}_{year}_{month}", None)
+        st.session_state.pop(f"ng_import_comment_{name}_{year}_{month}", None)
         st.session_state.pop(f"ng_dirty::{name}", None)
         done.append(name)
     if done:
@@ -3299,7 +3319,7 @@ if not valid_staff.empty:
         st.session_state["ng_current_doctor"] = doctor_names[0]
 
     # 先生方のコメント（専用URLから）と、医師条件の備考。選択欄の💬マークと、カレンダーの上の表示に使う
-    doctor_comments = remote_comments_safe(year, month)
+    doctor_comments = imported_comments(year, month)
     # 備考の列名は「備考」「備考（メモ…）」「備考(メモ…)」など、CSVによって少し違うことがあるので、
     # 「備考」で始まる列をすべて見る
     note_columns = [c for c in valid_staff.columns if str(c).strip().startswith("備考")]
@@ -3560,6 +3580,7 @@ work_snapshot = {
     "fixed_csv": edited_fixed_df.to_csv(index=False),
     "staff_csv": staff_df.to_csv(index=False),
     "priority": {k: int(v) for k, v in shortage_priority.items()},
+    "comments": {n: list(v) for n, v in imported_comments(year, month).items()},
 }
 # 右上の途中保存ボタンが押されていたら、ここで（全部の入力を読み終えてから）保存する
 if work_save_request:
@@ -3657,7 +3678,7 @@ if len(staff_df) > 0:
         st.subheader("🗓️ 医師別の当直一覧")
         st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。希望日が通った当直は茶色の太い枠で囲みます。マスにカーソルを合わせると、その先生の行とその日の列が黄色く色付きます。")
         matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday,
-                                                     comments=remote_comments_safe(year, month))
+                                                     comments=imported_comments(year, month))
         missing_total = sum(len(info['shortage']) for info in matrix_days)
         # 下の帯の「当直案を作成」ボタンの横に、結果のまとめを出す
         _t = remote_now()[-8:-3]
