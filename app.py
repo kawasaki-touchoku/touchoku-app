@@ -3201,18 +3201,22 @@ next_month_first = datetime.date(year, month, calendar.monthrange(year, month)[1
 next_month_first_label = f"{next_month_first.year}/{next_month_first.month}/1（{WEEKDAYS_JA[next_month_first.weekday()]}）"
 month_last = next_month_first - datetime.timedelta(days=1)
 month_last_label = f"{month_last.month}/{month_last.day}（{WEEKDAYS_JA[month_last.weekday()]}）"
-duty_note = f"月末 {month_last_label} の宿直で「翌日PM duty」を判定するために使います。"
+# 翌月1日が休みかどうか：月末の宿直に「翌日PM duty」の制限をかけるかどうかの判断に使う
+st.markdown(f"**翌月1日の扱い**（月末 {month_last_label} の宿直に、翌日PM dutyの制限をかけるかどうか）")
 if next_month_first.weekday() >= 5 or jpholiday.is_holiday(next_month_first):
     # 土日祝は自動で休日扱いになるため、チェックボックスは表示しない
-    st.caption(f"翌月1日 {next_month_first_label} は休日のため、設定不要です。（{duty_note}）")
+    _kind = "祝日" if jpholiday.is_holiday(next_month_first) else "土日"
+    st.caption(f"翌月1日 {next_month_first_label} は{_kind}なので、自動で休日として扱います（チェックは不要です）。"
+               f"翌日が休みなので、月末 {month_last_label} の宿直は「翌日PM duty」の制限を受けません。")
     next_month_special_holiday = False
 else:
     next_month_special_holiday = st.checkbox(
         f"翌月1日 {next_month_first_label} は病院独自の休み",
         key=f"next_month_special_holiday_{year}_{month}",
-        help="平日でも病院が休みの場合だけチェックしてください。休みなら、月末の宿直は「翌日PM duty」の制限を受けません。"
+        help="平日でも病院が休みの場合だけチェックしてください。"
     )
-    st.caption(duty_note)
+    st.caption(f"翌月1日 {next_month_first_label} は平日です。病院が休みの場合だけチェックしてください。"
+               f"チェックすると、月末 {month_last_label} の宿直は「翌日PM duty」の制限を受けません。")
 
 holiday_total_placeholder = st.empty()
 
