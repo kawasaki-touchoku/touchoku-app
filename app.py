@@ -1533,7 +1533,7 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
         if status == cp_model.FEASIBLE:
             warnings.append("必要人数を満たす案です。時間内に最適化を完了したことまでは確認できていません。")
         if over_cap_warnings:
-            warnings.append("⚠️ **【重要】以下の枠は「決定済み当直」や「優先度100」が重なったため、AIが自動的に定員を拡張（2名以上配置）して当直を完成させました:**")
+            warnings.append("⚠️ **【重要】次の枠は、確定当直や「希望優先度100以上」の指定が重なったため、設定した人数を超えて配置しています（そのまま当直案にしています）:**")
             warnings.extend([f"・{w}" for w in over_cap_warnings])
         return result_df, True, warnings, past_worked_dates, future_worked_dates
 
@@ -2240,7 +2240,7 @@ def work_save_floating():
                     st.write(f"保存日時：**{saved_at}**")
                     st.write(f"{saved['year']}年{saved['month']}月の作業")
                     st.button("この作業を読み込む", key="work_restore", type="primary", on_click=work_state_restore)
-                    st.caption("年月・休日と別途決定の日・増員設定・確定当直・医師条件（NG日を含む）・不足時の優先順位が、"
+                    st.caption("年月・休日と別途決定の日・増員設定・確定当直・医師条件（NG日を含む）・取り込んだ先生のコメント・不足時の優先順位・アラートの基準が、"
                                "途中保存したときの状態に戻ります。今の画面の入力内容は置き換わります。")
                 else:
                     st.caption("まだ途中保存された作業はありません。左の「💾 作業を途中保存する」で保存できます。")
@@ -3010,7 +3010,7 @@ def section_banner(icon, title, sub="", tag="", first=False, anchor=""):
 # 1. 上部ダッシュボード：年月と休日の設定
 # ==========================================
 section_banner("📅", "年月・休日・必要人数の設定", "作る月・休日と別途決定の日・1枠の人数を決めます", "必須", first=True)
-st.info("作成する年月を選んでください。土日祝日は自動で休日扱いになります。平日にも日直を設けたい場合は、その日の「休日にする」にチェックを入れます。")
+st.info("作成する年月を選んでください。土日祝日は自動で休日扱いになります。下のカレンダーで、平日でも休日扱いにする日は「休日にする」、別の方法で当番を決める日は「別途決定」にチェックします。")
 
 today = datetime.date.today()
 if today.month == 12:
@@ -3287,7 +3287,7 @@ def _fixed_csv_has_entries(text):
 _has_fixed = bool(restored_state and restored_state.get("fixed_csv") and _fixed_csv_has_entries(restored_state["fixed_csv"]))
 with st.container(key="fixed_section"), st.expander("📅 先月今月来月の確定当直（押すと開きます）", expanded=_has_fixed):
     st.info("先月・今月・来月の、担当者が決まっている当直を入力してください。先月末の勤務は、月初の勤務間隔の確認に使います。入力がなければ、この項目は飛ばせます。")
-    with (st.popover("確定済み当直の入力例と扱い") if hasattr(st, "popover") else st.container()):
+    with (st.popover("確定当直の入力例と扱い") if hasattr(st, "popover") else st.container()):
         st.markdown("""
 - CSVのアップロードと、下の表への直接入力のどちらでも入力できます。
 - 日付は `2026/10/1` または `10/1` の形式で入力します。
@@ -3297,7 +3297,7 @@ with st.container(key="fixed_section"), st.expander("📅 先月今月来月の�
 - 今月の平日に日直を入力する場合は、先に上のカレンダーでその日を「休日にする」にしてください。
 - 今月の確定勤務はNG日・曜日制限より優先され、回数上限も必要に応じて緩められます。確定勤務を基準に追加勤務の間隔を守ります。確定勤務同士が近すぎる場合は、確定内容を維持して警告します。
 
-**今月の同じ日・同じ枠を指定した場合、確定当直表への入力と「希望優先度100以上」での指定は、どちらも固定され、計算上の扱いは基本的に同じです。両方に入力する必要はありません。**
+**今月の同じ日・同じ枠を指定した場合、確定当直への入力と「希望優先度100以上」での指定は、どちらも固定され、計算上の扱いは基本的に同じです。両方に入力する必要はありません。**
     """)
 
     fixed_columns = ["日付", "平日/休日"] + ALL_SHIFT_TYPES
@@ -3314,7 +3314,7 @@ with st.container(key="fixed_section"), st.expander("📅 先月今月来月の�
             mime="text/csv",
         )
     with col_ul_fixed:
-        fixed_file = st.file_uploader("決定済み当直表（CSV）をアップロード", type="csv", key=f"fixed_csv_{st.session_state.get('uploader_gen', 0)}")
+        fixed_file = st.file_uploader("確定当直（CSV）をアップロード", type="csv", key=f"fixed_csv_{st.session_state.get('uploader_gen', 0)}")
 
     if fixed_file is not None:
         try:
@@ -3364,17 +3364,17 @@ with st.expander("回数・勤務間隔の数え方", expanded=False):
 
 1つの枠を1回と数えます。確定指定により同じ日に日直と宿直を担当する場合は2回です。
 月間最小回数は、月間最大回数以下に設定してください。
-確定済み当直や優先度100以上の希望がある場合は、上限の例外があります。自動追加勤務の間隔は守り、確定勤務同士の間隔違反は警告します。
+確定当直や希望優先度100以上の希望がある場合は、上限の例外があります。自動追加勤務の間隔は守り、確定勤務同士の間隔違反は警告します。
     """)
 with st.expander("希望優先度：通常の希望と、100以上の特別な設定", expanded=False):
     st.markdown("""
 - **通常は「1」**を使用します。1〜99は、数字が大きいほど希望を優先しますが、NG日・回数上限・勤務間隔などの範囲内で割り当てます。
 - **100以上は、その医師の希望日すべてを確定扱いにする設定**です。「できれば入りたい」という用途には使わないでください。
 - 確定扱いの日はNG日・曜日制限より優先され、回数上限が必要に応じて緩められます。その日と自動追加勤務の間隔は守ります。確定勤務同士の間隔違反は警告します。
-- 一部の勤務だけを確定させたい場合は、上の「確定済み当直」へ入力し、希望優先度は通常の値にしてください。
+- 一部の勤務だけを確定させたい場合は、上の「📅 先月今月来月の確定当直」へ入力し、希望優先度は通常の値にしてください。
 - 指定の誤りや条件の組み合わせによっては作成できない場合があります。作成後に確定勤務が反映されているか確認してください。
 
-**今月の同じ日・同じ枠を指定した場合、確定当直表への入力と「希望優先度100以上」での指定は、どちらも固定され、計算上の扱いは基本的に同じです。両方に入力する必要はありません。**
+**今月の同じ日・同じ枠を指定した場合、確定当直への入力と「希望優先度100以上」での指定は、どちらも固定され、計算上の扱いは基本的に同じです。両方に入力する必要はありません。**
     """)
 
 template_data = {
@@ -3525,7 +3525,8 @@ with st.expander("NGの種類・一括操作について", expanded=False):
 
 平日は日直がないので、「宿直」のボタンだけあります。
 「全日NGにする」は平日を宿NG、休日を全NGにし、「すべてOKに戻す」はNG指定を解除します。
-一括操作は押すとすぐ反映されます。確定済み当直・優先度100以上の希望は、NGより優先されます。
+一括操作は押すとすぐ反映されます。確定当直・希望優先度100以上の希望は、NGより優先されます。
+灰色の「別途決定」の日は、いちばん上のカレンダーで「別途決定」にした日です。NGは入力できず、当直案でもその日は決めません。
 
 「休日にする」のチェックを外した日は、平日として表示されます（全NG→宿NG として扱い、日NGは平日には関係しません）。
 チェックを戻すと、元のNG指定がそのまま復活します。
@@ -3755,7 +3756,7 @@ if not valid_staff.empty:
 st.divider()
 st.markdown("### 📂 医師条件をCSVでダウンロード（手元にファイルで残す場合）")
 st.write("医師名・回数・勤務間隔・希望日・NG日・備考をCSVファイルとしてパソコンなどにダウンロードします。このファイルは「医師条件」のアップロード欄から読み込めます。")
-st.caption("ダウンロードの前に、各医師の「NG日を反映する」を押してください。対象年月・休日と別途決定の日・増員設定・確定済み当直・生成結果・色分けとそのメモは、このCSVには含まれません。"
+st.caption("ダウンロードの前に、各医師の「NG日を反映する」を押してください。対象年月・休日と別途決定の日・増員設定・確定当直・作成した当直案・色分けとそのメモは、このCSVには含まれません。"
            "続きから作業するだけなら、CSVではなく「💾 途中保存」を使うほうが簡単です。")
 
 # ダウンロードするCSVも、画面と同じく「先生の名前 → 備考 → その他」の順にそろえる（読み込みは列名で行うので、古い並びのCSVもそのまま使える）
@@ -3913,7 +3914,7 @@ if len(staff_df) > 0:
         create_clicked = create_bar_request
         st.markdown("<div class='create-guide'>🚀 当直案は、画面のいちばん下の帯にある<b>「当直案を作成」</b>ボタンで作ります"
                     "<span>（どこまでスクロールしていても押せます）</span></div>", unsafe_allow_html=True)
-        st.caption("※ 押すたびに、同じ条件でも違うパターンの当直表を作ります。気に入った案は、下のボタンからダウンロードしてください（作成した当直案は途中保存には含まれません）。")
+        st.caption("※ 押すたびに、同じ条件でも違うパターンの当直表を作ります。気に入った案は、結果の緑のボタン「📥 この一覧をExcelでダウンロード」で保存してください（作成した当直案は途中保存には含まれません）。")
     if create_clicked:
         with st.spinner("当直案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
             try:
@@ -3956,7 +3957,7 @@ if len(staff_df) > 0:
 
         st.markdown("<div id='sec-result'></div>", unsafe_allow_html=True)
         st.subheader("🗓️ 医師別の当直一覧")
-        st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。希望日が通った当直は茶色の太い枠で囲みます。マスにカーソルを合わせると、その先生の行とその日の列が黄色く色付きます。")
+        st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。希望日が通った当直は茶色の太い枠で囲み、回数が多い先生は右端の回数を赤い枠で示します。マスにカーソルを合わせると、その先生の行とその日の列が黄色く色付きます。")
         matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday,
                                                      comments=imported_comments(year, month))
         missing_total = sum(len(info['shortage']) for info in matrix_days)
