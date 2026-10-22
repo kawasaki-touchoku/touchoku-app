@@ -1163,7 +1163,7 @@ def validate_fixed_inputs(df, doctors, year, month, holidays=None):
             continue
         dt = parse_shift_date(raw, year, month)
         if dt is None:
-            errors.append(f'確定当直 {i+1}行目：日付「{raw}」を確認してください。年付きの年月日で指定できます。')
+            errors.append(f'確定当直 {i+1}行目：日付「{raw}」を確認してください。「11/1」または「2026/11/1」の形で入力します。')
             continue
         df.at[i, '日付'] = dt.isoformat()
         for s in ALL_SHIFT_TYPES:
@@ -3366,11 +3366,22 @@ with st.container(key="fixed_section"), st.expander("📅 先月今月来月の�
     if "日付" not in base_fixed_df.columns:
         st.error("確定当直CSVに「日付」の列がありません。ひな形の列名を確認してください。")
         st.stop()
-    base_fixed_df = base_fixed_df.set_index("日付")
+    # 日付も普通の列として編集できるようにする（行の見出し＝インデックスにすると、既存の行の日付が直せないため）。
+    # 空の列は数字の列とみなされて文字が入らないことがあるので、すべて文字の列にそろえる
+    base_fixed_df = base_fixed_df.copy()
+    for _c in base_fixed_df.columns:
+        base_fixed_df[_c] = base_fixed_df[_c].apply(
+            lambda x: "" if pd.isna(x) or str(x).strip().lower() in ("nan", "none", "<na>") else str(x)).astype(str)
+    _date_first = ["日付"] + [c for c in base_fixed_df.columns if c != "日付"]
+    base_fixed_df = base_fixed_df[_date_first].reset_index(drop=True)
 
-    st.write("表のセルをクリックして、日付と担当医師名を入力・編集できます。")
-    edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
-    edited_fixed_df = edited_fixed_df_raw.reset_index()
+    st.write("表のセルをクリックして、日付（例：11/1）と担当医師名を入力・編集できます。行は下の「＋」で追加できます。")
+    edited_fixed_df = st.data_editor(
+        base_fixed_df, num_rows="dynamic", use_container_width=True, height=200, hide_index=True,
+        column_config={c: st.column_config.TextColumn(c, help="例：11/1 または 2026/11/1" if c == "日付" else None)
+                       for c in base_fixed_df.columns},
+    )
+    edited_fixed_df = edited_fixed_df.reset_index(drop=True)
 
 section_banner("👩‍⚕️", "医師条件の読み込み・入力", "先生ごとの回数・間隔・希望日を入力します", "必須", anchor="sec-staff")
 st.info("下の表に医師ごとの条件を入力してください。CSVを使う場合は、ひな形をダウンロードして編集し、アップロードします。NG日は、この下の「🚫 先生ごとのNG日設定」で設定します。")
