@@ -2150,6 +2150,34 @@ def work_state_restore():
     st.session_state["work_restore_gen"] = st.session_state.get("work_restore_gen", 0) + 1
 
 
+def carry_over_staff(year, month):
+    """
+    途中保存してある医師条件（回数・間隔・翌日PM duty・備考など）を、今の年月に引き継ぐ（ボタンのコールバック）。
+    月ごとに変わる NG日・希望日・先生のコメントは空にする。
+    """
+    saved_at, data = work_state_info()
+    if not data or not data.get("staff_csv"):
+        st.session_state["carry_over_message"] = ("error", "引き継げる医師条件が見つかりませんでした。先に「💾 作業を途中保存する」で保存してください。")
+        return
+    df = parse_staff_csv(str(data["staff_csv"]).encode("utf-8"))
+    for col in (NG_COLUMN, REQUEST_COLUMN):
+        if col in df.columns:
+            df[col] = ""
+    # 画面に残っている今月のNG日・取り込みの記録・先生のコメントを消す（新しい医師条件から読み直す）
+    for key in list(st.session_state.keys()):
+        if key.startswith("ng_"):
+            del st.session_state[key]
+    state = dict(st.session_state.get("restored_state") or {"year": year, "month": month})
+    state["staff_csv"] = df.to_csv(index=False)
+    st.session_state["restored_state"] = state
+    st.session_state["uploader_gen"] = st.session_state.get("uploader_gen", 0) + 1
+    st.session_state.pop("last_uploaded_file_id", None)
+    st.session_state["carry_over_gen"] = st.session_state.get("carry_over_gen", 0) + 1   # 小さな枠を閉じる
+    st.session_state["carry_over_message"] = (
+        "success", f"{saved_at} に途中保存した{data.get('year')}年{data.get('month')}月の医師条件（{len(df)}名）を引き継ぎました。"
+                   "NG日・希望日・先生のコメントは空にしてあります。")
+
+
 def admin_logged_in(widget_key):
     """管理用パスワードの確認。成功すると、同じ画面のほかの管理機能でも入力不要になる。"""
     if st.session_state.get("remote_admin_ok"):
@@ -2844,7 +2872,8 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
         st.markdown("""
 **毎月の作業は、画面の上から順に進めれば完了します。**
 
-1. **前回の続きを読み込む**：上の帯の「📂 前回の作業の続きから始める」を押し、「この作業を読み込む」を押します。先月の医師条件などがそのまま戻ります（初めての場合は不要です）。
+1. **前の月の医師条件を引き継ぐ**：新しい月を作るときは、年月を選んでから、医師条件の欄の「📋 前回の医師条件を引き継ぐ」を押します。途中保存してある医師条件（回数・間隔・翌日PM duty・備考など）が入り、NG日・希望日・先生のコメントは空になります（管理用パスワードが必要です）。
+   同じ月の作業を続ける場合は、上の帯の「📂 前回の作業の続きから始める」で、NG日なども含めてそのまま戻せます。
 2. **年月・休日を設定**：作る年月を選びます。カレンダーで、次の2つを必要な日だけチェックします。
     - **休日にする**：病院独自の休みなど、平日でも土日祝と同じ扱いにする日。日直の枠ができます。
     - **別途決定**：年末年始など、別の方法で当番を決める日。このアプリではその日の当直を決めず、先生もNGを入力できなくなります。
@@ -3344,6 +3373,29 @@ with st.container(key="fixed_section"), st.expander("📅 先月今月来月の�
 section_banner("👩‍⚕️", "医師条件の読み込み・入力", "先生ごとの回数・間隔・希望日を入力します", "必須", anchor="sec-staff")
 st.info("下の表に医師ごとの条件を入力してください。CSVを使う場合は、ひな形をダウンロードして編集し、アップロードします。NG日は、この下の「🚫 先生ごとのNG日設定」で設定します。")
 st.caption("最初に表示される5名は入力例です。実際の医師名・条件に置き換えてください。希望優先度は通常「1」を使用します。")
+
+# --- 前回の医師条件を引き継ぐ（管理用パスワードが必要） ---
+if remote_is_configured():
+    _co_msg = st.session_state.pop("carry_over_message", None)
+    _co_label = "📋 前回の医師条件を引き継ぐ（NG日・希望日・コメントは空にします）" + "\u200b" * st.session_state.get("carry_over_gen", 0)
+    with (st.popover(_co_label) if hasattr(st, "popover") else st.expander(_co_label, expanded=False)):
+        if admin_logged_in("carry_over_pw"):
+            _co_at, _co_data = work_state_info()
+            if _co_data and _co_data.get("staff_csv"):
+                st.write(f"途中保存：**{_co_at}**（{_co_data.get('year')}年{_co_data.get('month')}月の作業）")
+                st.caption(f"この医師条件（先生の名前・回数・勤務間隔・翌日PM duty・希望優先度・備考など）を、{year}年{month}月用に引き継ぎます。"
+                           "月ごとに変わる NG日・希望日・先生からのコメントは空になります。今の画面の医師条件は置き換わります。")
+                if (int(_co_data.get("year", 0)), int(_co_data.get("month", 0))) == (year, month):
+                    st.warning(f"途中保存は{year}年{month}月（今選んでいる月と同じ）の作業です。NG日なども含めて続きから作業する場合は、"
+                               "上の帯の「📂 前回の作業の続きから始める」を使ってください。")
+                st.button(f"{year}年{month}月用に医師条件を引き継ぐ", key="carry_over_do", type="primary",
+                          on_click=carry_over_staff, args=(year, month))
+            else:
+                st.caption("まだ途中保存された医師条件がありません。上の帯の「💾 作業を途中保存する」で保存すると、翌月に引き継げます。")
+        else:
+            st.caption("引き継ぎには管理用パスワードが必要です。")
+    if _co_msg:
+        (st.success if _co_msg[0] == "success" else st.error)(_co_msg[1])
 with st.expander("入力例：曜日・希望日・備考", expanded=False):
     st.markdown("""
 | 項目 | 入力方法・意味 |
