@@ -3327,7 +3327,7 @@ with st.container(key="fixed_section"), st.expander("📅 先月今月来月の�
 - 日付は `2026/10/1` または `10/1` の形式で入力します。
 - 担当する枠の欄に、医師条件と同じ名前を入力します。複数人の場合は `佐藤、鈴木` のように「、」で区切ります。
 - 医師名の区切りには「、」を使ってください。名前に含まれる空白は区切りません。医師条件と同じ表記にしてください。
-- 未確定の枠は空欄で構いません。「平日/休日」欄ではなく、上部のカレンダー設定で休日を判定します。
+- 未確定の枠は空欄で構いません。
 - 今月の平日に日直を入力する場合は、先に上のカレンダーでその日を「休日にする」にしてください。
 - 「別途決定」にした日（年末年始など）の当番が決まったら、ここに入れておくと、当直案と一覧に表示され、前後の勤務間隔の計算にも使われます。
 - 今月の確定勤務はNG日・曜日制限より優先され、回数上限も必要に応じて緩められます。確定勤務を基準に追加勤務の間隔を守ります。確定勤務同士が近すぎる場合は、確定内容を維持して警告します。
@@ -3335,7 +3335,7 @@ with st.container(key="fixed_section"), st.expander("📅 先月今月来月の�
 **今月の同じ日・同じ枠を指定した場合、確定当直への入力と「希望優先度100以上」での指定は、どちらも固定され、計算上の扱いは基本的に同じです。両方に入力する必要はありません。**
     """)
 
-    fixed_columns = ["日付", "平日/休日"] + ALL_SHIFT_TYPES
+    fixed_columns = ["日付"] + ALL_SHIFT_TYPES   # 平日か休日かは、上のカレンダーで自動的に決まるので入力しない
     fixed_template_df = pd.DataFrame(columns=fixed_columns)
     fixed_csv_template = fixed_template_df.to_csv(index=False).encode('utf-8-sig')
 
@@ -3368,7 +3368,8 @@ with st.container(key="fixed_section"), st.expander("📅 先月今月来月の�
         st.stop()
     # 日付も普通の列として編集できるようにする（行の見出し＝インデックスにすると、既存の行の日付が直せないため）。
     # 空の列は数字の列とみなされて文字が入らないことがあるので、すべて文字の列にそろえる
-    base_fixed_df = base_fixed_df.copy()
+    # 以前のひな形にあった「平日/休日」の列は使わないので外す（入っていても読み込める）
+    base_fixed_df = base_fixed_df.drop(columns=["平日/休日"], errors="ignore").copy()
     for _c in base_fixed_df.columns:
         base_fixed_df[_c] = base_fixed_df[_c].apply(
             lambda x: "" if pd.isna(x) or str(x).strip().lower() in ("nan", "none", "<na>") else str(x)).astype(str)
