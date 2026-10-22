@@ -1639,7 +1639,7 @@ def show_input_errors(messages):
     st.dataframe(pd.DataFrame({"修正が必要な項目": messages}), hide_index=True, use_container_width=True)
 
 
-def show_schedule_notice(result, messages):
+def show_schedule_notice(result, messages, alerts=None):
     messages = list(dict.fromkeys(str(m).strip() for m in messages if str(m).strip()))
     shortage_rows = []
     if result is not None:
@@ -1652,7 +1652,7 @@ def show_schedule_notice(result, messages):
     if result is None:
         st.error("当直案を作成できませんでした。")
     elif shortage_rows:
-        st.warning(f"不足が残っています：{len(shortage_rows)}枠、合計{sum(shortage_rows)}名分")
+        st.warning(f"不足が残っています：{len(shortage_rows)}枠、合計{sum(shortage_rows)}名分（医師別の当直一覧のいちばん下、赤線の下で確認できます）")
     else:
         st.success("必要人数を満たす当直案ができました。")
 
@@ -1663,9 +1663,14 @@ def show_schedule_notice(result, messages):
         if re.fullmatch(r'・\d+/\d+ の「.+」', message) or re.fullmatch(r'・.+： 計 \d+ 枠不足', message):
             continue
         details.append(message)
-    if details or result is None or shortage_rows:
+    alerts = alerts or []
+    if details or result is None or shortage_rows or alerts:
         with st.container(border=True):
             st.markdown("**計算状況・条件の注意事項と対処方法**")
+            if alerts:
+                # 当直回数のアラートも、計算の注意事項と同じ枠にまとめて出す
+                st.markdown("🔴 **当直が多い先生がいます**（医師別の当直一覧の右端の赤い枠。基準は表のすぐ上の「⚠ アラートの基準」で変えられます）")
+                st.markdown("\n".join("- " + a for a in alerts))
             for message in details:
                 st.markdown(message)
             if result is None or shortage_rows:
@@ -3937,8 +3942,6 @@ if len(staff_df) > 0:
     if 'generated_df' in st.session_state:
         year = st.session_state['generated_year']
         month = st.session_state['generated_month']
-        with result_notice_container:
-            show_schedule_notice(st.session_state['generated_df'], st.session_state.get('generated_warnings', []))
         df_result = st.session_state['generated_df'].reindex(columns=RESULT_COLUMNS)
         past_worked_dates = st.session_state.get('past_worked_dates', {})
         future_worked_dates = st.session_state.get('future_worked_dates', {})
@@ -3962,8 +3965,6 @@ if len(staff_df) > 0:
         if create_clicked or not st.session_state.get("create_bar_summary"):
             st.session_state["create_bar_summary"] = _summary
         create_bar_show(st.session_state["create_bar_summary"])
-        if missing_total:
-            st.warning(f"当直が決まっていない枠が{missing_total}枠あります。表の一番下（赤線の下）で確認できます。")
         # アラートの基準（この回数以上で赤く表示）。0はアラートなし
         for _k, _v in MATRIX_COUNT_ALERTS.items():
             if f"alert_{_k}" not in st.session_state:
@@ -3981,8 +3982,9 @@ if len(staff_df) > 0:
             st.button("初期設定に戻す（宿直4回以上・休日3回以上）", key="alert_reset", on_click=_reset_alerts)
         alert_limits = {_k: int(st.session_state.get(f"alert_{_k}", _v) or 0) for _k, _v in MATRIX_COUNT_ALERTS.items()}
         _alerts = count_alert_messages(matrix_rows, alert_limits)
-        if _alerts:
-            st.error("⚠ 当直が多い先生がいます（表の右端の赤いマス。基準はすぐ上の「アラートの基準」で変えられます）\n\n" + "\n\n".join("・" + a for a in _alerts))
+        # 計算結果のまとめ（不足・注意事項・当直回数のアラート）は、作成ボタンの下の1か所にまとめて出す
+        with result_notice_container:
+            show_schedule_notice(st.session_state['generated_df'], st.session_state.get('generated_warnings', []), _alerts)
         st.markdown(duty_matrix_html(matrix_days, matrix_rows, year, month, alert_limits), unsafe_allow_html=True)
         try:
             # 上下の帯の赤いボタン（途中保存・当直案を作成）と見分けやすいよう、Excelらしい緑にする
