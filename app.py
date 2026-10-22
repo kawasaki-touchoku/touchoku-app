@@ -2139,6 +2139,7 @@ def work_state_restore():
     for slot, rank in (data.get("priority") or {}).items():
         st.session_state[f"shortage_priority_{slot}"] = int(rank)
     st.session_state["restored_state"] = data
+    st.session_state["multi_editor_gen"] = st.session_state.get("multi_editor_gen", 0) + 1   # 増員設定の表を読み込んだ内容で作り直す
     # ファイルのアップロード欄を空にして、復元した内容を使う
     st.session_state["uploader_gen"] = st.session_state.get("uploader_gen", 0) + 1
     st.session_state.pop("last_uploaded_file_id", None)
@@ -3262,25 +3263,37 @@ date_options = [f"{d}日" for d in range(1, num_days + 1)]
 multi_df_template = pd.DataFrame(columns=["日付", "当直枠", "人数"])
 if restored_state and restored_state.get("multi") and (int(restored_state["year"]), int(restored_state["month"])) == (year, month):
     multi_df_template = pd.DataFrame(restored_state["multi"], columns=["日付", "当直枠", "人数"])
+def clear_multi_slots(y, m):
+    """増員設定をすべて消す（表を空の状態で作り直す）。"""
+    st.session_state["multi_editor_gen"] = st.session_state.get("multi_editor_gen", 0) + 1
+    rs = st.session_state.get("restored_state")
+    if rs and (int(rs.get("year", 0)), int(rs.get("month", 0))) == (y, m):
+        st.session_state["restored_state"] = {**rs, "multi": []}
+
+
+# 入力した内容を空欄に戻せるよう、必須の指定はしない（日付・枠・人数のどれかが空の行は使わない）
 edited_multi_df = st.data_editor(
     multi_df_template,
     num_rows="dynamic",
     use_container_width=True,
     hide_index=True,
     height=150,
+    key=f"multi_editor_{year}_{month}_{st.session_state.get('multi_editor_gen', 0)}",
     column_config={
-        "日付": st.column_config.SelectboxColumn("日付を選択", options=date_options, required=True),
-        "当直枠": st.column_config.SelectboxColumn("増員する枠を選択", options=NIGHT_SHIFTS + DAY_SHIFTS, required=True),
-        "人数": st.column_config.NumberColumn("合計人数", help="追加人数ではなく、その枠に配置する合計人数です。例：1名から2名体制にする場合は2。", min_value=2, max_value=10, step=1, required=True)
+        "日付": st.column_config.SelectboxColumn("日付を選択", options=date_options),
+        "当直枠": st.column_config.SelectboxColumn("増員する枠を選択", options=NIGHT_SHIFTS + DAY_SHIFTS),
+        "人数": st.column_config.NumberColumn("合計人数", help="追加人数ではなく、その枠に配置する合計人数です。例：1名から2名体制にする場合は2。", min_value=2, max_value=10, step=1)
     }
 )
+st.caption("行を消すには、行の左端をクリックして選び、表の右上のごみ箱のマークを押します。セルを選んで Delete キーで空欄にすることもできます（空欄のある行は使いません）。")
+st.button("増員設定をすべて消す", key="clear_multi", on_click=clear_multi_slots, args=(year, month))
 
 multi_slots_dict = {}
 for _, row in edited_multi_df.iterrows():
-    d_str = str(row.get("日付", ""))
-    s_val = str(row.get("当直枠", ""))
+    d_str = clean_text(row.get("日付", ""))
+    s_val = clean_text(row.get("当直枠", ""))
     c_val = row.get("人数")
-    if d_str and s_val and pd.notna(c_val):
+    if d_str and s_val and s_val in ALL_SHIFT_TYPES and pd.notna(c_val):
         try:
             d_val = int(re.sub(r'\D', '', d_str))
             multi_slots_dict[(d_val, s_val)] = int(c_val)
