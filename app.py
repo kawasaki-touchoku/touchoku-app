@@ -564,7 +564,8 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
             m = re.search(r'⚠️不足\((\d+)名\)', str(df_result.iloc[d - 1][s]))
             if m:
                 shortage.append({'slot': s, 'count': int(m.group(1))})
-        days.append({'day': d, 'weekday': WEEKDAYS_JA[dt.weekday()], 'holiday': hol, 'kind': kind, 'shortage': shortage})
+        days.append({'day': d, 'weekday': WEEKDAYS_JA[dt.weekday()], 'holiday': hol, 'kind': kind, 'shortage': shortage,
+                     'ng_count': 0})   # その日にNG（翌日PM dutyで宿直を外す先生を含む）の先生の数
 
     # 備考は「備考」で始まる列から読む（列名の書き方の違いに対応）
     note_columns = [c for c in staff_df.columns if str(c).strip().startswith("備考")]
@@ -579,6 +580,10 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
         for info in days:
             d = info['day']
             r = df_result.iloc[d - 1]
+            # 日ごとのNG人数：その日にNG（平日は宿NG・全NG、休日は日NGも）か、翌日PM dutyで宿直を外す先生を数える
+            if effective_ng(ng.get(d, 'OK'), info['holiday']) != 'OK' or pm_duty_restricted(
+                    datetime.date(year, month, d), pm_days, year, month, custom_holidays, next_month_special_holiday):
+                info['ng_count'] += 1
             assigned = [s for s in RESULT_COLUMNS[2:] if name in [x.strip() for x in re.split(r'[、,]', str(r[s]))]]
             if assigned:
                 if info['holiday']:
@@ -749,6 +754,7 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
     legend.append('<span><i>💬📝</i>メモ欄：先生からのコメント・備考（カーソルを合わせると全文）</span>')
     legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>翌日PM duty（宿直を外す日）</span>')
     legend.append('<span><i style="color:#c0392b;border-color:#c0392b">⚠️ 未決定</i>赤線の下：当直が決まっていない枠</span>')
+    legend.append('<span><i style="background:#f9c4c4;color:#7a1f1f">3</i>いちばん上の行：その日にNGの先生の数（翌日PM dutyで宿直を外す先生を含む）</span>')
     if count_alert_text(alerts):
         legend.append('<span><i style="color:#c0392b;background:#ffd8d8;border-color:#e03131">⚠</i>右端の赤いマス：' + count_alert_text(alerts) + '</span>')
     legend.append('</div>')
@@ -761,6 +767,15 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
     head.append(''.join(f'<th class="sum" style="{count_cell_css(key, True)}">{label}</th>' for key, label in MATRIX_COUNT_COLUMNS) + '</tr>')
 
     body = []
+    # 日ごとのNG人数（翌日PM dutyを含む）。多い日ほど濃い色にする
+    n_doctors = max(len(rows), 1)
+    ng_tr = ['<tr class="ngcount"><td class="nm" colspan="3">NG人数（翌日PM duty含む）</td>']
+    for info in days:
+        ratio = info.get('ng_count', 0) / n_doctors
+        bg = '#ffffff' if ratio == 0 else ('#fde8e8' if ratio < 0.25 else ('#f9c4c4' if ratio < 0.5 else '#f19a9a'))
+        ng_tr.append(f'<td class="c{info["day"]}" style="background:{bg};text-align:center;font-weight:700;color:#7a1f1f">{info.get("ng_count", 0)}</td>')
+    ng_tr.append(f'<td class="sum" colspan="{len(MATRIX_COUNT_COLUMNS)}" style="font-size:11px;color:#566174">／{len(rows)}名中</td></tr>')
+    body.append(''.join(ng_tr))
     for idx, row in enumerate(rows):
         tip_up = idx >= max(len(rows) - 6, 6)
         tr = [f'<tr><td class="nm">{html_escape(row["name"])}</td><td class="pmcol">{html_escape(row["pm_duty"])}</td>{memo_cell_html(row, tip_up)}']
@@ -903,7 +918,22 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
     for j, (key, _) in enumerate(MATRIX_COUNT_COLUMNS):
         style_count_cell(ws.cell(row=header_row, column=sum_col + j), key, True)
 
-    for r_idx, row in enumerate(rows, header_row + 1):
+    # 見出しのすぐ下の行：日ごとのNG人数（翌日PM dutyを含む）
+    ng_row = header_row + 1
+    ws.cell(row=ng_row, column=1, value='NG人数（翌日PM duty含む）').font = Font(bold=True, size=9)
+    n_doctors = max(len(rows), 1)
+    for i, info in enumerate(days):
+        cnt = info.get('ng_count', 0)
+        c = ws.cell(row=ng_row, column=first_day_col + i, value=cnt)
+        ratio = cnt / n_doctors
+        c.fill = fill('#FFFFFF' if ratio == 0 else ('#FDE8E8' if ratio < 0.25 else ('#F9C4C4' if ratio < 0.5 else '#F19A9A')))
+        c.font = Font(bold=True, color='7A1F1F'); c.alignment = center; c.border = border
+    for col in range(1, first_day_col):
+        ws.cell(row=ng_row, column=col).border = border
+    ws.cell(row=ng_row, column=sum_col, value=f"／{len(rows)}名中").font = Font(size=9, color='566174')
+    ws.row_dimensions[ng_row].height = 20
+
+    for r_idx, row in enumerate(rows, header_row + 2):
         ws.cell(row=r_idx, column=1, value=row['name']).font = Font(bold=True)
         ws.cell(row=r_idx, column=2, value=row['pm_duty'])
         if row.get('comment') or row.get('note'):
@@ -977,7 +1007,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
         ws.row_dimensions[r_idx].height = max(20, 11 * max_lines + 6)
 
     # 当直が決まっていない枠：枠ごとに1行、その枠の色で表示
-    last_row = header_row + len(rows)
+    last_row = header_row + 1 + len(rows)
     red = Side(style='medium', color='C0392B')
     # 表と「未決定」の行の境目は、マスの枠線ではなく、細い赤い行で区切る
     # （マスに赤線を付けると、Excelで未決定の枠をドラッグして移したときに赤線までついて行くため）
@@ -1045,6 +1075,8 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
     s5.value = '未決定'; s5.font = Font(bold=True, size=8, color='C0392B')
     s6 = legend_line(6, 'メモ：💬＝先生からのコメント、📝＝備考（セルにカーソルを乗せると全文。「メモ全文」シートにも一覧）')
     s6.value = '💬📝'; s6.border = Border()
+    s8 = legend_line(8, '見出しのすぐ下の行：その日にNGの先生の数（翌日PM dutyで宿直を外す先生を含む）')
+    s8.value = 3; s8.fill = fill('#F9C4C4'); s8.font = Font(bold=True, color='7A1F1F')
     if count_alert_text(alerts):
         s7 = legend_line(7, '右端の赤い枠の回数：' + count_alert_text(alerts))
         s7.value = next(v for k, v in alerts.items() if v) if alerts else 4
@@ -1059,7 +1091,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
     for j in range(n_counts):
         ws.column_dimensions[get_column_letter(sum_col + j)].width = 5
     ws.row_dimensions[header_row].height = 30
-    ws.freeze_panes = ws.cell(row=header_row + 1, column=first_day_col)
+    ws.freeze_panes = ws.cell(row=header_row + 2, column=first_day_col)
     # A3横向き・1ページに収めて印刷
     ws.page_setup.orientation = 'landscape'
     ws.page_setup.paperSize = ws.PAPERSIZE_A3
