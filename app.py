@@ -767,7 +767,7 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
     for info in days:
         miss_class = ' class="miss"' if info['shortage'] else ''
         miss_class = f' class="c{info["day"]}{" miss" if info["shortage"] else ""}"'
-        head.append(f'<th{miss_class} style="color:{head_color(info)}">{info["day"]}<br>{info["weekday"]}</th>')
+        head.append(f'<th{miss_class} style="color:{head_color(info)}">{info.get("label", info["day"])}<br>{info["weekday"]}</th>')
     head.append(''.join(f'<th class="sum" style="{count_cell_css(key, True)}">{label}</th>' for key, label in MATRIX_COUNT_COLUMNS) + '</tr>')
 
     body = []
@@ -843,7 +843,7 @@ def xlsx_label_size(label):
     return 6.5 if longest >= 4 else 8
 
 
-def duty_matrix_xlsx(days, rows, year, month, alerts=None):
+def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
     """一覧表をExcelファイル（印刷向けの書式付き）にする。"""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -853,7 +853,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
 
     wb = Workbook()
     ws = wb.active
-    ws.title = f"{year}年{month}月"
+    ws.title = f"{year}年{month}月" if title is None else "当直表"
     thin = Side(style='thin', color='B8C0CC')
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
     center = Alignment(horizontal='center', vertical='center', wrap_text=True)
@@ -861,13 +861,13 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
         return PatternFill('solid', fgColor=color.lstrip('#'))
     PM_FILL = PatternFill('lightUp', fgColor='E0A800', bgColor='FFF5D9')
 
-    ws.cell(row=1, column=1, value=f"{year}年{month}月分 当直表").font = Font(bold=True, size=14)
+    ws.cell(row=1, column=1, value=f"{year}年{month}月分 当直表" if title is None else f"{title} 当直表").font = Font(bold=True, size=14)
     header_row, first_day_col = 3, 4
     ws.cell(row=header_row, column=1, value='名前')
     ws.cell(row=header_row, column=2, value='翌日PM duty')
     ws.cell(row=header_row, column=3, value='メモ')
     for i, info in enumerate(days):
-        c = ws.cell(row=header_row, column=first_day_col + i, value=f"{info['day']}\n{info['weekday']}")
+        c = ws.cell(row=header_row, column=first_day_col + i, value=f"{info.get('label', info['day'])}\n{info['weekday']}")
         color = MATRIX_HOLIDAY_HEAD if info['kind'] == 'holiday' else (MATRIX_SATURDAY_HEAD if info['kind'] == 'saturday' else '#243247')
         c.font = Font(bold=True, color=color.lstrip('#'))
     sum_col = first_day_col + len(days)
@@ -1112,7 +1112,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
     memo_rows = [r for r in rows if r.get('comment') or r.get('note')]
     if memo_rows:
         ws2 = wb.create_sheet("メモ全文")
-        ws2.cell(row=1, column=1, value=f"{year}年{month}月 先生からのコメント・備考").font = Font(bold=True, size=13)
+        ws2.cell(row=1, column=1, value=(f"{year}年{month}月" if title is None else title) + " 先生からのコメント・備考").font = Font(bold=True, size=13)
         for j, label in enumerate(["名前", "先生からのコメント", "コメントの保存日時", "医師条件の備考"], 1):
             c = ws2.cell(row=3, column=j, value=label)
             c.font = Font(bold=True); c.fill = fill('#E6EBF2'); c.border = border
@@ -2378,6 +2378,10 @@ def doctor_entry_page(key):
     if doctor is None:
         st.error("このURLは無効です。担当者から届いた最新のURLを開いてください。")
         return
+    # 期間指定版（年末年始など）で受付中のときは、期間のカレンダーを出す
+    if str(settings.get("受付中の年月", "")).startswith(PERIOD_KEY_PREFIX):
+        doctor_entry_page_period(key)
+        return
 
     ym = parse_month_key(settings.get("受付中の年月", ""))
     if ym is None:
@@ -2507,6 +2511,150 @@ def doctor_entry_page(key):
         with st.expander("📷 提出内容を画像で残す（控えとして）", expanded=just_saved):
             st.caption("保存済みの内容をカレンダーの画像にします。保存し直した場合は、画像も新しい内容になります。")
             ng_receipt_image(doctor, year, month, latest.get("保存日時", ""), parse_ng_dict(saved_text, year, month), holidays)
+    st.caption("このページのURLは、先生専用です。ほかの方には共有しないでください。")
+
+
+def doctor_entry_page_period(key):
+    """期間指定版（年末年始など）で受付中のときの、先生用の入力画面。"""
+    st.markdown("<style>[data-testid='stSidebar']{display:none}</style>", unsafe_allow_html=True)
+    if not remote_is_configured():
+        st.error("現在、NG日の入力を受け付けていません（準備中です）。担当者にお問い合わせください。")
+        return
+    try:
+        tokens = remote_tokens()
+        settings = remote_settings()
+    except Exception:
+        st.error("データを読み込めませんでした。しばらくしてから、もう一度開いてください。")
+        return
+    doctor = next((name for name, r in tokens.items() if r.get("キー") and r.get("キー") == key), None)
+    if doctor is None:
+        st.error("このURLは無効です。担当者から届いた最新のURLを開いてください。")
+        return
+
+    P = TouchokuPeriod.from_key(settings.get("受付中の年月", ""))
+    if P is None:
+        st.info(f"{doctor} 先生、現在受け付けているNG日の入力はありません。")
+        return
+    year, month = P.year, P.month
+    holidays = parse_holiday_list(settings.get("特別休日", ""))
+    next_special = settings.get("翌月1日特別休日", "") == "True"
+    closed = settings.get("締め切り", "") == "True"
+    deadline = settings.get("締め切り日", "").strip()
+
+    st.title(f"{P.title()}　当直NG日の入力")
+    st.subheader(f"🩺 {doctor} 先生")
+    latest = remote_latest_submissions(P.key).get(doctor)
+    saved_text = latest.get("NG日", "") if latest else ""
+
+    if closed:
+        st.warning("受付は締め切りました。変更がある場合は、担当者に直接ご連絡ください。")
+        if latest:
+            summary = period_ng_summary(saved_text, P, holidays) or "NG日なし"
+            st.write(f"提出内容（{latest.get('保存日時', '')} 保存）：{summary}")
+            if latest.get("コメント", "").strip():
+                st.write(f"管理者へのコメント：{latest.get('コメント', '')}")
+        else:
+            st.write("この期間のNG日は提出されていません。")
+        return
+
+    st.info(
+        (f"締め切り：{deadline}\n\n" if deadline else "")
+        + "締め切りまでは、何度でも保存し直せます。**最後に保存した内容が採用されます**"
+        "（前に保存した内容は、新しい内容に置き換わります）。"
+    )
+    just_saved = st.session_state.pop("remote_just_saved", False)
+    if just_saved:
+        try:
+            st.toast("保存しました", icon="✅")   # 画面の隅に短く表示（古いStreamlitでは出ないだけ）
+        except Exception:
+            pass
+
+    def saved_status_box(show_comment=True):
+        """保存済みの内容を、はっきり分かる形で表示する（カレンダーの上と下の両方に出す）。"""
+        if latest:
+            summary = period_ng_summary(saved_text, P, holidays) or "NG日なし（どの日も入れます）"
+            title = "✅ 保存しました" if just_saved else "✅ 提出済みです"
+            st.success(f"**{title}**（{latest.get('保存日時', '')}）\n\n"
+                       f"**現在の提出内容：** {summary}\n\n"
+                       "変更したい場合は、カレンダーのボタンを押し直して、もう一度保存してください。")
+            # コメントは、アプリの案内文と混ざらないように別の枠で表示する
+            comment = latest.get("コメント", "").strip()
+            if comment and show_comment:
+                with st.container(border=True):
+                    st.markdown("💬 **保存されている管理者へのコメント**")
+                    st.text(f"「{comment}」")
+        else:
+            st.warning("**まだ提出されていません。** 当直に入れない日の「日直」「宿直」のボタンを押してNGにし、いちばん下の「NG日とコメントを保存する」を押してください。"
+                       "NG日がない場合も、そのまま保存ボタンを押してください（「NG日なし」として提出されます）。")
+
+    saved_status_box()
+
+    # 管理者へのコメント（任意）は、カレンダーの下・保存ボタンのすぐ上に出す（カレンダー部品の中にある）
+    comment_key = f"remote_comment_{P.key}"
+    saved_comment = latest.get("コメント", "") if latest else ""
+    st.caption("下のカレンダーで「日直」「宿直」のボタンを押してNGにし、いちばん下の「NG日とコメントを保存する」を押してください。"
+               "コメントだけを直したいときも、同じボタンを押してください（NG日はそのまま）。")
+
+    # 以前の紙の用紙（休日は日直・宿直まとめて×）から変わった点を、カレンダーのすぐ上で強調する
+    st.markdown("""
+<div style="border:2px solid #8a94a6;background:#f4f6f9;border-radius:10px;padding:12px 14px;margin:6px 0 10px">
+ <div style="font-weight:800;font-size:1.05rem;color:#22345a">⚠ 休日は「日直」と「宿直」を別々に指定します</div>
+ <div style="margin-top:4px;font-size:.95rem;color:#243247">終日入れない日は、<b>両方</b>押してください。</div>
+ <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:.82rem;font-weight:700">
+  <div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">日直<span>NG</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">宿直<span>NG</span></div></div></div><div style="margin-top:4px;color:#243247">終日NG</div></div><div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#fff;color:#243041;">日直<span style="color:#2f8a5b">可</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">宿直<span>NG</span></div></div></div><div style="margin-top:4px;color:#243247">宿直だけNG<br><span style="color:#566174">日直は入れる</span></div></div><div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">日直<span>NG</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#fff;color:#243041;border-top:1px solid #e3e7ed;">宿直<span style="color:#2f8a5b">可</span></div></div></div><div style="margin-top:4px;color:#243247">日直だけNG<br><span style="color:#566174">宿直は入れる</span></div></div>
+ </div>
+</div>""", unsafe_allow_html=True)
+
+    layout = st.radio("表示", ["月間カレンダー", "横一列"], horizontal=True, key="remote_layout_period")
+    pm_weekdays = pm_duty_weekdays(tokens[doctor].get("翌日PM duty", ""))
+    values = period_parse_ng(saved_text, P)
+    locked_days = set(parse_holiday_list(settings.get("入力不可日", "")))
+    days = period_ng_calendar_days(P, holidays, next_special, pm_weekdays, values, locked_days)
+    if locked_days:
+        st.caption("灰色の日（" + "・".join(P.label(d) for d in sorted(locked_days) if 1 <= d <= P.n) + "）は、別の方法で当番を決めるため、NGは入力できません。")
+    revision = hashlib.sha256(json.dumps([P.key, doctor, layout, days], ensure_ascii=False).encode()).hexdigest()
+    component_key = f"remote_ng_{'row' if layout != '月間カレンダー' else 'month'}_{P.key}"
+    response = horizontal_ng_component(HORIZONTAL_NG_HTML)(
+        days=days, mode="row" if layout != "月間カレンダー" else "month",
+        offset=P.start.weekday(), doctor=doctor,
+        button_label="NG日とコメントを保存する", pending_word="保存",
+        comment_enabled=True, comment=saved_comment, bulk_buttons=True,
+        version=revision, key=component_key, default=None,
+    )
+    seen_key = component_key + "_last_token"
+    if isinstance(response, dict) and response.get("token") != st.session_state.get(seen_key):
+        st.session_state[seen_key] = response.get("token")
+        new_values = response.get("values")
+        if response.get("version") == revision and isinstance(new_values, list) and len(new_values) == len(days) \
+                and all(v in item["options"] for v, item in zip(new_values, days)):
+            # 締め切り直前に保存された場合に備えて、保存の直前にもう一度確認する
+            remote_clear_cache()
+            if remote_settings().get("締め切り", "") == "True":
+                st.error("受付が締め切られたため、保存できませんでした。担当者に直接ご連絡ください。")
+                return
+            # 画面で選べない日（平日の日NGなど）の過去の値は、そのまま残す
+            merged = {d: v for d, v in values.items() if d not in locked_days}   # 入力できない日のNGは残さない
+            for d, (v, item) in enumerate(zip(new_values, days), 1):
+                if d in locked_days:
+                    continue
+                if v != item["value"]:
+                    if v == "OK":
+                        merged.pop(d, None)
+                    else:
+                        merged[d] = v
+            try:
+                now = remote_now()
+                comment_text = str(response.get("comment", saved_comment) or "").strip()[:500]
+                st.session_state[comment_key] = comment_text
+                remote_append("submissions", [P.key, doctor, period_ng_text(merged, P), now, comment_text])
+            except Exception:
+                st.error("保存できませんでした。通信状態を確認して、もう一度保存ボタンを押してください。")
+                return
+            st.session_state["remote_just_saved"] = True
+            st.rerun()
+    # 保存した直後だけ、保存ボタンのすぐ下にも表示する（スマートフォンで画面を上に戻さなくても確認できるように）
+    if just_saved:
+        saved_status_box(show_comment=False)
     st.caption("このページのURLは、先生専用です。ほかの方には共有しないでください。")
 
 
@@ -2697,6 +2845,10 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
         if active == month_key:
             status = "🔒 締め切り済み" if closed else "🟢 受付中"
             st.markdown(f"**{year}年{month}月：{status}**（締め切り日の表示：{settings.get('締め切り日', '') or '未設定'}）")
+        elif str(active).startswith(PERIOD_KEY_PREFIX):
+            _ap = TouchokuPeriod.from_key(active)
+            st.warning(f"現在は、期間指定版のページで「{_ap.title() if _ap else active}」の受付をしています。"
+                       f"ここで{year}年{month}月の受付を開始すると、期間指定版の受付は終わります。")
         elif active:
             st.warning(f"現在の受付は「{active.replace('-', '年')}月」です。上で選んでいる{year}年{month}月とは異なります。")
         else:
@@ -2897,6 +3049,805 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
 
 
 # ==========================================
+# 期間指定版（年末年始など）：今月の1日から、翌月の指定日までを1つの当直表として作る
+# 別ページ（pages フォルダ）と、先生用の入力画面で使う。通常の画面では使わない。
+# 期間の中の日は「通し番号」（1＝今月1日、…）で扱い、画面には「12/31」のように表示する。
+# ==========================================
+PERIOD_KEY_PREFIX = "P:"
+
+
+class TouchokuPeriod:
+    """当直を作る期間（今月1日〜翌月の指定日）。"""
+
+    def __init__(self, year, month, extra_days=0):
+        self.year, self.month = int(year), int(month)
+        self.start = datetime.date(self.year, self.month, 1)
+        month_last = datetime.date(self.year, self.month, calendar.monthrange(self.year, self.month)[1])
+        nxt = month_last + datetime.timedelta(days=1)
+        self.extra = max(0, min(int(extra_days), calendar.monthrange(nxt.year, nxt.month)[1]))
+        self.end = month_last + datetime.timedelta(days=self.extra)
+        self.n = (self.end - self.start).days + 1
+        self.dates = [self.start + datetime.timedelta(days=i) for i in range(self.n)]
+        self.key = f"{PERIOD_KEY_PREFIX}{self.start.isoformat()}~{self.end.isoformat()}"
+
+    @classmethod
+    def from_key(cls, key):
+        m = re.fullmatch(r"P:(\d{4})-(\d{2})-01~(\d{4})-(\d{2})-(\d{2})", str(key).strip())
+        if not m:
+            return None
+        y, mo = int(m.group(1)), int(m.group(2))
+        end = datetime.date(int(m.group(3)), int(m.group(4)), int(m.group(5)))
+        month_last = datetime.date(y, mo, calendar.monthrange(y, mo)[1])
+        return cls(y, mo, (end - month_last).days)
+
+    def date(self, i):
+        return self.dates[i - 1]
+
+    def index(self, dt):
+        if isinstance(dt, datetime.datetime):
+            dt = dt.date()
+        return (dt - self.start).days + 1 if self.start <= dt <= self.end else None
+
+    def label(self, i):
+        d = self.date(i)
+        return f"{d.month}/{d.day}"
+
+    def title(self):
+        s, e = self.start, self.end
+        if (s.year, s.month) == (e.year, e.month):
+            return f"{s.year}年{s.month}/{s.day}〜{e.month}/{e.day}"
+        if s.year == e.year:
+            return f"{s.year}年{s.month}/{s.day}〜{e.month}/{e.day}"
+        return f"{s.year}年{s.month}/{s.day}〜{e.year}年{e.month}/{e.day}"
+
+
+def period_is_holiday(P, i, custom_holidays):
+    dt = P.date(i)
+    return dt.weekday() >= 5 or jpholiday.is_holiday(dt) or i in custom_holidays
+
+
+def period_is_holiday_date(P, dt, custom_holidays):
+    i = P.index(dt)
+    return dt.weekday() >= 5 or jpholiday.is_holiday(dt) or (i is not None and i in custom_holidays)
+
+
+def period_pm_restricted(P, i, weekdays, custom_holidays, next_special=False):
+    """翌日が勤務日の場合だけ、指定曜日の宿直を制限する（期間の翌日が病院独自の休みなら next_special）。"""
+    dt = P.date(i)
+    nd = dt + datetime.timedelta(days=1)
+    next_is_holiday = period_is_holiday_date(P, nd, custom_holidays) or (next_special and nd == P.end + datetime.timedelta(days=1))
+    return dt.weekday() in weekdays and not next_is_holiday
+
+
+def period_checked_items(value, P, ng=False):
+    """「12/30:A宿直, 1/2」や通し番号「3」を、(通し番号, 種類) のリストにする。"""
+    text = clean_text(value).translate(str.maketrans('０１２３４５６７８９，：／', '0123456789,:/'))
+    items = []
+    for token in text.split(','):
+        if not token.strip():
+            continue
+        parts = token.strip().split(':')
+        head = parts[0].strip()
+        if len(parts) > 2:
+            raise ValueError(f'「{token}」：書き方を確認してください（例：12/30 または 1/2:A宿直）。')
+        m = re.fullmatch(r'(\d{1,2})/(\d{1,2})', head)
+        if m:
+            mo, dd = int(m.group(1)), int(m.group(2))
+            i = next((k for k, dt in enumerate(P.dates, 1) if (dt.month, dt.day) == (mo, dd)), None)
+            if i is None:
+                raise ValueError(f'「{token}」：{P.title()}の期間にない日付です。')
+        elif re.fullmatch(r'\d+', head):
+            i = int(head)
+            if not 1 <= i <= P.n:
+                raise ValueError(f'「{token}」：翌月の日は「1/3」のように月も書いてください。')
+        else:
+            raise ValueError(f'「{token}」：日付は「12/30」のように書き、複数は半角カンマで区切ってください。')
+        kind = parts[1].strip() if len(parts) == 2 else ('全NG' if ng else None)
+        if kind not in (['全NG', '日NG', '宿NG', 'OK'] if ng else ALL_SHIFT_TYPES + [None]):
+            raise ValueError(f'「{token}」：枠名・NGの種類を確認してください。')
+        items.append((i, kind))
+    if ng:
+        by_day = {}
+        for i, kind in items:
+            if i in by_day and by_day[i] != kind:
+                raise ValueError(f'{P.label(i)}のNG指定が重複して異なっています。1種類にしてください。')
+            by_day[i] = kind
+    return list(dict.fromkeys(items))
+
+
+def period_items_text(items, P, ng=False):
+    """(通し番号, 種類) を「12/30,1/2:宿NG」のような文字にする。"""
+    out = []
+    for i, kind in items:
+        if kind is None or (ng and kind == '全NG'):
+            out.append(P.label(i))
+        elif not (ng and kind == 'OK'):
+            out.append(f"{P.label(i)}:{kind}")
+    return ",".join(out)
+
+
+def period_parse_ng(value, P):
+    try:
+        return {i: kind for i, kind in period_checked_items(value, P, True) if kind != 'OK'}
+    except ValueError:
+        return {}
+
+
+def period_parse_requests(value, P):
+    try:
+        items = period_checked_items(value, P, False)
+    except ValueError:
+        return [], []
+    return [i for i, kind in items if kind is None], [(i, kind) for i, kind in items if kind is not None]
+
+
+def period_ng_text(values_by_day, P):
+    """{通し番号: NG種類} を「12/30,1/2:宿NG」にする。"""
+    return period_items_text([(i, values_by_day[i]) for i in sorted(values_by_day)], P, ng=True)
+
+
+def period_ng_summary(text, P, holidays):
+    parts = []
+    for i, v in sorted(period_parse_ng(text, P).items()):
+        shown = effective_ng(v, period_is_holiday(P, i, holidays))
+        if shown == "全NG":
+            parts.append(P.label(i))
+        elif shown == "日NG":
+            parts.append(f"{P.label(i)}(日直NG)")
+        elif shown == "宿NG":
+            parts.append(f"{P.label(i)}(宿直NG)")
+    return "、".join(parts)
+
+
+def period_ng_calendar_days(P, holidays, next_special, pm_weekdays, values_by_day, locked_days=()):
+    """NGカレンダー部品に渡す日ごとのデータ（期間版）。翌月に入った日は「1/1」のように月も表示する。"""
+    days = []
+    for i in range(1, P.n + 1):
+        dt = P.date(i)
+        hol = period_is_holiday(P, i, holidays)
+        days.append({
+            "day": (P.label(i) if (dt.month != P.month or i == 1) else dt.day),
+            "weekday": WEEKDAYS_JA[dt.weekday()],
+            "options": ["OK", "全NG", "日NG", "宿NG"] if hol else ["OK", "宿NG"],
+            "value": "OK" if i in locked_days else effective_ng(values_by_day.get(i, "OK"), hol),
+            "warning": period_pm_restricted(P, i, pm_weekdays, holidays, next_special),
+            "kind": "saturday" if dt.weekday() == 5 and not jpholiday.is_holiday(dt) and i not in holidays else ("holiday" if hol else "weekday"),
+            "locked": i in locked_days,
+        })
+    return days
+
+
+def period_add_interval_constraints(
+    model,
+    shifts,
+    doctors,
+    daily_active_shifts,
+    num_days,
+    period,
+    min_intervals,
+    past_worked_dates,
+    future_worked_dates,
+    absolute_req_days,
+    absolute_req_specific,
+):
+    """確定同士は維持し、自動割当と全勤務の間隔を制限する。"""
+    for doc in doctors:
+        gap = min_intervals[doc]
+        fixed_days = set(absolute_req_days[doc]) | {d for d, s in absolute_req_specific[doc]}
+        external = set(past_worked_dates.get(doc, [])) | set(future_worked_dates.get(doc, []))
+        worked = {}
+        for d in range(1, num_days + 1):
+            variables = [shifts[d, doc, s] for s in daily_active_shifts.get(d, []) if (d, doc, s) in shifts]
+            if not variables: continue
+            worked[d] = model.NewBoolVar(f'working_{doc}_{d}')
+            model.AddMaxEquality(worked[d], variables)
+            dt = period.date(d)
+            if d not in fixed_days and any(abs((dt - ext).days) <= gap for ext in external):
+                model.Add(worked[d] == 0)
+        for d in worked:
+            for other in range(d + 1, min(num_days, d + gap) + 1):
+                if other in worked and not (d in fixed_days and other in fixed_days):
+                    model.Add(worked[d] + worked[other] <= 1)
+
+
+def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_special_holiday=False, shortage_priority=None, locked_days=()):
+    target_year, target_month = P.year, P.month
+    locked_days = set(locked_days)   # 「別途決定」の日：別の方法で当番を決めるので、ここでは割り当てない（確定当直だけ残す）
+    num_days = P.n
+    days = range(1, num_days + 1)
+
+    def is_holiday(d):
+        return period_is_holiday(P, d, custom_holidays)
+
+    def safe_int(val, default_val):
+        if pd.isna(val): return default_val
+        try:
+            return int(float(val))
+        except (ValueError, TypeError):
+            return default_val
+
+    doctors = staff_df['先生の名前'].astype(str).tolist()
+    ng_days_dict = {}
+    req_days = {}
+    req_specific = {}
+    req_priority = {}
+    hard_weekdays = {}
+    min_intervals = {}
+    min_shifts_total = {}
+    max_shifts_total = {}
+    max_hol_shifts_per_doc = {}
+    max_shifts_per_type = {}
+    group_caps = {}
+
+    absolute_req_days = {doc: [] for doc in doctors}
+    absolute_req_specific = {doc: [] for doc in doctors}
+    past_worked_dates = {doc: [] for doc in doctors}
+    future_worked_dates = {doc: [] for doc in doctors}
+
+    # --- 確定当直（先月・今月・来月）の読み取り ---
+    fixed_specific = {doc: set() for doc in doctors}
+    if fixed_df is not None:
+        for _, row in fixed_df.iterrows():
+            date_obj = parse_shift_date(row.get('日付', ''), target_year, target_month)
+            if date_obj is None:
+                continue
+            for s_type in ALL_SHIFT_TYPES:
+                if s_type in row and pd.notna(row[s_type]):
+                    for doc_val in re.split(r'[、,]+', str(row[s_type])):
+                        doc_val = doc_val.strip()
+                        if doc_val not in doctors:
+                            continue
+                        if P.index(date_obj) is not None:
+                            absolute_req_specific[doc_val].append((P.index(date_obj), s_type))
+                            fixed_specific[doc_val].add((P.index(date_obj), s_type))
+                        elif date_obj < P.start:
+                            past_worked_dates[doc_val].append(date_obj)
+                        else:
+                            future_worked_dates[doc_val].append(date_obj)
+
+    # --- 医師条件の読み取り ---
+    for _, row in staff_df.iterrows():
+        doc = str(row['先生の名前'])
+        hard_weekdays[doc] = pm_duty_weekdays(row.get('翌日PM duty', ''))
+        ng_days_dict[doc] = period_parse_ng(row.get(NG_COLUMN, ''), P)
+        req_days[doc], req_specific[doc] = period_parse_requests(row.get(REQUEST_COLUMN, ''), P)
+        req_days[doc] = [d for d in req_days[doc] if d not in locked_days]
+        req_specific[doc] = [(d, s) for d, s in req_specific[doc] if d not in locked_days]
+        req_priority[doc] = safe_int(row.get('希望優先度(数字が大きいほど優先)'), 1)
+        min_intervals[doc] = safe_int(row.get('最低空ける日数'), 5)
+        min_shifts_total[doc] = safe_int(row.get('月間最小回数'), 0)
+        max_shifts_total[doc] = safe_int(row.get('月間最大回数'), 5)
+        max_hol_shifts_per_doc[doc] = safe_int(row.get('休日最大回数'), 4)
+        max_shifts_per_type[doc] = {s: safe_int(row.get(s + '上限'), 2) for s in ALL_SHIFT_TYPES}
+        group_caps[doc] = {col: safe_int(row.get(col), None) for col in GROUP_CAP_COLUMNS}
+
+    # --- その日に存在する枠（平日は宿直のみ、休日は日直・宿直） ---
+    daily_active_shifts = {d: (NIGHT_SHIFTS + DAY_SHIFTS) if is_holiday(d) else list(NIGHT_SHIFTS) for d in days}
+
+    # 存在しない枠の指定はエラーにする（優先度に関係なく同じ扱い）
+    invalid_requests = []
+    for doc in doctors:
+        for d, slot in req_specific[doc]:
+            if slot not in daily_active_shifts[d]:
+                invalid_requests.append(f'{doc}：{P.label(d)}の{slot}は設定されていません。平日に日直を希望する場合は、上のカレンダーでその日を「休日にする」にしてください。')
+        for d, slot in fixed_specific[doc]:
+            if slot not in daily_active_shifts[d]:
+                invalid_requests.append(f'{doc}：確定当直の{P.label(d)}の{slot}は、この日には設定されていない枠です。')
+    if invalid_requests:
+        return None, False, list(dict.fromkeys(invalid_requests)), None, None
+
+    # --- 優先度100以上の希望を確定扱いにする ---
+    for doc in doctors:
+        if req_priority[doc] >= 100:
+            absolute_req_days[doc].extend(req_days[doc])
+            absolute_req_specific[doc].extend(req_specific[doc])
+        absolute_req_specific[doc] = sorted(set(absolute_req_specific[doc]))
+        specified_days = {d for d, s in absolute_req_specific[doc]}
+        absolute_req_days[doc] = sorted(set(absolute_req_days[doc]) - specified_days)
+        past_worked_dates[doc] = sorted(set(past_worked_dates[doc]))
+        future_worked_dates[doc] = sorted(set(future_worked_dates[doc]))
+        # 確定した日はNG指定より確定を優先する
+        all_abs_dates = set(absolute_req_days[doc]) | specified_days
+        ng_days_dict[doc] = {d: v for d, v in ng_days_dict[doc].items() if d not in all_abs_dates}
+
+    def required_count(d, s):
+        fixed_docs_count = sum(1 for doc in doctors if (d, s) in absolute_req_specific[doc])
+        if d in locked_days:
+            return fixed_docs_count
+        return max(multi_slots_dict.get((d, s), 1), fixed_docs_count)
+
+    def total_cap(doc):
+        return max(max_shifts_total[doc], len(absolute_req_days[doc]) + len(absolute_req_specific[doc]))
+
+    # ------------------------------------------------------------------
+    # 通常計算と不足許容計算で共通の条件。
+    # ここを直せば両方の計算に反映される（片方だけ直し忘れることがない）。
+    # ------------------------------------------------------------------
+    def add_common_constraints(model, x):
+        worked_all = {}
+        holiday_worked = {}
+        blocked_by_ng = {"全NG": ALL_SHIFT_TYPES, "日NG": DAY_SHIFTS, "宿NG": NIGHT_SHIFTS}
+        for doc in doctors:
+            specific_days = {d for d, _ in absolute_req_specific[doc]}
+            fixed_dates = set(absolute_req_days[doc]) | specific_days
+
+            # 1日に入れる勤務は原則1つ（確定で複数ある日だけ例外）
+            for d in days:
+                fixed_count = sum(1 for sd, _ in absolute_req_specific[doc] if sd == d)
+                model.Add(sum(x[(d, doc, s)] for s in daily_active_shifts[d]) <= max(1, fixed_count))
+
+            # 「別途決定」の日は、確定当直以外は入れない
+            for d in locked_days:
+                if d in days:
+                    for s in daily_active_shifts[d]:
+                        if (d, s) not in absolute_req_specific[doc] and d not in absolute_req_days[doc]:
+                            model.Add(x[(d, doc, s)] == 0)
+
+            # NG日（全NG / 日NG / 宿NG）
+            for d, ng_type in ng_days_dict[doc].items():
+                for s in daily_active_shifts[d]:
+                    if s in blocked_by_ng.get(ng_type, []):
+                        model.Add(x[(d, doc, s)] == 0)
+
+            # 翌日PM duty：宿直のみ制限。翌日が休日なら制限しない。確定日は対象外。
+            for d in days:
+                if d in fixed_dates:
+                    continue
+                if period_pm_restricted(P, d, hard_weekdays[doc], custom_holidays, next_month_special_holiday):
+                    for s in NIGHT_SHIFTS:
+                        model.Add(x[(d, doc, s)] == 0)
+
+            # 確定（枠指定なしの日は、その日のいずれか1枠）
+            for d in absolute_req_days[doc]:
+                if d not in specific_days:
+                    model.AddExactlyOne(x[(d, doc, s)] for s in daily_active_shifts[d])
+            for d, s in absolute_req_specific[doc]:
+                model.Add(x[(d, doc, s)] == 1)
+
+            # 枠ごとの上限
+            for s_type in ALL_SHIFT_TYPES:
+                active_days = [d for d in days if s_type in daily_active_shifts[d]]
+                if not active_days:
+                    continue
+                worked = [x[(d, doc, s_type)] for d in active_days]
+                forced_vars = [x[(d, doc, s_type)] for d in active_days if (d, s_type) in absolute_req_specific[doc] or d in absolute_req_days[doc]]
+                add_type_cap(model, worked, forced_vars, max_shifts_per_type[doc][s_type], num_days)
+
+            # 宿直上限・日直上限（A・B・外来を合わせた回数。空欄なら制限なし）
+            for col, slots in GROUP_CAP_COLUMNS.items():
+                cap = group_caps[doc].get(col)
+                if cap is None:
+                    continue
+                worked = [x[(d, doc, s)] for d in days for s in daily_active_shifts[d] if s in slots]
+                if not worked:
+                    continue
+                forced_vars = [x[(d, doc, s)] for d in days for s in daily_active_shifts[d] if s in slots
+                               and ((d, s) in absolute_req_specific[doc] or d in absolute_req_days[doc])]
+                add_type_cap(model, worked, forced_vars, cap, num_days)
+
+            # 月間上限
+            all_vars = [x[(d, doc, s)] for d in days for s in daily_active_shifts[d]]
+            model.Add(sum(all_vars) <= total_cap(doc))
+            worked_all[doc] = all_vars
+
+            # 休日上限
+            hol_vars = [x[(d, doc, s)] for d in days if is_holiday(d) for s in daily_active_shifts[d]]
+            abs_hol_count = sum(1 for d in absolute_req_days[doc] if is_holiday(d)) + sum(1 for d, _ in absolute_req_specific[doc] if is_holiday(d))
+            model.Add(sum(hol_vars) <= max(max_hol_shifts_per_doc[doc], abs_hol_count))
+            holiday_worked[doc] = hol_vars
+
+        # 勤務間隔
+        period_add_interval_constraints(
+            model=model, shifts=x, doctors=doctors, daily_active_shifts=daily_active_shifts,
+            num_days=num_days, period=P,
+            min_intervals=min_intervals, past_worked_dates=past_worked_dates,
+            future_worked_dates=future_worked_dates, absolute_req_days=absolute_req_days,
+            absolute_req_specific=absolute_req_specific,
+        )
+        return worked_all, holiday_worked
+
+    def build_schedule(value_of, missing_of=None):
+        """計算結果を表（DataFrame）にする。不足があれば「⚠️不足(n名)」を書き込む。"""
+        rows = []
+        for d in days:
+            date_obj = P.date(d)
+            row = {"日付": f"{P.label(d)}({WEEKDAYS_JA[date_obj.weekday()]})", "平日/休日": "休日" if is_holiday(d) else "平日"}
+            for s in ALL_SHIFT_TYPES:
+                row[s] = "-"
+            for s in daily_active_shifts[d]:
+                names = [doc for doc in doctors if value_of((d, doc, s)) == 1]
+                missing = missing_of((d, s)) if missing_of else 0
+                if missing > 0:
+                    names.append(f"⚠️不足({missing}名)")
+                if names:
+                    row[s] = "、".join(names)
+            rows.append(row)
+        return pd.DataFrame(rows, columns=RESULT_COLUMNS)
+
+    # ==================================================================
+    # 通常計算
+    # ==================================================================
+    model = cp_model.CpModel()
+    shifts = {(d, doc, s): model.NewBoolVar(f'shift_d{d}_{doc}_{s}') for d in days for doc in doctors for s in daily_active_shifts[d]}
+    objective_terms = []
+
+    over_caps = {}
+    for d in days:
+        for s in daily_active_shifts[d]:
+            over_caps[(d, s)] = model.NewIntVar(0, len(doctors), f'over_cap_d{d}_{s}')
+            model.Add(sum(shifts[(d, doc, s)] for doc in doctors) == required_count(d, s) + over_caps[(d, s)])
+            objective_terms.append(over_caps[(d, s)] * -50000)
+
+    worked_all, holiday_worked = add_common_constraints(model, shifts)
+
+    # 月間最小回数（目標。届かない分は減点）
+    for doc in doctors:
+        shortfall = model.NewIntVar(0, min_shifts_total[doc], f'min_shortfall_{doc}')
+        model.Add(sum(worked_all[doc]) + shortfall >= min(min_shifts_total[doc], total_cap(doc)))
+        objective_terms.append(shortfall * -10000)
+
+    # 休日回数の偏りを減らす
+    max_hol_shifts = model.NewIntVar(0, num_days * 6, 'max_hol_shifts')
+    for doc in doctors:
+        model.Add(sum(holiday_worked[doc]) <= max_hol_shifts)
+
+    # 希望日（優先度100未満）は加点
+    for doc in doctors:
+        if req_priority[doc] < 100:
+            weight = req_priority[doc] * 100
+            for d in req_days[doc]:
+                for s in daily_active_shifts[d]:
+                    objective_terms.append(shifts[(d, doc, s)] * weight)
+            for d, s_name in req_specific[doc]:
+                objective_terms.append(shifts[(d, doc, s_name)] * weight)
+
+    model.Maximize(sum(objective_terms) - max_hol_shifts * 1000)
+
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 60.0
+    solver.parameters.random_seed = random.randint(1, 10000)
+    status = solver.Solve(model)
+
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        result_df = build_schedule(lambda key: solver.Value(shifts[key]))
+        over_cap_warnings = []
+        for d in days:
+            date_obj = P.date(d)
+            for s in daily_active_shifts[d]:
+                if solver.Value(over_caps[(d, s)]) > 0:
+                    over_cap_warnings.append(f"{P.label(d)}({WEEKDAYS_JA[date_obj.weekday()]}) の「{s}」枠")
+        warnings = []
+        if status == cp_model.FEASIBLE:
+            warnings.append("必要人数を満たす案です。時間内に最適化を完了したことまでは確認できていません。")
+        if over_cap_warnings:
+            warnings.append("⚠️ **【重要】次の枠は、確定当直や「希望優先度100以上」の指定が重なったため、設定した人数を超えて配置しています（そのまま当直案にしています）:**")
+            warnings.extend([f"・{w}" for w in over_cap_warnings])
+        return result_df, True, warnings, past_worked_dates, future_worked_dates
+
+    # ==================================================================
+    # バックアップ（不足を許容する計算）
+    # ==================================================================
+    reasons = []
+    if status == cp_model.MODEL_INVALID:
+        return None, False, ["計算モデルが無効です。入力条件と数値の範囲を確認してください。"], None, None
+    if status == cp_model.UNKNOWN:
+        reasons.append("通常計算では時間内に案を見つけられませんでした。条件が不可能と確定したわけではありません。")
+    try:
+        relax_model = cp_model.CpModel()
+        r_shifts = {(d, doc, s): relax_model.NewBoolVar(f'r_shift_d{d}_{doc}_{s}') for d in days for doc in doctors for s in daily_active_shifts[d]}
+        dummies = {}
+        r_excess = []
+        for d in days:
+            for s in daily_active_shifts[d]:
+                # 不足人数はその枠の必要人数を超えない
+                dummies[(d, s)] = relax_model.NewIntVar(0, required_count(d, s), f'dummy_d{d}_{s}')
+                overflow = relax_model.NewIntVar(0, len(doctors), f'r_over_{d}_{s}')
+                r_excess.append(overflow)
+                relax_model.Add(sum(r_shifts[(d, doc, s)] for doc in doctors) + dummies[(d, s)] == required_count(d, s) + overflow)
+
+        add_common_constraints(relax_model, r_shifts)
+
+        # 不足人数を、画面で指定した優先順位の群ごとに最小化する。
+        # 優先度の低い群から順に重みを決め、上位群の重みは
+        # 「下位群すべてで起こりうる最大の損失」より大きくする。
+        # こうすると、上位群の不足を1名減らすことが、下位群の不足をいくら減らすことよりも優先される。
+        missing_score = 0
+        accumulated_bound = 0
+        for group in reversed(shortage_priority_groups(shortage_priority)):
+            weight = accumulated_bound + 1
+            group_keys = [key for key in dummies if key[1] in group]
+            missing_score += weight * sum(dummies[key] for key in group_keys)
+            accumulated_bound += weight * sum(required_count(d, s) for d, s in group_keys)
+        excess_bound = len(r_excess) * len(doctors)
+        relax_model.Minimize(missing_score * (excess_bound + 1) + sum(r_excess))
+
+        relax_solver = cp_model.CpSolver()
+        relax_solver.parameters.max_time_in_seconds = 15.0
+        relax_status = relax_solver.Solve(relax_model)
+
+        if relax_status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            partial_df = build_schedule(lambda key: relax_solver.Value(r_shifts[key]),
+                                        lambda key: relax_solver.Value(dummies[key]))
+            bottlenecks = []
+            missing_by_shift = {s: 0 for s in ALL_SHIFT_TYPES}
+            for d in days:
+                for s in daily_active_shifts[d]:
+                    val = relax_solver.Value(dummies[(d, s)])
+                    if val > 0:
+                        bottlenecks.append(f"・{P.label(d)} の「{s}」")
+                        missing_by_shift[s] += val
+            if bottlenecks:
+                reasons.append(shortage_priority_text(shortage_priority))
+                if relax_status == cp_model.FEASIBLE:
+                    reasons.append("計算時間内に得られた案です。優先順位に沿った不足の最小化が完了したことまでは確認できていません。")
+                reasons.append("🚨 **以下の枠で必要人数が不足しています:**")
+                reasons.extend(bottlenecks)
+                reasons.append("")
+                reasons.append("📊 **【不足している枠の合計】**")
+                for s, count in sorted(missing_by_shift.items(), key=lambda x: x[1], reverse=True):
+                    if count > 0:
+                        reasons.append(f"・{s}： 計 {count} 枠不足")
+            return partial_df, False, reasons, past_worked_dates, future_worked_dates
+        if relax_status == cp_model.INFEASIBLE:
+            reasons.append("不足枠を許容しても条件が矛盾し、当直案を作成できませんでした。確定指定と上限を確認してください。")
+        elif relax_status == cp_model.MODEL_INVALID:
+            reasons.append("不足枠計算のモデルが無効です。入力値を確認してください。")
+        else:
+            reasons.append("不足枠を含む案も時間内に見つかりませんでした。条件が不可能と確定したわけではありません。")
+    except Exception as e:
+        reasons.append(f"⚠️ 部分的な当直表の作成中にもエラーが発生しました。詳細: {e}")
+
+    return None, False, reasons, None, None
+
+
+def period_validate_staff_inputs(df, P):
+    df = df.copy()
+    errors = []
+    if '先生の名前' not in df:
+        return df, ['医師条件CSVに「先生の名前」の列がありません。']
+    df['先生の名前'] = df['先生の名前'].map(clean_text)
+    blank = df['先生の名前'].eq('')
+    for i, row in df[blank].iterrows():
+        if any(clean_text(v) for k, v in row.items() if k != '先生の名前'):
+            errors.append(f'医師条件 {i+1}行目：条件が入力されていますが医師名が空欄です。')
+    df = df[~blank].reset_index(drop=True)
+    for name in df.loc[df['先生の名前'].duplicated(), '先生の名前'].unique():
+        errors.append(f'医師名「{name}」が重複しています。')
+    for col, default in NUMERIC_DEFAULTS.items():
+        if col not in df:
+            df[col] = default
+    for col in [NG_COLUMN, REQUEST_COLUMN, '翌日PM duty'] + list(GROUP_CAP_COLUMNS):
+        if col not in df:
+            df[col] = ''
+    for col in GROUP_CAP_COLUMNS:
+        df[col] = df[col].astype(object)   # 空欄（制限なし）と数字が混ざるため
+    for i, row in df.iterrows():
+        name = row['先生の名前']
+        if any(c in name for c in ',、') or name == '-' or '⚠️不足' in name:
+            errors.append(f'医師名「{name}」：カンマ・読点・不足表示・単独の「-」は使用できません。')
+        for col, default in NUMERIC_DEFAULTS.items():
+            raw = row[col]
+            try:
+                n = default if not clean_text(raw) else float(raw)
+                if not math.isfinite(n) or n < 0 or n != int(n) or n > 1000000:
+                    raise ValueError()
+                df.at[i, col] = int(n)
+            except (TypeError, ValueError, OverflowError):
+                errors.append(f'{name}：{col}は0〜1000000の整数にしてください。')
+        try:
+            if float(df.at[i, '月間最小回数']) > float(df.at[i, '月間最大回数']):
+                errors.append(f'{name}：月間最小回数は月間最大回数以下にしてください。')
+        except (ValueError, TypeError):
+            pass
+        # 宿直上限・日直上限は空欄なら制限なし
+        for col in GROUP_CAP_COLUMNS:
+            raw = clean_text(row.get(col, ''))
+            if raw.lower() in ('', 'nan', 'none', '<na>'):
+                df.at[i, col] = ''
+                continue
+            try:
+                n = float(raw)
+                if not math.isfinite(n) or n < 0 or n != int(n) or n > 1000:
+                    raise ValueError()
+                df.at[i, col] = int(n)
+            except (TypeError, ValueError, OverflowError):
+                errors.append(f'{name}：{col}は0以上の整数にしてください（空欄なら制限なし）。')
+        for col, ng in [(NG_COLUMN, True), (REQUEST_COLUMN, False)]:
+            try:
+                items = period_checked_items(row[col], P, ng)
+                df.at[i, col] = period_items_text(items, P, ng)
+            except ValueError as e:
+                errors.append(f'{name}：{col.split("(")[0]} {e}')
+        weekdays = clean_text(row['翌日PM duty']).replace('，', ',')
+        if any(w.strip() not in WEEKDAYS_JA for w in weekdays.split(',') if w.strip()):
+            errors.append(f'{name}：翌日PM dutyは「水,木」のように曜日を入力してください。')
+    return df, errors
+
+
+def period_validate_fixed_inputs(df, doctors, P, holidays=None):
+    year, month = P.year, P.month
+    """確定当直の入力チェック。holidays を渡すと、対象月の平日に日直が入っていないかも確認する。"""
+    errors = []
+    if df is None:
+        return None, errors
+    df = df.copy()
+    if '日付' not in df:
+        return df, ['確定当直CSVに「日付」の列がありません。']
+    unknown = [c for c in df if c not in ['日付', '平日/休日'] + ALL_SHIFT_TYPES]
+    for c in unknown:
+        if df[c].map(clean_text).ne('').any():
+            errors.append(f'確定当直：未対応の列「{c}」に入力があります。枠名を確認してください。')
+    for i, row in df.iterrows():
+        raw = clean_text(row['日付'])
+        populated = any(clean_text(row.get(s, '')) not in ('', '-') for s in ALL_SHIFT_TYPES)
+        if not raw and not populated:
+            continue
+        dt = parse_shift_date(raw, year, month)
+        if dt is None:
+            errors.append(f'確定当直 {i+1}行目：日付「{raw}」を確認してください。「11/1」または「2026/11/1」の形で入力します。')
+            continue
+        df.at[i, '日付'] = dt.isoformat()
+        for s in ALL_SHIFT_TYPES:
+            val = clean_text(row.get(s, ''))
+            if val in ('', '-'):
+                continue
+            if (holidays is not None and s in DAY_SHIFTS and P.index(dt) is not None
+                    and not period_is_holiday_date(P, dt, holidays)):
+                errors.append(f'確定当直 {dt} {s}：平日には日直がありません。この日に日直を設ける場合は、上のカレンダーで「休日にする」にチェックを入れてください。')
+            names = list(dict.fromkeys(n.strip() for n in re.split('[、,]', val)))
+            for name in names:
+                if name not in doctors:
+                    errors.append(f'確定当直 {dt} {s}：医師名「{name}」が名簿と一致しません。')
+            df.at[i, s] = '、'.join(names)
+    return df, errors
+
+
+def period_audit_schedule(result, staff, P, holidays, multi, past, future, next_month_special_holiday=False):
+    year, month = P.year, P.month
+    warnings = []
+    for _, row in staff.iterrows():
+        name = row['先生の名前']
+        worked = []; counts = dict.fromkeys(ALL_SHIFT_TYPES, 0); hol_count = 0
+        ng = period_parse_ng(row.get(NG_COLUMN, ''), P)
+        pm_weekdays = pm_duty_weekdays(row.get('翌日PM duty', ''))
+        for _, r in result.iterrows():
+            dt = P.date(int(r['_idx']))
+            for slot in ALL_SHIFT_TYPES:
+                if name not in [n.strip() for n in re.split('[、,]', str(r[slot]))]:
+                    continue
+                worked.append(dt); counts[slot] += 1
+                hol_count += int(r['平日/休日'] == '休日')
+                kind = ng.get(P.index(dt), 'OK')
+                night = slot in NIGHT_SHIFTS
+                if kind == '全NG' or (kind == '宿NG' and night) or (kind == '日NG' and not night):
+                    warnings.append(f'{name}：{dt} {slot}はNG指定より確定指定を優先しました。')
+                if night and period_pm_restricted(P, P.index(dt), pm_weekdays, holidays, next_month_special_holiday):
+                    warnings.append(f'{name}：{dt} {slot}は翌日PM dutyの制限より確定指定を優先しました。')
+        total = sum(counts.values())
+        if total < int(row['月間最小回数']):
+            warnings.append(f'{name}：月間最小回数の目標{int(row["月間最小回数"])}回に対し、{total}回です。')
+        group_items = [(col, sum(counts[s] for s in slots), int(row[col])) for col, slots in GROUP_CAP_COLUMNS.items()
+                       if clean_text(row.get(col, '')) not in ('', 'nan')]
+        for label, value, cap in [('月間最大回数', total, int(row['月間最大回数'])), ('休日最大回数', hol_count, int(row['休日最大回数']))] + group_items + [(s + '上限', counts[s], int(row[s + '上限'])) for s in ALL_SHIFT_TYPES]:
+            if value > cap:
+                warnings.append(f'{name}：確定指定に伴い{label}を超えています（設定{cap}回／結果{value}回）。')
+        dates = sorted(set(worked) | set((past or {}).get(name, [])) | set((future or {}).get(name, [])))
+        for a, b in zip(dates, dates[1:]):
+            if P.index(a) is None and P.index(b) is None: continue
+            gap = (b - a).days - 1
+            if gap < int(row['最低空ける日数']):
+                warnings.append(f'{name}：確定勤務同士の間隔が設定未満です（{a}→{b}、空き{gap}日／設定{int(row["最低空ける日数"])}日）。確定勤務を維持しました。')
+    for _, r in result.iterrows():
+        d = int(r['_idx'])
+        for s in ALL_SHIFT_TYPES:
+            names = [n.strip() for n in re.split('[、,]', str(r[s])) if n.strip() not in ('', '-') and '⚠️不足' not in n]
+            need = multi.get((d, s), 1)
+            if len(names) > need:
+                warnings.append(f'{P.label(d)} {s}：設定{need}名に対して{len(names)}名を配置しています。')
+    return warnings
+
+
+def period_generate_shift(P, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_special_holiday=False, shortage_priority=None, locked_days=()):
+    staff_df, errors = period_validate_staff_inputs(staff_df, P)
+    fixed_df, fixed_errors = period_validate_fixed_inputs(fixed_df, staff_df.get('先生の名前', pd.Series(dtype=str)).tolist(), P, custom_holidays)
+    errors += fixed_errors
+    if staff_df.empty: errors.append('医師を1名以上入力してください。')
+    for (d, s), count in multi_slots_dict.items():
+        if not isinstance(d, int) or not 1 <= d <= P.n or s not in ALL_SHIFT_TYPES or not isinstance(count, int) or not 2 <= count <= 10:
+            errors.append(f'増員設定「{d} {s} {count}名」を確認してください。')
+        elif s in DAY_SHIFTS:
+            if not period_is_holiday(P, d, custom_holidays):
+                errors.append(f'{P.label(d)}の日直増員：先にカレンダーでその日を「休日にする」にしてください。')
+    if errors: return None, False, errors, None, None
+    result, success, warnings, past, future = _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority, locked_days)
+    if result is not None:
+        result_idx = result.assign(_idx=range(1, len(result) + 1))
+        warnings += period_audit_schedule(result_idx, staff_df, P, custom_holidays, multi_slots_dict, past, future, next_month_special_holiday)
+        success = not any('⚠️不足' in str(v) for s in ALL_SHIFT_TYPES for v in result[s])
+    return result, success, list(dict.fromkeys(warnings)), past, future
+
+
+def period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month_special_holiday=False, comments=None):
+    year, month = P.year, P.month
+    """
+    医師ごと・日ごとのマスの内容を作る。
+    優先順：決まった当直 ＞ ×（当直NG）＞ PM（翌日PM duty）。
+    """
+    num_days = len(df_result)
+    days = []
+    for d in range(1, num_days + 1):
+        dt = P.date(d)
+        hol = str(df_result.iloc[d - 1]['平日/休日']) == '休日'
+        kind = 'holiday' if (hol and (dt.weekday() == 6 or jpholiday.is_holiday(dt) or d in custom_holidays)) else ('saturday' if dt.weekday() == 5 else 'weekday')
+        # 当直が決まっていない枠（⚠️不足）
+        shortage = []
+        for s in RESULT_COLUMNS[2:]:
+            m = re.search(r'⚠️不足\((\d+)名\)', str(df_result.iloc[d - 1][s]))
+            if m:
+                shortage.append({'slot': s, 'count': int(m.group(1))})
+        days.append({'day': d, 'weekday': WEEKDAYS_JA[dt.weekday()], 'holiday': hol, 'kind': kind, 'shortage': shortage,
+                     'ng_count': 0, 'label': P.label(d)})   # その日にNG（翌日PM dutyで宿直を外す先生を含む）の先生の数
+
+    # 備考は「備考」で始まる列から読む（列名の書き方の違いに対応）
+    note_columns = [c for c in staff_df.columns if str(c).strip().startswith("備考")]
+    rows = []
+    for _, staff in staff_df.iterrows():
+        name = str(staff['先生の名前'])
+        ng = period_parse_ng(staff.get(NG_COLUMN, ''), P)
+        pm_days = pm_duty_weekdays(staff.get('翌日PM duty', ''))
+        wish_days, wish_specific = period_parse_requests(staff.get(REQUEST_COLUMN, ''), P)
+        cells = []
+        weekday_count = holiday_count = ward_count = outpatient_count = night_count = day_count = 0
+        for info in days:
+            d = info['day']
+            r = df_result.iloc[d - 1]
+            # 日ごとのNG人数：その日にNG（平日は宿NG・全NG、休日は日NGも）か、翌日PM dutyで宿直を外す先生を数える
+            if effective_ng(ng.get(d, 'OK'), info['holiday']) != 'OK' or period_pm_restricted(P, d, pm_days, custom_holidays, next_month_special_holiday):
+                info['ng_count'] += 1
+            assigned = [s for s in RESULT_COLUMNS[2:] if name in [x.strip() for x in re.split(r'[、,]', str(r[s]))]]
+            if assigned:
+                if info['holiday']:
+                    holiday_count += len(assigned)
+                else:
+                    weekday_count += len(assigned)
+                night_count += sum(1 for s in assigned if s in NIGHT_SHIFTS)
+                day_count += sum(1 for s in assigned if s in DAY_SHIFTS)
+                ward_count += sum(1 for s in assigned if s in MATRIX_WARD_SHIFTS)
+                outpatient_count += sum(1 for s in assigned if s in MATRIX_OUTPATIENT_SHIFTS)
+                # 希望が通った日（日付だけの希望はどの枠でも、枠指定の希望はその枠に入ったとき）
+                wish = d in wish_days or any((d, s) in wish_specific for s in assigned)
+                text = '/'.join(assigned)
+                cells.append({'type': 'shift', 'text': text, 'shift': assigned[0], 'wish': wish})
+                continue
+            kind = ng.get(d)
+            pm = period_pm_restricted(P, d, pm_days, custom_holidays, next_month_special_holiday)
+            # 翌日PM dutyの日にNGも付いている場合は、斜線の上に×を出す（斜線だけ＝NGは付いていない）
+            if kind == '全NG' or (kind == '宿NG' and not info['holiday']):
+                cells.append({'type': 'ng', 'text': '×', 'pm': pm})
+            elif kind == '宿NG':
+                cells.append({'type': 'ng', 'text': '宿×', 'pm': pm})
+            elif kind == '日NG' and info['holiday']:
+                # 日直NGに加えて翌日PM dutyで宿直も外れる日は、両方わかるように表示
+                cells.append({'type': 'ng', 'text': '日×', 'pm': pm})
+            elif pm:
+                cells.append({'type': 'pm', 'text': ''})
+            else:
+                cells.append({'type': 'empty', 'text': ''})
+        rows.append({
+            'name': name,
+            'pm_duty': '・'.join(WEEKDAYS_JA[i] for i in pm_days),
+            'note': "\n".join(v for v in (clean_text(staff.get(c, "")) for c in note_columns) if v and v.lower() not in ("nan", "none")),
+            'comment': (comments or {}).get(name, ("", ""))[0],
+            'comment_at': (comments or {}).get(name, ("", ""))[1],
+            'cells': cells,
+            'night': night_count, 'day': day_count, 'ward': ward_count, 'outpatient': outpatient_count,
+            'weekday': weekday_count, 'holiday': holiday_count, 'total': weekday_count + holiday_count,
+        })
+    return days, rows
+
+
+
+# ==========================================
 # ページ設定
 # ==========================================
 st.set_page_config(page_title="当直作成アプリ", layout="wide")
@@ -2930,6 +3881,10 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
     2. 👩‍⚕️ 医師条件の読み込み・入力
     3. 🚫 先生ごとのNG日設定
     4. 🎯 当直案の作成・確認
+
+**年末年始など、月をまたいで作るとき**
+
+年月の設定の下にある「📆 期間指定版」から、今月1日〜翌月の指定日までを通しで作る別のページに移れます。先生方の専用URLは同じものを使えます。
 
 **管理用パスワード**
 
@@ -3114,6 +4069,12 @@ def section_banner(icon, title, sub="", tag="", first=False, anchor=""):
 # ==========================================
 section_banner("📅", "年月・休日・必要人数の設定", "作る月・休日と別途決定の日・1枠の人数を決めます", "必須", first=True)
 st.info("作成する年月を選んでください。土日祝日は自動で休日扱いになります。下のカレンダーで、平日でも休日扱いにする日は「休日にする」、別の方法で当番を決める日は「別途決定」にチェックします。")
+# 年末年始など、翌月にまたがって通しで作りたいときの別ページへの入口
+if hasattr(st, "page_link"):
+    try:
+        st.page_link("pages/2_期間指定（年末年始など）.py", label="📆 年末年始など、翌月の数日まで含めて通しで作る場合はこちら（期間指定版）")
+    except Exception:
+        pass
 
 today = datetime.date.today()
 if today.month == 12:
