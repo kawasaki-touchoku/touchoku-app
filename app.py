@@ -3862,6 +3862,20 @@ if _remote_key:
     doctor_entry_page(str(_remote_key))
     st.stop()
 
+# 期間指定版（年末年始など）：…/?mode=period で開かれたときは、そのページだけを表示する
+try:
+    _mode = st.query_params.get("mode")
+except AttributeError:
+    _mode = None
+if _mode == "period":
+    _pp = pathlib.Path(__file__).resolve().parent / "period_page.py"
+    if _pp.exists():
+        exec(compile(_pp.read_text(encoding="utf-8"), str(_pp), "exec"), globals())
+    else:
+        st.error("期間指定版のファイル（period_page.py）が見つかりません。GitHubに period_page.py を入れてください。")
+        st.markdown("<a href='./' target='_self'>← 通常版に戻る</a>", unsafe_allow_html=True)
+    st.stop()
+
 st.title("当直作成アプリ")
 st.caption("年月・勤務条件・NG日を入力して、当直表の案を作成します。")
 with st.expander("📖 使い方（初めての方・毎月の流れ・結果の見方）", expanded=False):
@@ -4070,26 +4084,14 @@ def section_banner(icon, title, sub="", tag="", first=False, anchor=""):
 # ==========================================
 section_banner("📅", "年月・休日・必要人数の設定", "作る月・休日と別途決定の日・1枠の人数を決めます", "必須", first=True)
 st.info("作成する年月を選んでください。土日祝日は自動で休日扱いになります。下のカレンダーで、平日でも休日扱いにする日は「休日にする」、別の方法で当番を決める日は「別途決定」にチェックします。")
-# 年末年始など、翌月にまたがって通しで作りたいときの別ページへの入口
-_period_page = "pages/2_期間指定（年末年始など）.py"
-_period_label = "📆 年末年始など、翌月の数日まで含めて通しで作る場合はこちら（期間指定版）"
+# 年末年始など、翌月にまたがって通しで作りたいときの入口（同じアプリの中で ?mode=period を開く）
 try:
-    _period_exists = (pathlib.Path(__file__).resolve().parent / _period_page).exists()
+    _period_exists = (pathlib.Path(__file__).resolve().parent / "period_page.py").exists()
 except Exception:
     _period_exists = False
 if _period_exists:
-    _shown = False
-    if hasattr(st, "page_link"):
-        try:
-            st.page_link(_period_page, label=_period_label)
-            _shown = True
-        except Exception:
-            _shown = False
-    if not _shown:
-        # page_link が使えないときは、ふつうのリンクで移動する
-        st.markdown(f"<a href='./期間指定（年末年始など）' target='_self' style='font-weight:700'>{_period_label}</a>", unsafe_allow_html=True)
-else:
-    st.caption("※ 期間指定版（年末年始など）のページを使うには、GitHubに「pages」フォルダ（中に「2_期間指定（年末年始など）.py」）を入れてください。")
+    st.markdown("<a href='./?mode=period' target='_self' style='font-weight:700'>📆 年末年始など、翌月の数日まで含めて通しで作る場合はこちら（期間指定版）</a>",
+                unsafe_allow_html=True)
 
 today = datetime.date.today()
 if today.month == 12:
