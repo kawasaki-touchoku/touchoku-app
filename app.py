@@ -3055,6 +3055,9 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
 # 期間の中の日は「通し番号」（1＝今月1日、…）で扱い、画面には「12/31」のように表示する。
 # ==========================================
 PERIOD_KEY_PREFIX = "P:"
+# 期間指定版では datetime.date / calendar を期間用に差し替えることがあるので、本物を別名で持っておく
+_REAL_DATE = datetime.date
+_REAL_MONTHRANGE = calendar.monthrange
 
 
 class TouchokuPeriod:
@@ -3062,10 +3065,10 @@ class TouchokuPeriod:
 
     def __init__(self, year, month, extra_days=0):
         self.year, self.month = int(year), int(month)
-        self.start = datetime.date(self.year, self.month, 1)
-        month_last = datetime.date(self.year, self.month, calendar.monthrange(self.year, self.month)[1])
+        self.start = _REAL_DATE(self.year, self.month, 1)
+        month_last = _REAL_DATE(self.year, self.month, _REAL_MONTHRANGE(self.year, self.month)[1])
         nxt = month_last + datetime.timedelta(days=1)
-        self.extra = max(0, min(int(extra_days), calendar.monthrange(nxt.year, nxt.month)[1]))
+        self.extra = max(0, min(int(extra_days), _REAL_MONTHRANGE(nxt.year, nxt.month)[1]))
         self.end = month_last + datetime.timedelta(days=self.extra)
         self.n = (self.end - self.start).days + 1
         self.dates = [self.start + datetime.timedelta(days=i) for i in range(self.n)]
@@ -3077,8 +3080,8 @@ class TouchokuPeriod:
         if not m:
             return None
         y, mo = int(m.group(1)), int(m.group(2))
-        end = datetime.date(int(m.group(3)), int(m.group(4)), int(m.group(5)))
-        month_last = datetime.date(y, mo, calendar.monthrange(y, mo)[1])
+        end = _REAL_DATE(int(m.group(3)), int(m.group(4)), int(m.group(5)))
+        month_last = _REAL_DATE(y, mo, _REAL_MONTHRANGE(y, mo)[1])
         return cls(y, mo, (end - month_last).days)
 
     def date(self, i):
