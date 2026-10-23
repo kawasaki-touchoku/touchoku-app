@@ -3096,6 +3096,14 @@ class TouchokuPeriod:
         d = self.date(i)
         return f"{d.month}/{d.day}"
 
+    def example(self, next_month=False):
+        """エラー文の入力例（今月の日なら「12/30」、翌月の日なら「1/2」など）。"""
+        if next_month and self.extra:
+            d = self.date(self.n - self.extra + min(2, self.extra))
+        else:
+            d = self.date(self.n - self.extra - 1)
+        return f"{d.month}/{d.day}"
+
     def title(self):
         s, e = self.start, self.end
         if (s.year, s.month) == (e.year, e.month):
@@ -3133,7 +3141,7 @@ def period_checked_items(value, P, ng=False):
         parts = token.strip().split(':')
         head = parts[0].strip()
         if len(parts) > 2:
-            raise ValueError(f'「{token}」：書き方を確認してください（例：12/30 または 1/2:A宿直）。')
+            raise ValueError(f'「{token}」：書き方を確認してください（例：{P.example()} または {P.example(True)}:A宿直）。')
         m = re.fullmatch(r'(\d{1,2})/(\d{1,2})', head)
         if m:
             mo, dd = int(m.group(1)), int(m.group(2))
@@ -3143,9 +3151,9 @@ def period_checked_items(value, P, ng=False):
         elif re.fullmatch(r'\d+', head):
             i = int(head)
             if not 1 <= i <= P.n:
-                raise ValueError(f'「{token}」：翌月の日は「1/3」のように月も書いてください。')
+                raise ValueError(f'「{token}」：翌月の日は「{P.example(True)}」のように月も書いてください。')
         else:
-            raise ValueError(f'「{token}」：日付は「12/30」のように書き、複数は半角カンマで区切ってください。')
+            raise ValueError(f'「{token}」：日付は「{P.example()}」のように書き、複数は半角カンマで区切ってください。')
         kind = parts[1].strip() if len(parts) == 2 else ('全NG' if ng else None)
         if kind not in (['全NG', '日NG', '宿NG', 'OK'] if ng else ALL_SHIFT_TYPES + [None]):
             raise ValueError(f'「{token}」：枠名・NGの種類を確認してください。')
