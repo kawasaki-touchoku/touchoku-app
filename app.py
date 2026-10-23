@@ -754,7 +754,7 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
     legend.append('<span><i>💬📝</i>メモ欄：先生からのコメント・備考（カーソルを合わせると全文）</span>')
     legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>翌日PM duty（宿直を外す日）</span>')
     legend.append('<span><i style="color:#c0392b;border-color:#c0392b">⚠️ 未決定</i>赤線の下：当直が決まっていない枠</span>')
-    legend.append('<span><i style="background:#f9c4c4;color:#7a1f1f">3</i>いちばん上の行：その日にNGの先生の数（翌日PM dutyで宿直を外す先生を含む）</span>')
+    legend.append('<span><i style="background:#ffd2a1;color:#7a3a00">3</i>いちばん上の行：その日にNGの先生の数（翌日PM dutyで宿直を外す先生を含む）</span>')
     if count_alert_text(alerts):
         legend.append('<span><i style="color:#c0392b;background:#ffd8d8;border-color:#e03131">⚠</i>右端の赤いマス：' + count_alert_text(alerts) + '</span>')
     legend.append('</div>')
@@ -769,11 +769,11 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
     body = []
     # 日ごとのNG人数（翌日PM dutyを含む）。多い日ほど濃い色にする
     n_doctors = max(len(rows), 1)
-    ng_tr = ['<tr class="ngcount"><td class="nm" colspan="3">NG人数（翌日PM duty含む）</td>']
+    ng_tr = ['<tr class="ngcount"><td class="nm" colspan="3" style="background:#ffe2c2;color:#7a3a00;font-weight:800">NG人数（翌日PM duty含む）</td>']
     for info in days:
         ratio = info.get('ng_count', 0) / n_doctors
-        bg = '#ffffff' if ratio == 0 else ('#fde8e8' if ratio < 0.25 else ('#f9c4c4' if ratio < 0.5 else '#f19a9a'))
-        ng_tr.append(f'<td class="c{info["day"]}" style="background:{bg};text-align:center;font-weight:700;color:#7a1f1f">{info.get("ng_count", 0)}</td>')
+        bg = '#ffffff' if ratio == 0 else ('#ffefdc' if ratio < 0.25 else ('#ffd2a1' if ratio < 0.5 else '#ffad5c'))
+        ng_tr.append(f'<td class="c{info["day"]}" style="background:{bg};text-align:center;font-weight:700;color:#7a3a00">{info.get("ng_count", 0)}</td>')
     ng_tr.append(f'<td class="sum" colspan="{len(MATRIX_COUNT_COLUMNS)}" style="font-size:11px;color:#566174">／{len(rows)}名中</td></tr>')
     body.append(''.join(ng_tr))
     for idx, row in enumerate(rows):
@@ -920,14 +920,17 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
 
     # 見出しのすぐ下の行：日ごとのNG人数（翌日PM dutyを含む）
     ng_row = header_row + 1
-    ws.cell(row=ng_row, column=1, value='NG人数（翌日PM duty含む）').font = Font(bold=True, size=9)
+    ng_title = ws.cell(row=ng_row, column=1, value='NG人数（翌日PM duty含む）')
+    ng_title.font = Font(bold=True, size=9, color='7A3A00')
+    for col in range(1, first_day_col):
+        ws.cell(row=ng_row, column=col).fill = fill('#FFE2C2')
     n_doctors = max(len(rows), 1)
     for i, info in enumerate(days):
         cnt = info.get('ng_count', 0)
         c = ws.cell(row=ng_row, column=first_day_col + i, value=cnt)
         ratio = cnt / n_doctors
-        c.fill = fill('#FFFFFF' if ratio == 0 else ('#FDE8E8' if ratio < 0.25 else ('#F9C4C4' if ratio < 0.5 else '#F19A9A')))
-        c.font = Font(bold=True, color='7A1F1F'); c.alignment = center; c.border = border
+        c.fill = fill('#FFFFFF' if ratio == 0 else ('#FFEFDC' if ratio < 0.25 else ('#FFD2A1' if ratio < 0.5 else '#FFAD5C')))
+        c.font = Font(bold=True, color='7A3A00'); c.alignment = center; c.border = border
     for col in range(1, first_day_col):
         ws.cell(row=ng_row, column=col).border = border
     ws.cell(row=ng_row, column=sum_col, value=f"／{len(rows)}名中").font = Font(size=9, color='566174')
@@ -1076,7 +1079,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
     s6 = legend_line(6, 'メモ：💬＝先生からのコメント、📝＝備考（セルにカーソルを乗せると全文。「メモ全文」シートにも一覧）')
     s6.value = '💬📝'; s6.border = Border()
     s8 = legend_line(8, '見出しのすぐ下の行：その日にNGの先生の数（翌日PM dutyで宿直を外す先生を含む）')
-    s8.value = 3; s8.fill = fill('#F9C4C4'); s8.font = Font(bold=True, color='7A1F1F')
+    s8.value = 3; s8.fill = fill('#FFD2A1'); s8.font = Font(bold=True, color='7A3A00')
     if count_alert_text(alerts):
         s7 = legend_line(7, '右端の赤い枠の回数：' + count_alert_text(alerts))
         s7.value = next(v for k, v in alerts.items() if v) if alerts else 4
