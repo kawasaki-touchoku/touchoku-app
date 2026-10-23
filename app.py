@@ -601,10 +601,11 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
                 continue
             kind = ng.get(d)
             pm = pm_duty_restricted(datetime.date(year, month, d), pm_days, year, month, custom_holidays, next_month_special_holiday)
+            # 翌日PM dutyの日にNGも付いている場合は、斜線の上に×を出す（斜線だけ＝NGは付いていない）
             if kind == '全NG' or (kind == '宿NG' and not info['holiday']):
-                cells.append({'type': 'ng', 'text': '×'})
+                cells.append({'type': 'ng', 'text': '×', 'pm': pm})
             elif kind == '宿NG':
-                cells.append({'type': 'ng', 'text': '宿×'})
+                cells.append({'type': 'ng', 'text': '宿×', 'pm': pm})
             elif kind == '日NG' and info['holiday']:
                 # 日直NGに加えて翌日PM dutyで宿直も外れる日は、両方わかるように表示
                 cells.append({'type': 'ng', 'text': '日×', 'pm': pm})
@@ -752,7 +753,8 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
     legend.append(f'<span><i style="box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME}">&nbsp;&nbsp;&nbsp;</i>茶色の枠：希望日が通った当直</span>')
     legend.append('<span><i style="color:#c0392b">×</i>当直NG（宿×＝宿直NG、日×＝日直NG）</span>')
     legend.append('<span><i>💬📝</i>メモ欄：先生からのコメント・備考（カーソルを合わせると全文）</span>')
-    legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>翌日PM duty（宿直を外す日）</span>')
+    legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>斜線だけ：翌日PM dutyで宿直を外す日（NGは付いていない）</span>')
+    legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px);color:#c0392b">×</i>斜線に×：翌日PM dutyの日で、NGも付いている</span>')
     legend.append('<span><i style="color:#c0392b;border-color:#c0392b">⚠️ 未決定</i>赤線の下：当直が決まっていない枠</span>')
     legend.append('<span><i style="background:#ffd2a1;color:#7a3a00">3</i>いちばん上の行：その日にNGの先生の数（翌日PM dutyで宿直を外す先生を含む）</span>')
     if count_alert_text(alerts):
@@ -1065,7 +1067,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
 
     s1 = legend_line(1, '×：その日の当直NG　　宿×：休日の宿直だけNG　　日×：休日の日直だけNG')
     s1.value = '×'; s1.font = Font(bold=True, color='C0392B')
-    legend_line(2, '翌日PM duty（その日の宿直を外す日）').fill = PM_FILL
+    legend_line(2, '斜線だけ：翌日PM dutyで宿直を外す日（NGは付いていない）　　斜線に×：翌日PM dutyの日で、NGも付いている').fill = PM_FILL
     legend_line(3, '薄い赤の列：土日祝・休日にした日').fill = fill('#FDF1F1')
     s4 = legend_line(4, '茶色の太い枠：希望日が通った当直')
     # 枠が見えやすいよう、淡い色の枠名を見本にする
@@ -2966,7 +2968,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 - 枠名のマス：決まった当直（色は枠の種類）
 - **茶色の太い枠**：希望日が、希望どおりに通った当直
 - **×**：当直NGの日（宿×＝休日の宿直だけNG、日×＝休日の日直だけNG）
-- **黄色の斜線**：翌日PM dutyのため宿直を外す日
+- **黄色の斜線**：翌日PM dutyのため宿直を外す日。斜線だけならNGは付いておらず、斜線に×があればNGも付いている日です
 - **赤線の下の「⚠️ 未決定」**：人数が足りず、担当が決まっていない枠
 - **右端の回数**：宿直・日直／病棟・外来／平日・休日／合計。回数が多い先生は**赤い枠**で表示されます。該当する先生は、作成ボタンの下の「計算状況・条件の注意事項と対処方法」にも一覧で出ます。基準は表のすぐ上の「⚠ アラートの基準」で変えられます（初期設定は宿直4回以上・休日3回以上。0にした項目はアラートなし）。
 - **メモ欄**：💬は先生からのコメント（取り込んだ先生だけ）、📝は医師条件の備考です。カーソルを合わせると全文が出ます。全員分は「💬 先生方のコメント・備考の一覧」でまとめて見られます。
