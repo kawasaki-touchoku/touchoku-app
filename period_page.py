@@ -1,22 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-期間指定版の当直作成（年末年始など）。app.py から「?mode=period」で開かれる。
-今月の1日から、翌月の指定した日までを1つの当直表として作る。
+期間指定版（年末年始など）の当直作成。app.py から「?mode=period」で開かれる。
+通常版（app.py）の画面と同じ作りで、「今月1日〜翌月の指定日」を1つの当直表として作る。
 
-通常版（app.py）の計算・表示の部品をそのまま使い、通常版の画面には手を入れない。
-入力内容のキー（st.session_state）は「p_」で始め、通常版の入力と混ざらないようにする。
+【このファイルは、app.py から自動で作ったものです】
+通常版の画面をそのまま使い、日付の扱いだけを「期間」に読み替えています。
+・日付は「期間の通し番号」（1＝今月1日、…）で扱う。今月の日は日付と同じ番号、翌月の日は月末の続きの番号。
+・datetime.date / calendar.monthrange は、対象の年月のときだけ期間を指すように差し替える。
+・休日・NG日・希望日・計算・表の作成は、期間用の関数に差し替える。
 """
 import ast
 import pathlib
+import types as _types
 
 import streamlit as st
 
-# ------------------------------------------------------------
-# 通常版（app.py）の「部品」（関数・定数）を使う。
-# app.py の中から呼ばれたとき（?mode=period）は、すでに読み込まれているのでそのまま使う。
-# 単独で動かしたときだけ、app.py から部品を読み込む。
-# ------------------------------------------------------------
 if "TouchokuPeriod" not in globals():
+    # 単独で動かしたとき（ふつうは app.py の中から呼ばれる）
     _APP_PATH = pathlib.Path(__file__).resolve().parent / "app.py"
     _tree = ast.parse(_APP_PATH.read_text(encoding="utf-8"))
     _lib = []
@@ -27,40 +27,70 @@ if "TouchokuPeriod" not in globals():
     exec(compile(ast.Module(_lib, []), str(_APP_PATH), "exec"), globals())
     st.set_page_config(page_title="当直作成（期間指定）", layout="wide")
 
-# 途中保存は通常版と別の場所に保存する
+# ------------------------------------------------------------
+# 期間への読み替え
+# ------------------------------------------------------------
+_REAL_CALENDAR = calendar
+_REAL_DATETIME = datetime
+
+
+def _install_period(period):
+    """datetime.date と calendar を、対象の年月のときだけ期間を指すものに差し替える（このページの中だけ）。"""
+    global datetime, calendar, P
+    P = period
+    real_last = _REAL_MONTHRANGE(period.year, period.month)[1]
+
+    class _Meta(type):
+        def __instancecheck__(cls, obj):
+            return isinstance(obj, _REAL_DATE)
+
+    class _PeriodDate(_REAL_DATE, metaclass=_Meta):
+        def __new__(cls, y, m=None, d=None):
+            if m is None:
+                return _REAL_DATE.__new__(cls, y)
+            if (int(y), int(m)) == (period.year, period.month) and int(d) > real_last:
+                return period.date(int(d))
+            return _REAL_DATE(int(y), int(m), int(d))
+
+    def _monthrange(y, m):
+        if (int(y), int(m)) == (period.year, period.month):
+            return (period.start.weekday(), period.n)
+        return _REAL_MONTHRANGE(y, m)
+
+    def _monthcalendar(y, m):
+        if (int(y), int(m)) != (period.year, period.month):
+            return _REAL_CALENDAR.monthcalendar(y, m)
+        cells = [0] * period.start.weekday() + list(range(1, period.n + 1))
+        cells += [0] * ((7 - len(cells) % 7) % 7)
+        return [cells[i:i + 7] for i in range(0, len(cells), 7)]
+
+    dt_mod = _types.SimpleNamespace(date=_PeriodDate, datetime=_REAL_DATETIME.datetime, timedelta=_REAL_DATETIME.timedelta,
+                                    timezone=_REAL_DATETIME.timezone, time=_REAL_DATETIME.time)
+    cal_mod = _types.SimpleNamespace(**{k: getattr(_REAL_CALENDAR, k) for k in dir(_REAL_CALENDAR) if not k.startswith("__")})
+    cal_mod.monthrange = _monthrange
+    cal_mod.monthcalendar = _monthcalendar
+    datetime, calendar = dt_mod, cal_mod
+
+
+def _day_label(d):
+    """今月の日は「5日」、翌月の日は「1/3」と表示する。"""
+    dt = P.date(d)
+    return f"{dt.day}日" if dt.month == P.month else f"{dt.month}/{dt.day}"
+
+
+# 途中保存は通常版と別の場所に保存する（通常版の途中保存は上書きしない）
 REMOTE_SHEETS["saved_state_period"] = ["項目", "値"]
-
-st.markdown("""
-<style>
-.sec-banner{display:flex;align-items:center;gap:14px;margin:2.2rem 0 .9rem;padding:14px 18px;border-radius:12px;
-  background:linear-gradient(90deg,#5b3a1e 0%,#a0662f 100%);color:#fff;box-shadow:0 2px 6px rgba(60,40,20,.2)}
-.sec-banner .ic{font-size:1.6rem;line-height:1}
-.sec-banner .t{font-size:1.3rem;font-weight:800;letter-spacing:.02em;line-height:1.3}
-.sec-banner .s{font-size:.88rem;opacity:.92;margin-top:2px}
-.sec-banner.first{margin-top:.4rem}
-.p-cal-head{text-align:center;font-weight:800;padding:2px 0}
-.st-key-p_calendar [data-testid="stVerticalBlockBorderWrapper"]{min-height:120px}
-@media (max-width:600px){.sec-banner{padding:11px 13px}.sec-banner .t{font-size:1.1rem}.sec-banner .s{display:none}}
-</style>""", unsafe_allow_html=True)
+_normal_work_state_info = work_state_info
 
 
-def banner(icon, title, sub="", first=False):
-    sub_html = f'<div class="s">{sub}</div>' if sub else ""
-    st.markdown(f'<div class="sec-banner{" first" if first else ""}"><span class="ic">{icon}</span>'
-                f'<div><div class="t">{title}</div>{sub_html}</div></div>', unsafe_allow_html=True)
-
-
-# ==========================================
-# 途中保存（期間指定版専用の保存場所）
-# ==========================================
-def p_state_save(snapshot):
+def work_state_save(snapshot):
     text = json.dumps(snapshot, ensure_ascii=False)
     chunks = [text[i:i + WORK_STATE_CHUNK] for i in range(0, len(text), WORK_STATE_CHUNK)] or [""]
     rows = [["保存日時", remote_now()]] + [["内容" if i == 0 else f"内容{i + 1}", c] for i, c in enumerate(chunks)]
     remote_rewrite("saved_state_period", rows)
 
 
-def p_state_info():
+def work_state_info():
     try:
         rows = {r.get("項目", ""): r.get("値", "") for r in remote_read("saved_state_period")}
     except Exception:
@@ -78,455 +108,1758 @@ def p_state_info():
         return None, None
 
 
-def p_restore():
-    """期間指定版で途中保存した作業を戻す（ボタンのコールバック）。"""
-    saved_at, data = p_state_info()
-    if not data:
-        st.session_state["p_message"] = ("error", "保存された作業が見つかりませんでした。")
-        return
-    for k in list(st.session_state.keys()):
-        if k.startswith(("p_hol_", "p_lock_", "p_ng_", "p_next_special_", "p_prio_", "p_comment_", "p_import_")):
-            del st.session_state[k]
-    st.session_state["p_year"] = int(data["year"])
-    st.session_state["p_month"] = int(data["month"])
-    st.session_state["p_extra"] = int(data.get("extra", 0))
-    P0 = TouchokuPeriod(data["year"], data["month"], data.get("extra", 0))
-    for i in data.get("holidays", []):
-        st.session_state[f"p_hol_{P0.key}_{int(i)}"] = True
-    for i in data.get("locked", []):
-        st.session_state[f"p_lock_{P0.key}_{int(i)}"] = True
-    st.session_state[f"p_next_special_{P0.key}"] = bool(data.get("next_special"))
-    for s, rank in (data.get("priority") or {}).items():
-        st.session_state[f"p_prio_{s}"] = int(rank)
-    for name, cv in (data.get("comments") or {}).items():
-        if cv:
-            st.session_state[f"p_comment_{P0.key}_{name}"] = (str(cv[0]), str(cv[1]) if len(cv) > 1 else "")
-    st.session_state["p_restored"] = data
-    st.session_state["p_uploader_gen"] = st.session_state.get("p_uploader_gen", 0) + 1
-    st.session_state["p_editor_gen"] = st.session_state.get("p_editor_gen", 0) + 1
-    st.session_state.pop("p_result", None)
-    st.session_state["p_message"] = ("success", f"{saved_at} に保存した作業（{P0.title()}）を読み込みました。")
+# 日付・休日・NG日・希望日・計算を、期間用に差し替える（引数の年月は使わない）
+def is_holiday_date(date_obj, target_year, target_month, custom_holidays):
+    return period_is_holiday_date(P, date_obj, custom_holidays)
 
 
-def p_carry_over():
-    """通常版で途中保存した医師条件を読み込む（NG日・希望日は空にする）。"""
+def pm_duty_restricted(date_obj, weekdays, target_year, target_month, custom_holidays, next_month_special_holiday=False):
+    nd = date_obj + _REAL_DATETIME.timedelta(days=1)
+    next_is_holiday = period_is_holiday_date(P, nd, custom_holidays) or (
+        next_month_special_holiday and nd == P.end + _REAL_DATETIME.timedelta(days=1))
+    return date_obj.weekday() in weekdays and not next_is_holiday
+
+
+def checked_day_items(value, year, month, ng=False):
+    return period_checked_items(value, P, ng)
+
+
+def parse_ng_dict(value, year, month):
+    return period_parse_ng(value, P)
+
+
+def parse_requests(value, year, month):
+    return period_parse_requests(value, P)
+
+
+def ng_dict_to_text(values_by_day):
+    return period_ng_text(values_by_day, P)
+
+
+def ng_text_summary(text, year, month, holidays):
+    return period_ng_summary(text, P, holidays)
+
+
+def ng_calendar_days(year, month, holidays, next_month_special_holiday, pm_weekdays, values_by_day, locked_days=()):
+    return period_ng_calendar_days(P, holidays, next_month_special_holiday, pm_weekdays, values_by_day, locked_days)
+
+
+def validate_staff_inputs(df, year, month):
+    return period_validate_staff_inputs(df, P)
+
+
+def validate_fixed_inputs(df, doctors, year, month, holidays=None):
+    return period_validate_fixed_inputs(df, doctors, P, holidays)
+
+
+def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_special_holiday=False, shortage_priority=None, locked_days=()):
+    return period_generate_shift(P, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority, locked_days)
+
+
+def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday=False, comments=None):
+    return period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month_special_holiday, comments)
+
+
+_normal_duty_matrix_xlsx = duty_matrix_xlsx
+
+
+def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
+    return _normal_duty_matrix_xlsx(days, rows, year, month, alerts, title=P.title())
+
+
+
+# ---- 管理画面（受付）・途中保存の読み込み・医師条件の引き継ぎ（期間用） ----
+def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_special_holiday, day_is_holiday, locked_days=()):
+    """管理者用：受付の開始・締め切り、専用URL、提出状況、取り込み。"""
+    # 管理用パスワードが必要な欄であることが一目で分かるように、紺色の枠で囲み、上に印を付ける
+    st.markdown("""
+<style>
+.st-key-remote_admin_box{border:2px solid #3b5b92;background:#f3f6fb;border-radius:12px;padding:10px 12px 6px}
+.st-key-remote_admin_box [data-testid="stExpander"] details{background:#fff}
+.admin-badge{display:inline-flex;align-items:center;gap:6px;font-size:.85rem;font-weight:800;color:#fff;background:#3b5b92;border-radius:999px;padding:2px 12px}
+.admin-badge.on{background:#2f8a5b}
+.admin-note{font-size:.85rem;color:#3b4a63;margin-left:8px}
+</style>""", unsafe_allow_html=True)
+    # 上のカレンダー（休日にする・別途決定）を、この画面で今まさに変えたかどうか。
+    # 開いた直後（まだ何も設定していない状態）で先生側の設定を消してしまわないよう、
+    # 変えたときだけ自動で先生側に反映する。
+    _cal_now = (year, month, tuple(sorted(custom_holidays)), tuple(sorted(locked_days)), bool(next_month_special_holiday))
+    _cal_prev = st.session_state.get("remote_cal_prev")
+    # 年月を切り替えただけのときは「変えた」とみなさない
+    cal_changed = _cal_prev is not None and _cal_prev[:2] == _cal_now[:2] and _cal_prev != _cal_now
+    st.session_state["remote_cal_prev"] = _cal_now
+    logged_in = bool(st.session_state.get("remote_admin_ok"))
+    box = st.container(key="remote_admin_box")
+    with box:
+        if logged_in:
+            st.markdown("<span class='admin-badge on'>🔓 管理者専用（ログイン中）</span>", unsafe_allow_html=True)
+        else:
+            st.markdown("<span class='admin-badge'>🔒 管理者専用</span><span class='admin-note'>管理用パスワードを入力すると使えます</span>",
+                        unsafe_allow_html=True)
+    with box, st.expander("📨 先生方からのNG日入力（専用URL）", expanded=False):
+        if not remote_is_configured():
+            st.info("この機能を使うには、最初に保存用のGoogleスプレッドシートとの接続設定が必要です。設定方法は担当者向けの手順書を参照してください。")
+            return
+        admin_password = remote_secret("admin_password")
+        if not admin_password:
+            st.error("管理用パスワード（admin_password）が設定されていません。Secretsに追加してください。")
+            return
+        if not st.session_state.get("remote_admin_ok"):
+            # ログインしていないと、上のカレンダーの「休日にする」「別途決定」は先生側に届かないので知らせる
+            try:
+                _st = remote_settings()
+                if _st.get("受付中の年月", "") == P.key and (
+                        parse_holiday_list(_st.get("入力不可日", "")) != sorted(locked_days)
+                        or parse_holiday_list(_st.get("特別休日", "")) != sorted(custom_holidays)):
+                    st.warning("上のカレンダーの「休日にする」「別途決定」が、先生側の画面とまだ違います。"
+                               "管理用パスワードを入れて「締め切り日・休日設定を更新」を押すと反映されます。")
+            except Exception:
+                pass
+            st.info("🔒 この欄は**管理者専用**です。受付の開始・締め切り、専用URLや配布用の案内書類の作成、提出されたNG日の取り込みができます。"
+                    "使うには、管理用パスワードを入力してください。")
+            pw = st.text_input("管理用パスワード", type="password", key="remote_admin_pw")
+            if pw:
+                if pw == str(admin_password):
+                    st.session_state["remote_admin_ok"] = True
+                    st.rerun()
+                else:
+                    st.error("パスワードが違います。")
+            return
+
+        try:
+            settings = remote_settings()
+            tokens = remote_tokens()
+        except Exception as e:
+            st.error(f"スプレッドシートを読み込めませんでした。接続設定を確認してください。詳細：{e}")
+            return
+
+        st.caption("毎月の流れ：① 受付を開始する → ② URLの案内書類を配る（初回のみ）→ ③ 提出状況を確認 → ④ 締め切る → ⑤ 提出されたNG日を取り込む")
+        month_key = P.key
+        active = settings.get("受付中の年月", "")
+        closed = settings.get("締め切り", "") == "True"
+        if active == month_key:
+            status = "🔒 締め切り済み" if closed else "🟢 受付中"
+            st.markdown(f"**{P.title()}：{status}**（締め切り日の表示：{settings.get('締め切り日', '') or '未設定'}）")
+        elif str(active).startswith(PERIOD_KEY_PREFIX):
+            _ap = TouchokuPeriod.from_key(active)
+            st.warning(f"現在は、期間指定版のページで「{_ap.title() if _ap else active}」の受付をしています。"
+                       f"ここで{P.title()}の受付を開始すると、その受付は終わります。")
+        elif active:
+            st.warning(f"現在の受付は「{active.replace('-', '年')}月」です。上で選んでいる{P.title()}とは異なります。ここで受付を開始すると、先生方の画面はこの期間のカレンダーに切り替わります。")
+        else:
+            st.markdown("**現在、受付していません。**")
+
+        # --- 受付の開始・締め切り ---
+        deadline = st.text_input("先生方に表示する締め切り日（例：10月25日）", value=settings.get("締め切り日", "") if active == month_key else "", key="remote_deadline")
+        _n_days = calendar.monthrange(year, month)[1]
+        _saved_locked = [d for d in parse_holiday_list(settings.get("入力不可日", "")) if d <= _n_days] if active == month_key else []
+        locked_sel = sorted(locked_days)
+        locked_text = ",".join(map(str, locked_sel))
+        if locked_sel:
+            st.caption("先生がNGを入力できない日（上のカレンダーの「別途決定」）：" + "・".join(P.label(d) for d in locked_sel if 1 <= d <= P.n))
+        c1, c2, c3 = st.columns(3)
+        if c1.button(f"{P.title()}の受付を開始する", key="remote_open", use_container_width=True,
+                     help="上で設定した期間・休日・別途決定の日で受付を始めます。先生の名簿と専用URLも更新します。"):
+            remote_sync_doctors(doctor_rows)
+            remote_save_settings(**{"受付中の年月": month_key, "特別休日": ",".join(map(str, sorted(custom_holidays))),
+                                    "翌月1日特別休日": bool(next_month_special_holiday), "締め切り": False, "締め切り日": deadline,
+                                    "入力不可日": locked_text})
+            st.rerun()
+        if active == month_key:
+            if not closed and c2.button("🔒 締め切る（先生側の編集を止める）", key="remote_close", use_container_width=True):
+                remote_save_settings(**{"締め切り": True})
+                st.rerun()
+            if closed and c2.button("受付を再開する", key="remote_reopen", use_container_width=True):
+                remote_save_settings(**{"締め切り": False})
+                st.rerun()
+            if c3.button("締め切り日・休日設定を更新", key="remote_update", use_container_width=True,
+                         help="受付中に締め切り日を変えた場合に押します（上のカレンダーの「休日にする」「別途決定」は自動で反映されます）。"):
+                remote_save_settings(**{"特別休日": ",".join(map(str, sorted(custom_holidays))),
+                                        "翌月1日特別休日": bool(next_month_special_holiday), "締め切り日": deadline,
+                                        "入力不可日": locked_text})
+                st.rerun()
+            # 上のカレンダーの「休日にする」「別途決定」を変えたら、先生側の画面にも自動で反映する
+            saved_holidays = parse_holiday_list(settings.get("特別休日", ""))
+            saved_next = settings.get("翌月1日特別休日", "") == "True"
+            cal_differs = saved_holidays != sorted(custom_holidays) or sorted(locked_sel) != sorted(_saved_locked) \
+                    or saved_next != bool(next_month_special_holiday)
+            if cal_differs and not cal_changed:
+                st.warning("上のカレンダーの「休日にする」「別途決定」が、先生側の画面と違います。"
+                           "いまの内容を先生側に反映するには「締め切り日・休日設定を更新」を押してください。")
+            elif cal_differs:
+                try:
+                    remote_save_settings(**{"特別休日": ",".join(map(str, sorted(custom_holidays))),
+                                            "翌月1日特別休日": bool(next_month_special_holiday),
+                                            "入力不可日": locked_text})
+                    st.toast("上のカレンダーの「休日にする」「別途決定」を、先生側の画面に反映しました。")
+                except Exception as e:
+                    st.warning(f"先生側の画面に休日・別途決定を反映できませんでした。「締め切り日・休日設定を更新」を押してください。詳細：{e}")
+
+        # --- 専用URL ---
+        st.markdown("##### 🔗 先生ごとの専用URL（固定）")
+        missing = [name for name, _ in doctor_rows if name not in tokens]
+        if missing:
+            st.caption(f"まだURLがない先生：{'、'.join(missing)}")
+            if st.button("名簿の先生全員のURLを用意する", key="remote_sync"):
+                remote_sync_doctors(doctor_rows)
+                st.rerun()
+        url_rows = [{"先生": name, "専用URL": remote_doctor_url(tokens[name]["キー"])} for name, _ in doctor_rows if name in tokens]
+        if url_rows:
+            st.dataframe(pd.DataFrame(url_rows), hide_index=True, use_container_width=True,
+                         column_config={"専用URL": st.column_config.LinkColumn("専用URL（右上のアイコンでコピーできます）")})
+            st.download_button("📥 URL一覧をCSVでダウンロード", pd.DataFrame(url_rows).to_csv(index=False).encode("utf-8-sig"),
+                               file_name="NG日入力_専用URL一覧.csv", mime="text/csv", key="remote_url_csv")
+            # 紙で配る用：QRコード付きの案内書類（A4・1人1枚）
+            card_targets = st.multiselect("案内書類を作る先生（URLを作り直した先生だけ印刷する場合などは絞り込めます）",
+                                          [r["先生"] for r in url_rows], default=[r["先生"] for r in url_rows], key="remote_card_targets")
+            if card_targets:
+                url_by_name = {r["先生"]: r["専用URL"] for r in url_rows}
+                try:
+                    st.download_button(f"🖨️ 配布用の案内書類（QRコード付き・{len(card_targets)}名分）をダウンロード",
+                                       remote_qr_cards_html([(n, url_by_name[n]) for n in card_targets]).encode("utf-8"),
+                                       file_name="当直NG日入力用URLのご案内.html", mime="text/html", key="remote_qr_cards", type="primary")
+                    st.caption("ダウンロードしたファイルを開くとブラウザに表示されるので、「印刷する」を押してA4・片面で印刷します（1人1枚）。"
+                               "点線で三つ折りにすると（上の線は外側へ、下の線は内側へ折る）、宛名と題名が表に出て、QRコードは内側に隠れます。封筒に入れて各先生に渡してください。")
+                except ImportError:
+                    st.error("案内書類を作るには、requirements.txt に「reportlab」の1行を追加してください。")
+            if st.checkbox("URLを作り直す（URLが漏れてしまった場合）", key="remote_regen_open"):
+                target = st.selectbox("作り直す先生", [r["先生"] for r in url_rows], key="remote_regen_target")
+                st.caption("作り直すと、古いURLは使えなくなります。新しいURLをその先生に送り直してください。")
+                if st.button("この先生のURLを作り直す", key="remote_regen"):
+                    remote_regenerate_key(target)
+                    st.rerun()
+
+        # --- 提出状況と取り込み ---
+        st.markdown(f"##### 📋 {P.title()}の提出状況")
+        if st.button("🔄 最新の状態に更新", key="remote_refresh"):
+            remote_clear_cache()
+            st.rerun()
+        submissions = remote_latest_submissions(month_key)
+        status_rows = []
+        for name, _ in doctor_rows:
+            r = submissions.get(name)
+            text = r.get("NG日", "") if r else ""
+            status_rows.append({
+                "先生": name,
+                "状況": "✅ 提出済み" if r else "⏳ 未提出",
+                "最終保存": r.get("保存日時", "") if r else "",
+                "NG日": (ng_text_summary(text, year, month, custom_holidays) or "NG日なし") if r else "",
+                "コメント": r.get("コメント", "") if r else "",
+            })
+        done = sum(1 for r in status_rows if r["状況"].startswith("✅"))
+        with_comment = sum(1 for r in status_rows if r["コメント"].strip())
+        st.caption(f"提出済み {done} / {len(status_rows)} 名" + (f"　💬 コメントあり {with_comment} 名（表の「コメント」列）" if with_comment else ""))
+        st.dataframe(pd.DataFrame(status_rows), hide_index=True, use_container_width=True)
+
+        flash = st.session_state.pop("remote_import_message", None)
+        if flash:
+            st.success(flash)
+        _locked_now = set(parse_holiday_list(settings.get("入力不可日", ""))) if active == month_key else set()
+
+        def _drop_locked(r):
+            # 先生がNGを入力できない日（年末年始など）のNGは取り込まない
+            if not _locked_now:
+                return r
+            kept = {d: v for d, v in parse_ng_dict(r.get("NG日", ""), year, month).items() if d not in _locked_now}
+            return {**r, "NG日": ng_dict_to_text(kept)}
+        importable = {name: _drop_locked(r) for name, r in submissions.items() if name in {n for n, _ in doctor_rows}}
+        if importable:
+            mode = "replace"   # 取り込むと、その先生のNG日は提出内容に置き換わる
+            changes = []
+            for name, r in importable.items():
+                submitted = parse_ng_dict(r.get("NG日", ""), year, month)
+                result, _ = planned_import(name, year, month, submitted, mode)
+                now = {d: st.session_state.get(f"ng_{name}_{year}_{month}_{d}", "OK") for d in day_is_holiday}
+                now = {d: v for d, v in now.items() if v != "OK"}
+                if result != now:
+                    changes.append({"先生": name,
+                                    "今のNG日（アプリ）": ng_text_summary(ng_dict_to_text(now), year, month, custom_holidays) or "なし",
+                                    "取り込むNG日（提出）": ng_text_summary(r.get("NG日", ""), year, month, custom_holidays) or "なし",
+                                    "コメント": str(r.get("コメント", "")).strip()})
+            if changes:
+                st.markdown("**取り込むと変わる先生**")
+                st.dataframe(pd.DataFrame(changes), hide_index=True, use_container_width=True)
+                changed_names = [c["先生"] for c in changes]
+                # 取り込む先生を選べる（はじめは全員。対象の先生が変わったら選び直しになる）
+                sel_key = "remote_import_targets_" + hashlib.sha256("|".join(changed_names).encode()).hexdigest()[:12]
+                targets = st.multiselect("取り込む先生（×で外せます）", changed_names, default=changed_names, key=sel_key)
+                targets = [n for n in (targets or []) if n in changed_names]
+                st.button(f"⬇️ 選んだ先生のNG日を取り込む（{len(targets)}名分）", key="remote_import", type="primary",
+                          disabled=not targets,
+                          on_click=import_remote_ng, args=(year, month, {n: importable[n] for n in targets}, mode))
+                st.caption("取り込むと、その先生のNG日は提出内容に置き換わります（CSVなどで入れていたNGは消えます）。"
+                           "選ばなかった先生や、提出していない先生のNG日は変わりません。取り込んだあとも、下のカレンダーで個別に直せます。")
+            else:
+                st.caption("提出内容は、すべてアプリに取り込み済みです。")
+        # --- 取り込みの取り消し ---
+        undoable = import_undo_doctors(year, month, [n for n, _ in doctor_rows])
+        if undoable:
+            with st.container(border=True):
+                st.markdown("**↩️ 取り込みを取り消す**")
+                st.caption("URLから取り込んだNG日を取り消して、取り込む前のNG日（CSVや手入力の分）に戻します。"
+                           "取り込んだあとにカレンダーで手直しした分も元に戻ります。先生の提出内容そのものは消えないので、もう一度取り込めます。")
+                cu1, cu2 = st.columns([3, 2])
+                undo_target = cu1.selectbox("取り消す先生", undoable, key="remote_undo_target", label_visibility="collapsed")
+                cu2.button("この先生の取り込みを取り消す", key="remote_undo_one", use_container_width=True,
+                           on_click=undo_remote_import, args=(year, month, [undo_target]))
+                if len(undoable) > 1:
+                    st.button(f"取り込んだ{len(undoable)}名全員の取り込みを取り消す", key="remote_undo_all",
+                              on_click=undo_remote_import, args=(year, month, undoable))
+        unknown = [name for name in submissions if name not in {n for n, _ in doctor_rows}]
+        if unknown:
+            st.caption(f"名簿にない先生の提出（取り込み対象外）：{'、'.join(unknown)}")
+
+        # --- 先生の提出のリセット ---
+        if submissions and st.checkbox("先生の提出をリセットする（入力をやり直してもらう場合など）", key="remote_reset_open"):
+            reset_names = list(submissions)
+            # 選択肢（提出済みの先生）が変わったら選び直しになるよう、名前の組み合わせで欄を分ける
+            reset_key = "remote_reset_targets_" + hashlib.sha256("|".join(reset_names).encode()).hexdigest()[:12]
+            reset_targets = [n for n in (st.multiselect("リセットする先生（複数選べます）", reset_names, key=reset_key) or [])
+                             if n in reset_names]
+            st.caption("リセットすると、その先生は「未提出」に戻り、先生のURLの画面もNG日・コメントが空の状態になります。"
+                       "これまでの提出は「変更の履歴」に残ります。すでにアプリに取り込んだNG日は変わらないので、"
+                       "必要なら「↩️ 取り込みを取り消す」も使ってください。")
+
+            def _do_reset(names):
+                for name in names:
+                    remote_reset_submission(month_key, name)
+                st.session_state["remote_reset_confirm"] = False   # 確認のチェックを外しておく（続けて押してしまわないように）
+                st.session_state["remote_import_message"] = f"{'、'.join(names)} 先生の提出をリセットしました（未提出に戻しました）。"
+            if reset_targets:
+                if st.checkbox(f"選んだ{len(reset_targets)}名（{'、'.join(reset_targets)}）の提出をリセットしてよい", key="remote_reset_confirm"):
+                    st.button(f"🗑️ {len(reset_targets)}名の提出をリセットする", key="remote_reset_do",
+                              on_click=_do_reset, args=(reset_targets,))
+
+        # （この欄自体が折りたたみの中にあるため、履歴はチェックボックスで開く）
+        if st.checkbox("変更の履歴を表示（だれが・いつ・どう変えたか）", key="remote_history_open"):
+            history = [r for r in remote_read("submissions") if r.get("年月") == month_key]
+            if history:
+                st.dataframe(pd.DataFrame([{"保存日時": r.get("保存日時", ""), "先生": r.get("先生", ""),
+                                            "NG日": "（管理者がリセット）" if r.get("種別", "") == "リセット"
+                                            else (ng_text_summary(r.get("NG日", ""), year, month, custom_holidays) or "NG日なし"),
+                                            "コメント": r.get("コメント", "")}
+                                           for r in reversed(history)]), hide_index=True, use_container_width=True)
+            else:
+                st.caption("まだ履歴はありません。")
+
+
+def work_state_restore():
+    """保存した作業を画面に戻す（ボタンのコールバック。画面を作る前に実行される）。"""
     saved_at, data = work_state_info()
+    if not data:
+        st.session_state["work_state_message"] = ("error", "保存された作業が見つかりませんでした。")
+        return
+    y, m = int(data["year"]), int(data["month"])
+    for key in list(st.session_state.keys()):
+        if key.startswith(("ng_", "hol_", "lock_", "next_month_special_holiday_", "shortage_priority_")):
+            del st.session_state[key]
+    st.session_state["sel_year"] = y
+    st.session_state["sel_month"] = m
+    st.session_state["sel_extra"] = int(data.get("extra", 0))
+    _tp = TouchokuPeriod(y, m, int(data.get("extra", 0)))
+    for d in data.get("holidays", []):
+        st.session_state[f"hol_{y}_{m}_{int(d)}"] = True
+    for d in data.get("locked", []):
+        st.session_state[f"lock_{y}_{m}_{int(d)}"] = True
+    st.session_state[f"next_month_special_holiday_{y}_{m}"] = bool(data.get("next_special"))
+    for name, cv in (data.get("comments") or {}).items():
+        if isinstance(cv, (list, tuple)) and cv and str(cv[0]).strip():
+            st.session_state[f"ng_import_comment_{name}_{y}_{m}"] = (str(cv[0]), str(cv[1]) if len(cv) > 1 else "")
+    for k, v in (data.get("alerts") or {}).items():
+        if k in MATRIX_COUNT_ALERTS:
+            st.session_state[f"alert_{k}"] = int(v)
+    for slot, rank in (data.get("priority") or {}).items():
+        st.session_state[f"shortage_priority_{slot}"] = int(rank)
+    st.session_state["restored_state"] = data
+    st.session_state["multi_editor_gen"] = st.session_state.get("multi_editor_gen", 0) + 1   # 増員設定の表を読み込んだ内容で作り直す
+    # ファイルのアップロード欄を空にして、復元した内容を使う
+    st.session_state["uploader_gen"] = st.session_state.get("uploader_gen", 0) + 1
+    st.session_state.pop("last_uploaded_file_id", None)
+    st.session_state["work_state_message"] = ("success", f"{saved_at} に保存した作業（{_tp.title()}）を読み込みました。")
+    # 読み込んだことは、上の帯のボタンの右に1か所だけ出す（次に途中保存するまで表示しておく）
+    st.session_state["work_restore_note"] = f"{str(saved_at)[5:16]} 保存分（{_tp.title()}）を読み込みました"
+    st.session_state.pop("work_save_note", None)
+    # 読み込んだあとは「続きから」の小さな枠を閉じる（見出しを目に見えない形で変えると、閉じた状態で作り直される）
+    st.session_state["work_restore_gen"] = st.session_state.get("work_restore_gen", 0) + 1
+
+
+def carry_over_staff(year, month):
+    """
+    途中保存してある医師条件（回数・間隔・翌日PM duty・備考など）を、今の年月に引き継ぐ（ボタンのコールバック）。
+    月ごとに変わる NG日・希望日・先生のコメントは空にする。
+    """
+    saved_at, data = _normal_work_state_info()   # 通常版で途中保存した医師条件を使う
     if not data or not data.get("staff_csv"):
-        st.session_state["p_message"] = ("error", "通常版で途中保存した医師条件が見つかりませんでした。")
+        st.session_state["carry_over_message"] = ("error", "通常版で途中保存した医師条件が見つかりませんでした。先に通常版で「💾 作業を途中保存する」を押してください。")
         return
     df = parse_staff_csv(str(data["staff_csv"]).encode("utf-8"))
     for col in (NG_COLUMN, REQUEST_COLUMN):
         if col in df.columns:
             df[col] = ""
-    for k in list(st.session_state.keys()):
-        if k.startswith(("p_ng_", "p_comment_", "p_import_")):
-            del st.session_state[k]
-    restored = dict(st.session_state.get("p_restored") or {})
-    restored["staff_csv"] = df.to_csv(index=False)
-    st.session_state["p_restored"] = restored
-    st.session_state["p_uploader_gen"] = st.session_state.get("p_uploader_gen", 0) + 1
-    st.session_state["p_editor_gen"] = st.session_state.get("p_editor_gen", 0) + 1
-    st.session_state["p_message"] = ("success", f"通常版で{saved_at}に途中保存した医師条件（{len(df)}名）を読み込みました。"
-                                                "NG日・希望日は空にしてあります。")
+    # 画面に残っている今月のNG日・取り込みの記録・先生のコメントを消す（新しい医師条件から読み直す）
+    for key in list(st.session_state.keys()):
+        if key.startswith("ng_"):
+            del st.session_state[key]
+    state = dict(st.session_state.get("restored_state") or {"year": year, "month": month})
+    state["staff_csv"] = df.to_csv(index=False)
+    st.session_state["restored_state"] = state
+    st.session_state["uploader_gen"] = st.session_state.get("uploader_gen", 0) + 1
+    st.session_state.pop("last_uploaded_file_id", None)
+    st.session_state["carry_over_gen"] = st.session_state.get("carry_over_gen", 0) + 1   # 小さな枠を閉じる
+    st.session_state["carry_over_message"] = (
+        "success", f"{saved_at} に途中保存した{data.get('year')}年{data.get('month')}月の医師条件（{len(df)}名）を引き継ぎました。"
+                   "NG日・希望日・先生のコメントは空にしてあります。")
 
 
-# ==========================================
-# 画面
-# ==========================================
-st.title("📆 当直作成（期間指定・年末年始など）")
-st.caption("今月の1日から、翌月の指定した日までを1つの当直表として作ります。年末年始など、月をまたいで通しで決めたいときに使います。"
-           "ふだんの月の当直は、通常版で作ってください。")
+# ============================================================
+# 画面（通常版と同じ。色は茶色）
+# ============================================================
+st.title("当直作成アプリ（期間指定版・年末年始など）")
+st.caption("今月の1日から、翌月の指定した日までを1つの当直表として作ります。使い方は通常版と同じです。")
 st.markdown("<a href='./' target='_self' style='font-weight:700'>🏠 ← 通常版の当直作成に戻る</a>", unsafe_allow_html=True)
+with st.expander("📖 使い方（初めての方・毎月の流れ・結果の見方）", expanded=False):
+    tab_intro, tab_flow, tab_ng, tab_result, tab_trouble = st.tabs(["はじめに", "毎月の流れ", "NG日の集め方", "結果の見方・Excel", "困ったとき"])
+    with tab_intro:
+        st.markdown("""
+**このアプリでできること**
 
-msg = st.session_state.pop("p_message", None)
-if msg:
-    (st.success if msg[0] == "success" else st.error)(msg[1])
+先生方の条件（回数・間隔・希望日・NG日など）をもとに、毎月の当直表の案を自動で作ります。
+先生方には専用のURL（QRコード）から、スマートフォンでNG日を入力してもらえます。
 
-configured = remote_is_configured()
-if configured:
-    with st.expander("💾 途中保存・📂 続きから・👩‍⚕️ 通常版の医師条件を読み込む（管理用パスワードが必要）", expanded=False):
-        if admin_logged_in("p_pw"):
-            c1, c2, c3 = st.columns(3)
-            p_save_clicked = c1.button("💾 作業を途中保存する", key="p_save", type="primary", use_container_width=True)
-            _at, _saved = p_state_info()
-            c2.button("📂 前回の作業の続きから始める", key="p_restore", on_click=p_restore, use_container_width=True,
-                      disabled=not _saved)
-            c3.button("👩‍⚕️ 通常版の医師条件を読み込む", key="p_carry", on_click=p_carry_over, use_container_width=True)
-            st.caption((f"期間指定版の途中保存：{_at}（{TouchokuPeriod(_saved['year'], _saved['month'], _saved.get('extra', 0)).title()}）"
-                        if _saved else "期間指定版の途中保存はまだありません。")
-                       + "　／　通常版の医師条件を読み込むと、NG日・希望日は空になります（回数・間隔・備考などはそのまま）。")
-        else:
-            p_save_clicked = False
-else:
-    p_save_clicked = False
+**画面のつくり**
 
-# ------------------------------------------
-# 1. 期間・休日
-# ------------------------------------------
-banner("📅", "期間・休日・必要人数の設定", "作る期間（今月1日〜翌月の何日まで）と、休日・別途決定の日を決めます", first=True)
+- **いちばん上の紺色の帯**：「💾 作業を途中保存する」と「📂 前回の作業の続きから始める」があります。スクロールしても常に表示されます。
+- **いちばん下の紺色の帯**：「🚀 当直案を作成」ボタンと、「医師条件」「NG日」「結果」へ移動するボタン、作成結果（未決定の枠の数）があります。
+- **真ん中**：上から順に、紺色の見出しの帯で4つの項目に分かれています。上から順に進めれば、1か月分の作業が終わります。
+    1. 📅 年月・休日・必要人数の設定
+    2. 👩‍⚕️ 医師条件の読み込み・入力
+    3. 🚫 先生ごとのNG日設定
+    4. 🎯 当直案の作成・確認
+
+**年末年始など、月をまたいで作るとき**
+
+年月の設定の下にある「📆 期間指定版」から、今月1日〜翌月の指定日までを通しで作る別のページに移れます。先生方の専用URLは同じものを使えます。
+
+**管理用パスワード**
+
+途中保存・続きからの読み込み・前回の医師条件の引き継ぎ・専用URLの管理（受付・取り込みなど）には、管理用パスワードが必要です。
+一度入れると、画面を閉じるまでほかの場所でも入力不要です。
+
+**大事なこと**
+
+- 画面に入力した内容は、しばらく使わないと消えます。作業の区切りごとに、上の帯の「💾 作業を途中保存する」を押してください。
+- 作った当直案は途中保存に入りません。気に入った案は、Excelでダウンロードしておいてください。
+        """)
+    with tab_flow:
+        st.markdown("""
+**毎月の作業は、画面の上から順に進めれば完了します。**
+
+1. **年月を選ぶ**：いちばん上で、作る年月を選びます。
+   同じ月の作業の続きなら、上の帯の「📂 前回の作業の続きから始める」で、NG日なども含めてそのまま戻せます（この場合、2〜5は確認だけで済みます）。
+2. **休日を設定**：カレンダーで、次の2つを必要な日だけチェックします。土日祝は自動で休日になります。
+    - **休日にする**：病院独自の休みなど、平日でも土日祝と同じ扱いにする日。日直の枠ができます。
+    - **別途決定**：年末年始など、別の方法で当番を決める日。このアプリではその日の当直を決めず、先生もNGを入力できなくなります。
+3. **人数を増やす枠（任意）**：1つの枠を2名以上にする日があれば、行を足して設定します。
+4. **確定当直（任意）**：「📅 先月今月来月の確定当直」の帯を押して開き、すでに決まっている当直や、先月末・来月初めの当直を入れます。勤務の間隔の計算に使われます。
+5. **医師条件**：新しい月なら、医師条件の欄の「📋 前回の医師条件を引き継ぐ」を押します。途中保存してある医師条件（回数・間隔・翌日PM duty・備考など）が入り、NG日・希望日・先生のコメントは空になります。
+   初めての場合は、ひな形（CSV）をダウンロードして先生の名前や回数の上限などを入れ、アップロードします。表の中で直接直すこともできます。希望日もここに入れます。
+6. **NG日を集める**：先生方に専用URLから入力してもらい、取り込みます（「NG日の集め方」のタブを参照）。
+7. **不足時の優先順位（任意）**：人数が足りない月に、どの枠から埋めるかを決めます。
+8. **当直案を作る**：下の帯の「🚀 当直案を作成」を押します（計算に最大1分少々かかります）。押すたびに違うパターンの案ができるので、気に入るまで押し直して構いません。
+   未決定の枠が出たら、条件を直して作り直します。下の帯の移動ボタンで、条件と結果を行き来できます。
+9. **確認してダウンロード**：「医師別の当直一覧」をExcelでダウンロードします（「結果の見方・Excel」のタブを参照）。
+10. **途中保存**：最後に上の帯の「💾 作業を途中保存する」を押しておくと、翌月は「📋 前回の医師条件を引き継ぐ」で、この医師条件から始められます。
+
+途中保存には、年月・休日・別途決定の日・増員設定・確定当直・医師条件（NG日を含む）・取り込んだ先生のコメント・不足時の優先順位・アラートの基準が入ります。
+        """)
+    with tab_ng:
+        st.markdown("""
+**方法A：先生方に専用URLから入力してもらう（おすすめ）**
+
+「🚫 先生ごとのNG日設定」の中の「📨 先生方からのNG日入力（専用URL）」を開き、管理用パスワードを入れて使います。
+
+1. **受付を開始**：先に、いちばん上のカレンダーで「休日にする」「別途決定」を済ませておきます。締め切り日を書いて「受付を開始する」を押します。
+   受付中にカレンダーを変えた場合も、パスワードを入れた状態なら自動で先生側に反映されます。
+2. **URLを配る（初回だけ）**：「配布用の案内書類（QRコード付き）」をダウンロードして印刷し、点線で三つ折りにして封筒で各先生に渡します。URLは毎月同じなので、翌月からは「入力が始まりました」と伝えるだけです。
+3. **先生が入力**：先生はQRコードを読み取り、入れない日の「日直」「宿直」のボタンを押してNGにし、「NG日とコメントを保存する」を押します。「全日NGにする」「すべてOKに戻す」のボタンもあります。締め切りまでは何度でも直せて、最後に保存した内容が採用されます。
+4. **提出状況を確認**：管理画面の表で、提出済み・未提出・コメントを確認できます。「🔄 最新の状態に更新」で最新になります。
+5. **締め切る**：「🔒 締め切る」を押すと、先生側は編集できなくなります。
+6. **取り込む**：「取り込むと変わる先生」の表で内容とコメントを確認し、取り込む先生を選んで「⬇️ 選んだ先生のNG日を取り込む」を押します。その先生のNG日は提出内容に置き換わり、コメントも当直一覧のメモ欄に表示されるようになります。
+
+**やり直したいとき**
+
+- **取り込みを取り消す**：「↩️ 取り込みを取り消す」で、取り込む前のNG日に戻せます（先生ごとのNG日の欄にもボタンがあります）。取り込んだあとにアプリを開き直したり、途中保存から読み込んだりした場合は取り消せないので、カレンダーで直してください。
+- **先生の提出をリセットする**：入力をやり直してもらう場合は、「先生の提出をリセットする」で先生を選んでリセットします。未提出に戻り、先生の画面も空になります（これまでの提出は履歴に残ります）。
+- **URLを作り直す**：案内書類をなくした・URLが漏れた場合に使います。古いURLは使えなくなります。
+
+**方法B：管理者が直接入力する**
+
+「NG日を入力する医師」で先生を選び、カレンダーの「日直」「宿直」のボタンを押してNGにし、「NG日を反映する」を押します。紙やメールで集めた場合はこちらを使います。
+反映していない変更があると、ボタンがオレンジに光ります。そのまま別の先生に切り替えようとすると注意が出ます。
+
+| NGの種類 | 意味 |
+| --- | --- |
+| 宿NG | 宿直（夜）に入れない。「宿直」のボタンだけ押した状態 |
+| 日NG | 日直（日中）に入れない。休日だけ。「日直」のボタンだけ押した状態 |
+| 全NG | 日直・宿直とも入れない。休日だけ。両方のボタンを押した状態 |
+| ⚠ | 翌日PMにdutyがあるため、原則その日の宿直を外す日 |
+| 灰色の「別途決定」 | 別の方法で当番を決める日。NGは入力できません |
+        """)
+    with tab_result:
+        st.markdown("""
+**🗓️ 医師別の当直一覧**（先生ごとに1行）
+
+- 枠名のマス：決まった当直（色は枠の種類）
+- **茶色の太い枠**：希望日が、希望どおりに通った当直
+- **×**：当直NGの日（宿×＝休日の宿直だけNG、日×＝休日の日直だけNG）
+- **黄色の斜線**：翌日PM dutyのため宿直を外す日。斜線だけならNGは付いておらず、斜線に×があればNGも付いている日です
+- **赤線の下の「⚠️ 未決定」**：人数が足りず、担当が決まっていない枠
+- **右端の回数**：宿直・日直／病棟・外来／平日・休日／合計。回数が多い先生は**赤い枠**で表示されます。該当する先生は、作成ボタンの下の「計算状況・条件の注意事項と対処方法」にも一覧で出ます。基準は表のすぐ上の「⚠ アラートの基準」で変えられます（初期設定は宿直4回以上・休日3回以上。0にした項目はアラートなし）。
+- **メモ欄**：💬は先生からのコメント（取り込んだ先生だけ）、📝は医師条件の備考です。カーソルを合わせると全文が出ます。全員分は「💬 先生方のコメント・備考の一覧」でまとめて見られます。
+- マスにカーソルを合わせると、その先生の行と、その日の列が黄色く色付きます。
+
+**📥 Excelでダウンロード（緑のボタン）**
+
+印刷用の表（A3横・1枚）がダウンロードされます。Excelで最終調整もできます。
+
+- 右の回数は計算式になっているので、マスに「A宿直」「外来日直」などの枠名を書き足したり消したりすると、自動で変わります。赤い枠も自動で付きます。
+- 「⚠️ 未決定」の行の枠を、表の中のマスへドラッグして移せます。移すと、未決定の「○枠」と、移した先の先生の回数が自動で変わります。
+- メモ欄にはメモの全文が入っています。マスを選ぶと上の入力欄で全文が読めます。「メモ全文」シートにも一覧があります。
+
+**📅 作成した当直案**（日付ごとの表）
+
+名前にカーソルを合わせると、同じ先生の当直が強調されます。
+「🔍 特定の医師の当直を色別でハイライト」を開くと、選んだ先生を色分けできます。CSVでもダウンロードできます。
+        """)
+    with tab_trouble:
+        st.markdown("""
+- **「未決定」の枠が出る**：作成ボタンの下の「計算状況・条件の注意事項と対処方法」を見てください。NG日・回数の上限・勤務間隔の条件が厳しすぎる可能性があります。月間最大回数を増やす、勤務間隔を短くするなどして、下の帯の「🚀 当直案を作成」で作り直してください。少しだけなら、Excelで手で埋めることもできます。
+- **アプリを開くと入力した内容が消えている**：しばらく使わないと画面がリセットされます。上の帯の「📂 前回の作業の続きから始める」で読み込んでください。先生方の提出内容と専用URLはスプレッドシートに残っているので消えません。
+- **英語の画面（Zzzz…）が出る**：アプリが休止しています。青いボタン「Yes, get this app back up!」を押して1分ほど待つと開きます。
+- **先生のNG日が当直案に入っていない**：管理画面で「⬇️ 選んだ先生のNG日を取り込む」を押したか確認してください。
+- **先生側の休日・別途決定の表示が違う**：管理用パスワードを入れて、「締め切り日・休日設定を更新」を押してください。
+- **先生から「URLが無効」と言われた**：URLを作り直していないか確認してください。案内書類をなくした場合は、管理画面の「URLを作り直す」で新しい案内書類を印刷します。
+- **アプリが起動しない・エラーが出る**：表示されたエラーの内容を控えて、管理担当者に連絡してください。
+        """)
+
+# 見出しの装飾。Streamlitの内部名に依存するため、将来のバージョンで効かなくなることがあるが、
+# その場合も標準の見た目に戻るだけで、動作やレイアウトは崩れない。
+st.markdown("""
+<style>
+[data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h1,
+.main [data-testid="stHeadingWithActionElements"] h1 {
+    font-size: 1.9rem !important; line-height: 1.4 !important; font-weight: 750 !important; padding: 0 0 .6rem !important;
+}
+[data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h2,
+.main [data-testid="stHeadingWithActionElements"] h2 {
+    font-size: 1.3rem !important; line-height: 1.5 !important; font-weight: 700 !important;
+    background: var(--secondary-background-color, #f0f3f7);
+    border-left: 5px solid #a0662f; border-radius: 0 8px 8px 0;
+    padding: .85rem 1rem !important; margin: .4rem 0 .35rem !important;
+}
+[data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h3,
+.main [data-testid="stHeadingWithActionElements"] h3 {
+    font-size: 1.08rem !important; line-height: 1.55 !important; font-weight: 700 !important;
+    padding: .45rem 0 .6rem !important; border-bottom: 1px solid rgba(128, 144, 160, .3);
+    margin: .2rem 0 .15rem !important;
+}
+[data-testid="stMain"] [data-testid="stMarkdownContainer"] hr,
+.main [data-testid="stMarkdownContainer"] hr {
+    margin: 1.4rem 0 !important; border: 0; border-top: 1px solid rgba(128, 144, 160, .35);
+}
+[data-testid="stMetricLabel"] p {font-size: .9rem !important; line-height: 1.5 !important;}
+[data-testid="stMetricValue"] {font-size: 1.8rem !important; line-height: 1.25 !important;}
+@media (max-width:600px) {
+    [data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h1 {font-size:1.6rem !important;}
+    [data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h2 {font-size:1.15rem !important; padding:.7rem .75rem !important;}
+    [data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h3 {font-size:1rem !important;}
+}
+</style>
+""", unsafe_allow_html=True)
+
+# 大きな区切り（セクション）の見出し。紺色の帯で、どこからどこまでが1つの項目かを分かりやすくする
+st.markdown("""
+<style>
+.sec-banner{display:flex;align-items:center;gap:14px;margin:2.6rem 0 .9rem;padding:14px 18px;border-radius:12px;
+  background:linear-gradient(90deg,#5b3a1e 0%,#a0662f 100%);color:#fff;box-shadow:0 2px 6px rgba(31,52,82,.18)}
+.sec-banner .ic{font-size:1.6rem;line-height:1}
+.sec-banner .t{font-size:1.35rem;font-weight:800;letter-spacing:.02em;line-height:1.3}
+.sec-banner .s{font-size:.88rem;opacity:.9;margin-top:2px}
+.sec-banner .tag{margin-left:auto;font-size:.8rem;font-weight:800;padding:3px 12px;border-radius:999px;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.45);white-space:nowrap}
+.sec-banner.first{margin-top:.6rem}
+/* 画面上部の帯（ボタンの並ぶ所）：下の画面との境目が分かるよう、細い線とごく薄い影を付ける。
+   すりガラス風にして、下を流れる内容が透けて重ならないようにする */
+[data-testid="stHeader"]{background:linear-gradient(90deg,#4a2e15 0%,#7a4a20 100%) !important;
+  border-bottom:3px solid #f2b84b;box-shadow:0 3px 12px rgba(16,24,40,.22)}
+/* 紺色の帯の上でも見えるよう、右上のStreamlitのアイコンや「実行中」の表示を白にする */
+[data-testid="stHeader"] button,[data-testid="stHeader"] a,[data-testid="stHeader"] [data-testid="stToolbar"],
+[data-testid="stHeader"] [data-testid="stStatusWidget"],[data-testid="stHeader"] [data-testid="stStatusWidget"] *{color:#fff !important}
+[data-testid="stHeader"] svg{fill:currentColor}
+[data-testid="stDecoration"]{display:none}
+/* 下の帯のリンクで移動したとき、画面上部の帯（ボタンの並ぶ所）に見出しが隠れないよう、少し上に余白を取って止める */
+#sec-staff,#sec-ng,#sec-create,#sec-result{scroll-margin-top:5.5rem}
+.sec-banner[id]{scroll-margin-top:5.5rem}
+/* 折りたたみ式の項目（確定当直）も、同じ帯の見た目にする */
+.st-key-fixed_section{margin:2.6rem 0 .4rem}
+.st-key-fixed_section [data-testid="stExpander"] details{border:0;border-radius:12px;overflow:hidden;box-shadow:0 2px 6px rgba(31,52,82,.18)}
+.st-key-fixed_section [data-testid="stExpander"] details > summary{background:linear-gradient(90deg,#5b3a1e 0%,#a0662f 100%);color:#fff;padding:14px 18px}
+.st-key-fixed_section [data-testid="stExpander"] details > summary p{color:#fff;font-size:1.35rem;font-weight:800}
+.st-key-fixed_section [data-testid="stExpander"] details > summary svg{color:#fff;fill:#fff}
+.st-key-fixed_section [data-testid="stExpanderDetails"]{padding-top:1rem}
+@media (max-width:600px){.sec-banner{padding:11px 13px;gap:10px}.sec-banner .t,.st-key-fixed_section summary p{font-size:1.12rem !important}.sec-banner .s{display:none}}
+</style>""", unsafe_allow_html=True)
+
+
+def section_banner(icon, title, sub="", tag="", first=False, anchor=""):
+    tag_html = f'<span class="tag">{tag}</span>' if tag else ""
+    sub_html = f'<div class="s">{sub}</div>' if sub else ""
+    id_html = f' id="{anchor}"' if anchor else ""
+    st.markdown(f'<div{id_html} class="sec-banner{" first" if first else ""}"><span class="ic">{icon}</span>'
+                f'<div><div class="t">{title}</div>{sub_html}</div>{tag_html}</div>', unsafe_allow_html=True)
+
+
+# ==========================================
+# 1. 上部ダッシュボード：年月と休日の設定
+# ==========================================
+section_banner("📅", "年月・休日・必要人数の設定", "作る月・休日と別途決定の日・1枠の人数を決めます", "必須", first=True)
+st.info("作成する年月を選んでください。土日祝日は自動で休日扱いになります。下のカレンダーで、平日でも休日扱いにする日は「休日にする」、別の方法で当番を決める日は「別途決定」にチェックします。")
 today = datetime.date.today()
-default_y, default_m = (today.year + 1, 1) if today.month == 12 else (today.year, today.month + 1)
-if "p_year" not in st.session_state:
-    st.session_state["p_year"] = default_y
-    st.session_state["p_month"] = default_m
-    st.session_state["p_extra"] = 5
-cy, cm, ce = st.columns(3)
-year = int(cy.number_input("年", min_value=2000, step=1, key="p_year"))
-month = int(cm.number_input("月（この月の1日から）", min_value=1, max_value=12, step=1, key="p_month"))
-_next_first = datetime.date(year, month, calendar.monthrange(year, month)[1]) + datetime.timedelta(days=1)
-extra = int(ce.number_input(f"翌月（{_next_first.month}月）の何日まで含めるか", min_value=0,
-                            max_value=calendar.monthrange(_next_first.year, _next_first.month)[1], step=1, key="p_extra"))
+if today.month == 12:
+    default_year = today.year + 1
+    default_month = 1
+else:
+    default_year = today.year
+    default_month = today.month + 1
+
+# 画面右上の帯に「前回の作業の続きから始める」「作業を途中保存する」を置く
+work_save_floating()
+
+# --- 画面の下に固定する帯（フッター）：「当直案を作成」ボタンと結果、移動リンク ---
+# 条件を直す → 作成し直す、を行ったり来たりせずに繰り返せるように、どこまでスクロールしていても押せるようにする。
+# 上の帯は「保存」、下の帯は「作成」と役割を分ける。
+st.markdown("""
+<style>
+.st-key-create_bar{position:fixed;left:0;right:0;bottom:0;z-index:1000001;width:auto !important;height:64px !important;min-height:0 !important;
+  display:flex !important;flex-direction:row !important;align-items:center !important;gap:14px !important;
+  padding:0 9rem 0 1rem;background:linear-gradient(90deg,#4a2e15 0%,#7a4a20 100%);
+  border-top:3px solid #f2b84b;box-shadow:0 -3px 12px rgba(16,24,40,.22);overflow:visible !important}
+.st-key-create_bar > div{width:auto !important;flex:0 0 auto !important;margin:0 !important}
+.st-key-create_bar [data-testid="stElementContainer"],.st-key-create_bar [data-testid="stMarkdownContainer"],
+.st-key-create_bar [data-testid="stMarkdown"]{margin:0 !important;width:auto !important}
+/* 並び：いちばん左に作成ボタン、その右に移動リンク、右端に結果 */
+.st-key-create_bar > div:has(button){order:1}
+.st-key-create_bar > div:has(.cb-box){order:2;flex:1 1 auto !important}
+.st-key-create_bar button{min-height:2.7rem;padding:0 1.5rem 0 1.15rem;font-size:1rem;font-weight:800;white-space:nowrap}
+/* 絵文字の前に入る余白をなくし、ボタンの左右の余白を見た目でそろえる */
+.st-key-create_bar button p{margin:0;letter-spacing:.01em}
+.st-key-create_bar p{margin:0}
+.cb-box{display:flex;flex-direction:row;align-items:center;gap:14px;width:100%}
+.cb-res{margin-left:auto;font-size:.92rem;font-weight:800;line-height:1.4;white-space:nowrap;padding:4px 12px;border-radius:999px;background:rgba(255,255,255,.12)}
+.cb-res.ok{color:#8ff0b6}.cb-res.bad{color:#ffd08a}.cb-res.wait{color:#e3e9f1}
+.cb-nav{display:flex;gap:6px;font-size:.82rem;order:-1}
+.cb-nav a{text-decoration:none;color:#fff !important;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.28);border-radius:6px;padding:4px 10px;white-space:nowrap}
+.cb-nav a:hover{background:rgba(255,255,255,.26)}
+/* 作成ボタンは紺の帯の上で目立つよう、白い縁取りを付ける */
+.st-key-create_bar button{box-shadow:0 0 0 2px rgba(255,255,255,.85),0 2px 8px rgba(0,0,0,.25)}
+/* 下の帯に最後の内容が隠れないよう、ページの下に余白を取る */
+[data-testid="stMainBlockContainer"],.block-container{padding-bottom:6.5rem !important}
+@media (max-width:600px){
+  /* スマートフォン：右下にはStreamlitのマークが出るので、右側を空ける */
+  .st-key-create_bar{height:58px !important;padding:0 7.5rem 0 .5rem;gap:8px !important}
+  .st-key-create_bar button{padding:0 .9rem;font-size:.9rem}
+  .cb-nav{display:none}.cb-res{margin-left:0;font-size:.75rem;white-space:normal}
+}
+</style>""", unsafe_allow_html=True)
+create_bar_request = False
+
+
+def create_bar_show(result_html=""):
+    """下の帯の、移動リンクと結果の1行をまとめて表示する（1つの部品にして、表示のずれを防ぐ）。"""
+    res_anchor = "#sec-result" if "generated_df" in st.session_state else "#sec-create"
+    CREATE_BAR_SLOT.markdown(
+        f"<div class='cb-box'><div class='cb-nav'><a href='#sec-staff' target='_self'>医師条件</a>"
+        f"<a href='#sec-ng' target='_self'>NG日</a><a href='{res_anchor}' target='_self'>結果</a></div>{result_html}</div>",
+        unsafe_allow_html=True)
+
+
+with st.container(key="create_bar"):
+    if st.button("🚀 当直案を作成", key="create_bar_button", type="primary"):
+        create_bar_request = True
+    CREATE_BAR_SLOT = st.empty()
+    _last = st.session_state.get("create_bar_summary")
+    if create_bar_request:
+        create_bar_show("<div class='cb-res wait'>計算しています…（最大75秒）</div>")
+    elif st.session_state.get("result_needs_refresh"):
+        create_bar_show("<div class='cb-res wait'>条件が変わりました。もう一度作成してください。</div>")
+    elif _last:
+        create_bar_show(_last)
+    else:
+        create_bar_show()
+
+if "sel_year" not in st.session_state:
+    st.session_state["sel_year"] = default_year
+if "sel_month" not in st.session_state:
+    st.session_state["sel_month"] = default_month
+if "sel_extra" not in st.session_state:
+    st.session_state["sel_extra"] = 5
+col_y, col_m, col_e = st.columns(3)
+year = int(col_y.number_input("年", min_value=2000, step=1, key="sel_year"))
+month = int(col_m.number_input("月（この月の1日から）", min_value=1, max_value=12, step=1, key="sel_month"))
+_nf = _REAL_DATE(year, month, _REAL_MONTHRANGE(year, month)[1]) + datetime.timedelta(days=1)
+extra = int(col_e.number_input(f"翌月（{_nf.month}月）の何日まで含めるか", min_value=0, max_value=_REAL_MONTHRANGE(_nf.year, _nf.month)[1], step=1, key="sel_extra"))
 P = TouchokuPeriod(year, month, extra)
+_install_period(P)
 st.info(f"**作る期間：{P.title()}（{P.n}日間）**　この期間全体を1つの当直表として作ります。"
         "医師条件の回数（月間最大回数・休日最大回数・各枠の上限など）は、この期間全体での回数として扱います。")
+restored_state = st.session_state.get("restored_state")
 
-st.markdown("**休日にする**：平日でも土日祝と同じ扱いにする日。**別途決定**：このページでは当直を決めず、先生もNGを入力できない日。")
-custom_holidays, locked_days = [], []
-with st.container(key="p_calendar"):
-    head = st.columns(7)
-    for i, w in enumerate(WEEKDAYS_JA):
-        color = "#c0392b" if i == 6 else ("#1f6fbf" if i == 5 else "#243247")
-        head[i].markdown(f"<div class='p-cal-head' style='color:{color}'>{w}</div>", unsafe_allow_html=True)
-    cells = [None] * P.start.weekday() + list(range(1, P.n + 1))
-    cells += [None] * ((7 - len(cells) % 7) % 7)
-    for wk in range(0, len(cells), 7):
-        cols = st.columns(7)
-        for col, i in zip(cols, cells[wk:wk + 7]):
-            if i is None:
-                continue
-            dt = P.date(i)
-            auto_hol = dt.weekday() >= 5 or jpholiday.is_holiday(dt)
-            with col.container(border=True):
-                color = "#c0392b" if (dt.weekday() == 6 or jpholiday.is_holiday(dt)) else ("#1f6fbf" if dt.weekday() == 5 else "#243247")
-                st.markdown(f"<div style='text-align:center;font-weight:800;color:{color}'>{P.label(i)}</div>", unsafe_allow_html=True)
-                if auto_hol:
-                    st.markdown("<div style='text-align:center;color:#c0392b;font-size:.8rem'>休</div>", unsafe_allow_html=True)
-                elif st.checkbox("休日にする", key=f"p_hol_{P.key}_{i}"):
-                    custom_holidays.append(i)
-                if st.checkbox("別途決定", key=f"p_lock_{P.key}_{i}"):
-                    locked_days.append(i)
+st.divider()
 
-_after = P.end + datetime.timedelta(days=1)
-_after_label = f"{_after.month}/{_after.day}（{WEEKDAYS_JA[_after.weekday()]}）"
-if _after.weekday() >= 5 or jpholiday.is_holiday(_after):
-    next_special = False
-    st.caption(f"期間の翌日 {_after_label} は休日なので、最終日 {P.label(P.n)} の宿直は「翌日PM duty」の制限を受けません。")
-else:
-    next_special = st.checkbox(f"期間の翌日 {_after_label} は病院独自の休み", key=f"p_next_special_{P.key}",
-                               help="チェックすると、最終日の宿直は「翌日PM duty」の制限を受けません。")
+st.subheader(f"📅 休日と別途決定の日の設定 - {P.title()}")
+st.caption("**休日にする**：病院独自の休みなど、平日でも土日祝と同じ扱いにする日です。日直の枠ができ、日直・宿直とも休日回数に数えます。")
+st.caption("**別途決定**：年末年始など、別の方法で当番を決める日です。このアプリでは当直を決めず、先生の専用URLの画面でも灰色になってNGを入力できません。確定当直に入れた分だけは当直案に表示されます。")
 
-day_is_holiday = {i: period_is_holiday(P, i, custom_holidays) for i in range(1, P.n + 1)}
-labels = [P.label(i) for i in range(1, P.n + 1)]
-label_to_index = {lb: i for i, lb in enumerate(labels, 1)}
+cal_matrix = calendar.monthcalendar(year, month)
+custom_holidays = []
+locked_days = []   # 先生がNGを入力できない日（年末年始など）
 
-st.markdown("##### 👥 1つの枠を2名以上にする設定（任意）")
-_restored = st.session_state.get("p_restored") or {}
-_same_period = _restored and TouchokuPeriod(_restored.get("year", year), _restored.get("month", month), _restored.get("extra", 0)).key == P.key
-multi_df0 = pd.DataFrame(_restored.get("multi", []) if _same_period else [], columns=["日付", "当直枠", "人数"])
-multi_df = st.data_editor(
-    multi_df0, num_rows="dynamic", use_container_width=True, hide_index=True, height=140,
-    key=f"p_multi_{P.key}_{st.session_state.get('p_editor_gen', 0)}",
-    column_config={
-        "日付": st.column_config.SelectboxColumn("日付", options=labels),
-        "当直枠": st.column_config.SelectboxColumn("増員する枠", options=NIGHT_SHIFTS + DAY_SHIFTS),
-        "人数": st.column_config.NumberColumn("合計人数", min_value=2, max_value=10, step=1),
-    })
-multi_slots = {}
-for _, r in multi_df.iterrows():
-    lb, sl, cnt = clean_text(r.get("日付")), clean_text(r.get("当直枠")), r.get("人数")
-    if lb in label_to_index and sl in ALL_SHIFT_TYPES and pd.notna(cnt):
-        multi_slots[(label_to_index[lb], sl)] = int(cnt)
-
-# ------------------------------------------
-# 2. 確定当直
-# ------------------------------------------
-banner("📌", "確定当直（任意）", "すでに決まっている当直や、期間の前後の当直を入れます（勤務間隔の計算に使います）")
-fixed_cols = ["日付"] + ALL_SHIFT_TYPES
-if _same_period and _restored.get("fixed_csv"):
-    fixed0 = parse_fixed_csv(_restored["fixed_csv"].encode("utf-8"))
-else:
-    fixed0 = pd.DataFrame([[""] * len(fixed_cols)], columns=fixed_cols)
-fixed0 = fixed0.drop(columns=["平日/休日"], errors="ignore")
-for c in fixed_cols:
-    if c not in fixed0.columns:
-        fixed0[c] = ""
-fixed0 = fixed0[fixed_cols].apply(lambda col: col.map(lambda x: "" if pd.isna(x) or str(x).strip().lower() in ("nan", "none") else str(x)))
-st.caption("日付は「12/30」「1/2」のように入力します。担当する枠の欄に先生の名前を入れます（複数は「、」で区切る）。")
-fixed_df = st.data_editor(fixed0, num_rows="dynamic", use_container_width=True, hide_index=True, height=180,
-                          key=f"p_fixed_{P.key}_{st.session_state.get('p_editor_gen', 0)}",
-                          column_config={c: st.column_config.TextColumn(c) for c in fixed_cols})
-
-# ------------------------------------------
-# 3. 医師条件
-# ------------------------------------------
-banner("👩‍⚕️", "医師条件", "通常版と同じ条件の表です。回数は期間全体での回数として扱います")
-st.caption("通常版で途中保存した医師条件は、上の「👩‍⚕️ 通常版の医師条件を読み込む」で読み込めます。CSVのアップロードもできます。"
-           "希望日は「12/30」「1/2:A宿直」のように、月も入れて書きます。")
-up = st.file_uploader("医師条件（CSV）をアップロード", type="csv", key=f"p_staff_csv_{st.session_state.get('p_uploader_gen', 0)}")
-if up is not None:
-    if st.session_state.get("p_last_upload") != up.file_id:
-        for k in list(st.session_state.keys()):
-            if k.startswith(("p_ng_", "p_comment_", "p_import_")):
-                del st.session_state[k]
-        st.session_state["p_last_upload"] = up.file_id
-    base_df = parse_staff_csv(up.getvalue())
-elif _restored.get("staff_csv"):
-    base_df = parse_staff_csv(_restored["staff_csv"].encode("utf-8"))
-else:
-    base_df = pd.DataFrame(columns=["先生の名前", "備考（メモ・説明など自由記入）", "翌日PM duty", NG_COLUMN, REQUEST_COLUMN]
-                           + list(NUMERIC_DEFAULTS) + list(GROUP_CAP_COLUMNS))
-if "先生の名前" not in base_df.columns:
-    st.error("医師条件CSVに「先生の名前」の列がありません。")
-    st.stop()
-for c in ["備考（メモ・説明など自由記入）", "翌日PM duty", NG_COLUMN, REQUEST_COLUMN]:
-    if c not in base_df.columns:
-        base_df[c] = ""
-    base_df[c] = base_df[c].map(lambda x: "" if pd.isna(x) or str(x).lower() in ("nan", "none", "<na>") else str(x))
-for c in GROUP_CAP_COLUMNS:
-    if c not in base_df.columns:
-        base_df[c] = None
-    base_df[c] = pd.to_numeric(base_df[c], errors="coerce")
-staff_df = st.data_editor(
-    base_df, num_rows="dynamic", use_container_width=True, hide_index=True, height=320,
-    key=f"p_staff_{P.key}_{st.session_state.get('p_editor_gen', 0)}",
-    column_config={
-        NG_COLUMN: None,
-        REQUEST_COLUMN: st.column_config.TextColumn("希望日", help="例：12/30 または 1/2:A宿直。複数は半角カンマ区切り。"),
-        "希望優先度(数字が大きいほど優先)": st.column_config.NumberColumn("希望優先度"),
-        "備考（メモ・説明など自由記入）": st.column_config.TextColumn("備考"),
-    },
-    column_order=[c for c in base_df.columns if str(c).startswith("備考")] + [c for c in base_df.columns if not str(c).startswith("備考")],
-)
-staff_df = staff_df[staff_df["先生の名前"].map(clean_text) != ""].reset_index(drop=True)
-doctor_names = [clean_text(n) for n in staff_df["先生の名前"]]
-
-# ------------------------------------------
-# 4. NG日（先生方の専用URL・管理者の入力）
-# ------------------------------------------
-banner("🚫", "先生ごとのNG日", "先生方に専用URLから入力してもらい、取り込みます。管理者が直接入力することもできます")
-
-
-def ng_key(name, i):
-    return f"p_ng_{P.key}_{name}_{i}"
-
-
-# 医師条件の表にNG日が入っていれば、最初だけ読み込む
-for _, r in staff_df.iterrows():
-    nm = clean_text(r["先生の名前"])
-    if not any(ng_key(nm, i) in st.session_state for i in range(1, P.n + 1)):
-        vals = period_parse_ng(r.get(NG_COLUMN, ""), P)
-        for i in range(1, P.n + 1):
-            st.session_state[ng_key(nm, i)] = vals.get(i, "OK")
-
-
-def p_current_ng(name):
-    return {i: st.session_state.get(ng_key(name, i), "OK") for i in range(1, P.n + 1)
-            if st.session_state.get(ng_key(name, i), "OK") != "OK"}
-
-
-def p_import(submissions, names):
-    for name in names:
-        r = submissions.get(name)
-        if not r:
-            continue
-        submitted = period_parse_ng(r.get("NG日", ""), P)
-        undo = f"p_import_undo_{P.key}_{name}"
-        if undo not in st.session_state:
-            st.session_state[undo] = p_current_ng(name)
-        for i in range(1, P.n + 1):
-            st.session_state[ng_key(name, i)] = "OK" if i in locked_days else submitted.get(i, "OK")
-        comment = clean_text(r.get("コメント", ""))
-        if comment:
-            st.session_state[f"p_comment_{P.key}_{name}"] = (comment, r.get("保存日時", ""))
-        else:
-            st.session_state.pop(f"p_comment_{P.key}_{name}", None)
-    st.session_state["p_message"] = ("success", f"{len(names)}名分のNG日を取り込みました。")
-
-
-def p_undo_import(name):
-    before = st.session_state.pop(f"p_import_undo_{P.key}_{name}", None)
-    if before is None:
-        return
-    for i in range(1, P.n + 1):
-        st.session_state[ng_key(name, i)] = before.get(i, "OK")
-    st.session_state.pop(f"p_comment_{P.key}_{name}", None)
-    st.session_state["p_message"] = ("success", f"{name} 先生の取り込みを取り消しました。")
-
-
-if configured:
-    with st.container(border=True):
-        st.markdown("**📨 先生方からのNG日入力（専用URL）**　🔒 管理者専用")
-        if admin_logged_in("p_pw2"):
-            try:
-                settings = remote_settings()
-            except Exception as e:
-                st.error(f"スプレッドシートを読み込めませんでした。詳細：{e}")
-                settings = {}
-            active = settings.get("受付中の年月", "")
-            closed = settings.get("締め切り", "") == "True"
-            if active == P.key:
-                st.markdown(f"**{P.title()}：{'🔒 締め切り済み' if closed else '🟢 受付中'}**（締め切り日の表示：{settings.get('締め切り日', '') or '未設定'}）")
-            elif active:
-                _ap = TouchokuPeriod.from_key(active) if str(active).startswith(PERIOD_KEY_PREFIX) else None
-                st.warning(f"現在の受付は「{_ap.title() if _ap else str(active).replace('-', '年') + '月'}」です。"
-                           f"ここで受付を開始すると、その受付は終わり、先生方の画面は{P.title()}のカレンダーに切り替わります。")
-            else:
-                st.markdown("**現在、受付していません。**")
-            st.caption("先生方の専用URL・案内書類は、通常版と同じものをそのまま使えます（配り直しは不要です）。")
-            deadline = st.text_input("先生方に表示する締め切り日（例：12月10日）",
-                                     value=settings.get("締め切り日", "") if active == P.key else "", key="p_deadline")
-            hol_text = ",".join(map(str, sorted(custom_holidays)))
-            lock_text = ",".join(map(str, sorted(locked_days)))
-            b1, b2, b3 = st.columns(3)
-            if b1.button(f"{P.title()}の受付を開始する", key="p_open", use_container_width=True):
-                remote_sync_doctors([(n, clean_text(r.get("翌日PM duty", ""))) for n, (_, r) in zip(doctor_names, staff_df.iterrows())])
-                remote_save_settings(**{"受付中の年月": P.key, "特別休日": hol_text, "翌月1日特別休日": bool(next_special),
-                                        "締め切り": False, "締め切り日": deadline, "入力不可日": lock_text})
-                st.rerun()
-            if active == P.key:
-                if not closed and b2.button("🔒 締め切る", key="p_close", use_container_width=True):
-                    remote_save_settings(**{"締め切り": True})
-                    st.rerun()
-                if closed and b2.button("受付を再開する", key="p_reopen", use_container_width=True):
-                    remote_save_settings(**{"締め切り": False})
-                    st.rerun()
-                if b3.button("締め切り日・休日設定を更新", key="p_update", use_container_width=True):
-                    remote_save_settings(**{"特別休日": hol_text, "翌月1日特別休日": bool(next_special),
-                                            "締め切り日": deadline, "入力不可日": lock_text})
-                    st.rerun()
-                if (settings.get("特別休日", "") != hol_text or settings.get("入力不可日", "") != lock_text):
-                    st.warning("上のカレンダーの「休日にする」「別途決定」が、先生側の画面と違います。「締め切り日・休日設定を更新」を押してください。")
-
-                if st.button("🔄 最新の状態に更新", key="p_refresh"):
-                    remote_clear_cache()
-                    st.rerun()
-                submissions = remote_latest_submissions(P.key)
-                status = []
-                for n in doctor_names:
-                    r = submissions.get(n)
-                    status.append({"先生": n, "状況": "✅ 提出済み" if r else "⏳ 未提出",
-                                   "最終保存": r.get("保存日時", "") if r else "",
-                                   "NG日": (period_ng_summary(r.get("NG日", ""), P, custom_holidays) or "NG日なし") if r else "",
-                                   "コメント": r.get("コメント", "") if r else ""})
-                st.caption(f"提出済み {sum(1 for x in status if x['状況'].startswith('✅'))} / {len(status)} 名")
-                st.dataframe(pd.DataFrame(status), hide_index=True, use_container_width=True)
-                importable = [n for n in doctor_names if n in submissions]
-                if importable:
-                    sel_key = "p_import_sel_" + hashlib.sha256("|".join(importable).encode()).hexdigest()[:12]
-                    targets = [n for n in (st.multiselect("取り込む先生（×で外せます）", importable, default=importable, key=sel_key) or [])
-                               if n in importable]
-                    st.button(f"⬇️ 選んだ先生のNG日を取り込む（{len(targets)}名分）", key="p_import", type="primary",
-                              disabled=not targets, on_click=p_import, args=(submissions, targets))
-                    st.caption("取り込むと、その先生のNG日は提出内容に置き換わります。")
-                undoable = [n for n in doctor_names if f"p_import_undo_{P.key}_{n}" in st.session_state]
-                if undoable:
-                    u1, u2 = st.columns([3, 2])
-                    ut = u1.selectbox("取り込みを取り消す先生", undoable, key="p_undo_target")
-                    u2.button("↩️ 取り込みを取り消す", key="p_undo", on_click=p_undo_import, args=(ut,), use_container_width=True)
-                if submissions and st.checkbox("先生の提出をリセットする", key="p_reset_open"):
-                    rs_key = "p_reset_sel_" + hashlib.sha256("|".join(submissions).encode()).hexdigest()[:12]
-                    rs = [n for n in (st.multiselect("リセットする先生", list(submissions), key=rs_key) or []) if n in submissions]
-                    if rs and st.checkbox(f"選んだ{len(rs)}名の提出をリセットしてよい", key="p_reset_confirm"):
-                        if st.button(f"🗑️ {len(rs)}名の提出をリセットする", key="p_reset_do"):
-                            for n in rs:
-                                remote_reset_submission(P.key, n)
-                            st.rerun()
-
-st.markdown("##### ✍️ 管理者が直接入力する")
-if doctor_names:
-    sel = st.selectbox("NG日を入力する先生", doctor_names, key=f"p_ng_doctor_{P.key}")
-    srow = staff_df.iloc[doctor_names.index(sel)]
-    pm_weekdays = pm_duty_weekdays(srow.get("翌日PM duty", ""))
-    cm_ = st.session_state.get(f"p_comment_{P.key}_{sel}")
-    if cm_:
-        st.info(f"💬 先生からのコメント（{cm_[1]}）：{cm_[0]}")
-    vals = {i: st.session_state.get(ng_key(sel, i), "OK") for i in range(1, P.n + 1)}
-    days = period_ng_calendar_days(P, custom_holidays, next_special, pm_weekdays, vals, set(locked_days))
-    revision = hashlib.sha256(json.dumps([P.key, sel, days], ensure_ascii=False).encode()).hexdigest()
-    comp_key = f"p_ng_editor_{P.key}_{sel}"
-    response = horizontal_ng_component(HORIZONTAL_NG_HTML)(
-        days=days, mode="month", offset=P.start.weekday(), doctor=sel, version=revision,
-        key=comp_key, default=None, report_dirty=True, bulk_buttons=True)
-    seen = comp_key + "_last"
-    if isinstance(response, dict) and response.get("kind") == "apply" and response.get("token") != st.session_state.get(seen):
-        st.session_state[seen] = response.get("token")
-        new_values = response.get("values")
-        if response.get("version") == revision and isinstance(new_values, list) and len(new_values) == len(days):
-            changed = False
-            for i, (v, item) in enumerate(zip(new_values, days), 1):
-                if v in item["options"] and v != item["value"] and i not in locked_days:
-                    st.session_state[ng_key(sel, i)] = v
-                    changed = True
-            if changed:
-                st.rerun()
-    if p_current_ng(sel):
-        st.success("反映済みのNG日：" + period_ng_summary(period_ng_text(p_current_ng(sel), P), P, custom_holidays))
-
-# NG日を医師条件に書き込む（計算・途中保存に使う）
-staff_df = staff_df.copy()
-staff_df[NG_COLUMN] = [period_ng_text({i: v for i, v in p_current_ng(n).items() if i not in locked_days}, P) for n in doctor_names]
-
-# ------------------------------------------
-# 5. 作成
-# ------------------------------------------
-banner("🎯", "当直案の作成・確認", "人数が足りないときに優先して埋める枠を確認して、当直案を作ります")
-prio = {}
-pcols = st.columns(len(ALL_SHIFT_TYPES))
-for col, s in zip(pcols, NIGHT_SHIFTS + DAY_SHIFTS):
-    if f"p_prio_{s}" not in st.session_state:
-        st.session_state[f"p_prio_{s}"] = DEFAULT_SHORTAGE_PRIORITY[s]
-    prio[s] = col.selectbox(s, list(range(1, len(ALL_SHIFT_TYPES) + 1)), key=f"p_prio_{s}")
-st.caption("数字が小さい枠ほど、人数が足りないときに優先して埋めます。")
-
-comments = {k[len(f"p_comment_{P.key}_"):]: v for k, v in st.session_state.items() if k.startswith(f"p_comment_{P.key}_")}
-
-snapshot = {
-    "year": year, "month": month, "extra": extra,
-    "holidays": sorted(custom_holidays), "locked": sorted(locked_days), "next_special": bool(next_special),
-    "multi": [[P.label(i), s, int(c)] for (i, s), c in multi_slots.items()],
-    "fixed_csv": fixed_df.to_csv(index=False), "staff_csv": staff_df.to_csv(index=False),
-    "priority": {k: int(v) for k, v in prio.items()},
-    "comments": {n: list(v) for n, v in comments.items()},
+# 特別休日カレンダーの見た目。key を付けたコンテナ（st-key-〜）を起点に指定しているので、
+# 他の部品には影響しない。
+st.markdown("""
+<style>
+.st-key-special_holiday_calendar [data-testid="stHorizontalBlock"] {
+ display:grid !important;
+ grid-template-columns:repeat(7,minmax(0,1fr)) !important;
+ gap:6px !important;
+ width:100% !important;
 }
-if p_save_clicked:
+.st-key-special_holiday_calendar [data-testid="stHorizontalBlock"] > :is([data-testid="stColumn"],[data-testid="column"]) {
+ width:100% !important; min-width:0 !important;
+ flex:none !important;
+}
+.st-key-special_holiday_calendar [class*="st-key-special_day_"] {
+ height:138px !important; min-height:138px !important;
+ border:1px solid #d6dce5; border-radius:7px;
+ padding:8px 3px !important; gap:6px !important;
+ box-sizing:border-box;
+}
+.st-key-special_holiday_calendar [data-testid="stElementContainer"]:has([data-testid="stCheckbox"]),
+.st-key-special_holiday_calendar .element-container:has([data-testid="stCheckbox"]) {
+ width:100% !important; align-self:stretch !important;
+}
+.st-key-special_holiday_calendar [data-testid="stCheckbox"] {
+ width:100% !important; display:flex !important; justify-content:center !important;
+}
+.st-key-special_holiday_calendar [data-testid="stCheckbox"] label {
+ display:flex !important; justify-content:center !important; gap:3px; width:fit-content !important; max-width:100%; margin-left:auto !important; margin-right:auto !important;
+ min-width:0;
+}
+.st-key-special_holiday_calendar [data-testid="stCheckbox"] label p {
+ font-size:12px; line-height:1.2; overflow-wrap:anywhere;
+}
+.st-key-special_holiday_calendar [data-testid="stCheckbox"] label > span {
+ flex-shrink:0;
+}
+@media(max-width:600px) {
+ .st-key-special_holiday_calendar [data-testid="stHorizontalBlock"] {gap:3px !important}
+ .st-key-special_holiday_calendar [class*="st-key-special_day_"] {
+  height:128px !important; min-height:128px !important; padding:6px 1px !important;
+ }
+ .st-key-special_holiday_calendar [data-testid="stCheckbox"] label p {font-size:10px}
+ .st-key-special_holiday_calendar [data-testid="stCheckbox"] label {gap:1px}
+}
+</style>
+""", unsafe_allow_html=True)
+
+with st.container(key="special_holiday_calendar"):
+    # 曜日のヘッダー行
+    cols = st.columns(7)
+    for i, w in enumerate(WEEKDAYS_JA):
+        color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
+        cols[i].markdown(
+            f"<div style='color: {color}; font-weight: bold; text-align: center; padding: 4px 0;'>{w}</div>",
+            unsafe_allow_html=True
+        )
+
+    # 日付とチェックボックス（1日ごとの格子セルは平日・休日・空欄すべて同じ高さ）
+    for week in cal_matrix:
+        cols = st.columns(7)
+        for i, day in enumerate(week):
+            with cols[i]:
+                with st.container(key=f"special_day_{year}_{month}_{week[0]}_{i}"):
+                    if day == 0:
+                        st.markdown("<div style='height: 72px;'></div>", unsafe_allow_html=True)
+                        continue
+
+                    date_obj = datetime.date(year, month, day)
+                    is_weekend_or_hol = date_obj.weekday() >= 5 or jpholiday.is_holiday(date_obj)
+                    day_color = "#ff4b4b" if is_weekend_or_hol else "inherit"
+
+                    st.markdown(
+                        f"<div style='width:100%;text-align:center;color:{day_color};font-weight:600;"
+                        f"font-size:0.95rem;line-height:1.35;margin:0 0 8px 0;padding:0;'>{_day_label(day)}</div>",
+                        unsafe_allow_html=True
+                    )
+
+                    if is_weekend_or_hol:
+                        st.markdown(
+                            "<div style='width:100%;height:2.35rem;display:flex;align-items:center;"
+                            "justify-content:center;color:#ff4b4b;font-size:0.85rem;line-height:1.2;"
+                            "margin:0;padding:0;'>休</div>",
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        if st.checkbox("休日にする", key=f"hol_{year}_{month}_{day}"):
+                            custom_holidays.append(day)
+                    # 年末年始など、別の方法で当番を決める日（先生側でNGを入力できなくする）
+                    if st.checkbox("別途決定", key=f"lock_{year}_{month}_{day}",
+                                   help="年末年始など、別の方法で当番を決める日です。この日は当直案を作らず、先生の専用URLの画面でもNGを入力できなくなります。"):
+                        locked_days.append(day)
+
+next_month_first = datetime.date(year, month, calendar.monthrange(year, month)[1]) + datetime.timedelta(days=1)
+next_month_first_label = f"{next_month_first.year}/{next_month_first.month}/1（{WEEKDAYS_JA[next_month_first.weekday()]}）"
+month_last = next_month_first - datetime.timedelta(days=1)
+month_last_label = f"{month_last.month}/{month_last.day}（{WEEKDAYS_JA[month_last.weekday()]}）"
+# 翌月1日が休みかどうか：月末の宿直に「翌日PM duty」の制限をかけるかどうかの判断に使う
+next_month_first_label = f"{next_month_first.month}/{next_month_first.day}（{WEEKDAYS_JA[next_month_first.weekday()]}）"
+st.markdown(f"**期間の翌日の扱い**（最終日 {month_last_label} の宿直に、翌日PM dutyの制限をかけるかどうか）")
+if next_month_first.weekday() >= 5 or jpholiday.is_holiday(next_month_first):
+    # 土日祝は自動で休日扱いになるため、チェックボックスは表示しない
+    _kind = "祝日" if jpholiday.is_holiday(next_month_first) else "土日"
+    st.caption(f"期間の翌日 {next_month_first_label} は{_kind}なので、自動で休日として扱います（チェックは不要です）。"
+               f"翌日が休みなので、最終日 {month_last_label} の宿直は「翌日PM duty」の制限を受けません。")
+    next_month_special_holiday = False
+else:
+    next_month_special_holiday = st.checkbox(
+        f"期間の翌日 {next_month_first_label} は病院独自の休み",
+        key=f"next_month_special_holiday_{year}_{month}",
+        help="平日でも病院が休みの場合だけチェックしてください。"
+    )
+    st.caption(f"期間の翌日 {next_month_first_label} は平日です。病院が休みの場合だけチェックしてください。"
+               f"チェックすると、最終日 {month_last_label} の宿直は「翌日PM duty」の制限を受けません。")
+
+holiday_total_placeholder = st.empty()
+
+st.divider()
+
+st.subheader("👥 1つの枠を2名以上にする設定（任意）")
+st.info("通常は各枠1名です。増員する場合だけ行を追加し、日付・枠・合計人数を選んでください。2名体制にしたい場合は「2」を入力します。")
+st.caption("日直の増員は休日扱いの日に設定してください。平日に日直を設ける場合は、先に上のカレンダーで「休日にする」にチェックを入れます。")
+
+_, num_days = calendar.monthrange(year, month)
+date_options = [_day_label(d) for d in range(1, num_days + 1)]
+_label_to_day = {_day_label(d): d for d in range(1, num_days + 1)}
+
+multi_df_template = pd.DataFrame(columns=["日付", "当直枠", "人数"])
+if restored_state and restored_state.get("multi") and (int(restored_state["year"]), int(restored_state["month"]), int(restored_state.get("extra", 0))) == (year, month, extra):
+    multi_df_template = pd.DataFrame(restored_state["multi"], columns=["日付", "当直枠", "人数"])
+def clear_multi_slots(y, m):
+    """増員設定をすべて消す（表を空の状態で作り直す）。"""
+    st.session_state["multi_editor_gen"] = st.session_state.get("multi_editor_gen", 0) + 1
+    rs = st.session_state.get("restored_state")
+    if rs and (int(rs.get("year", 0)), int(rs.get("month", 0))) == (y, m):
+        st.session_state["restored_state"] = {**rs, "multi": []}
+
+
+# 入力した内容を空欄に戻せるよう、必須の指定はしない（日付・枠・人数のどれかが空の行は使わない）
+edited_multi_df = st.data_editor(
+    multi_df_template,
+    num_rows="dynamic",
+    use_container_width=True,
+    hide_index=True,
+    height=150,
+    key=f"multi_editor_{year}_{month}_{st.session_state.get('multi_editor_gen', 0)}",
+    column_config={
+        "日付": st.column_config.SelectboxColumn("日付を選択", options=date_options),
+        "当直枠": st.column_config.SelectboxColumn("増員する枠を選択", options=NIGHT_SHIFTS + DAY_SHIFTS),
+        "人数": st.column_config.NumberColumn("合計人数", help="追加人数ではなく、その枠に配置する合計人数です。例：1名から2名体制にする場合は2。", min_value=2, max_value=10, step=1)
+    }
+)
+st.caption("行を消すには、行の左端をクリックして選び、表の右上のごみ箱のマークを押します。セルを選んで Delete キーで空欄にすることもできます（空欄のある行は使いません）。")
+st.button("増員設定をすべて消す", key="clear_multi", on_click=clear_multi_slots, args=(year, month))
+
+multi_slots_dict = {}
+for _, row in edited_multi_df.iterrows():
+    d_str = clean_text(row.get("日付", ""))
+    s_val = clean_text(row.get("当直枠", ""))
+    c_val = row.get("人数")
+    if d_str and s_val and s_val in ALL_SHIFT_TYPES and pd.notna(c_val):
+        try:
+            d_val = _label_to_day[d_str]
+            multi_slots_dict[(d_val, s_val)] = int(c_val)
+        except (ValueError, TypeError, KeyError):
+            pass
+
+
+# ==========================================
+# 2. 枠数の集計
+# ==========================================
+shift_counts = {s: 0 for s in NIGHT_SHIFTS + DAY_SHIFTS}
+for d in range(1, num_days + 1):
+    if d in locked_days:
+        continue   # 「別途決定」の日は別の方法で決めるので、このアプリの枠数に数えない
+    is_hol = is_holiday_date(datetime.date(year, month, d), year, month, custom_holidays)
+    for s in NIGHT_SHIFTS:
+        shift_counts[s] += multi_slots_dict.get((d, s), 1)
+    if is_hol:
+        for s in DAY_SHIFTS:
+            shift_counts[s] += multi_slots_dict.get((d, s), 1)
+
+total_slots = sum(shift_counts.values())
+holiday_total_placeholder.metric("🏥 必要な総当直枠数", f"{total_slots} 枠")
+
+# ==========================================
+# 3. メイン画面：データの読み込み＆画面入力
+# ==========================================
+# あまり使わない項目なので、ふだんは折りたたんでおく（途中保存から読み込んだ確定当直があるときは開く）
+def _fixed_csv_has_entries(text):
+    """途中保存の確定当直に、空でない入力が1つでもあるか。"""
     try:
-        p_state_save(snapshot)
-        st.success(f"途中保存しました（{remote_now()}）。")
-    except Exception as e:
-        st.error(f"途中保存できませんでした。詳細：{e}")
+        df = parse_fixed_csv(text.encode("utf-8"))
+    except Exception:
+        return False
+    return any(str(v).strip() not in ("", "nan", "None") for v in df.drop(columns=["平日/休日"], errors="ignore").values.ravel())
 
-signature = hashlib.sha256(json.dumps(snapshot, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-if st.button(f"🚀 {P.title()}の当直案を作成", key="p_create", type="primary"):
-    with st.spinner("当直案を計算中…（最大75秒）"):
+
+_has_fixed = bool(restored_state and restored_state.get("fixed_csv") and _fixed_csv_has_entries(restored_state["fixed_csv"]))
+with st.container(key="fixed_section"), st.expander("📅 先月今月来月の確定当直（押すと開きます）", expanded=_has_fixed):
+    st.info("先月・今月・来月の、担当者が決まっている当直を入力してください。先月末の勤務は、月初の勤務間隔の確認に使います。入力がなければ、この項目は飛ばせます。")
+    with (st.popover("確定当直の入力例と扱い") if hasattr(st, "popover") else st.container()):
+        st.markdown("""
+- CSVのアップロードと、下の表への直接入力のどちらでも入力できます。
+- 日付は `2026/10/1` または `10/1` の形式で入力します。
+- 担当する枠の欄に、医師条件と同じ名前を入力します。複数人の場合は `佐藤、鈴木` のように「、」で区切ります。
+- 医師名の区切りには「、」を使ってください。名前に含まれる空白は区切りません。医師条件と同じ表記にしてください。
+- 未確定の枠は空欄で構いません。
+- 今月の平日に日直を入力する場合は、先に上のカレンダーでその日を「休日にする」にしてください。
+- 「別途決定」にした日（年末年始など）の当番が決まったら、ここに入れておくと、当直案と一覧に表示され、前後の勤務間隔の計算にも使われます。
+- 今月の確定勤務はNG日・曜日制限より優先され、回数上限も必要に応じて緩められます。確定勤務を基準に追加勤務の間隔を守ります。確定勤務同士が近すぎる場合は、確定内容を維持して警告します。
+
+**今月の同じ日・同じ枠を指定した場合、確定当直への入力と「希望優先度100以上」での指定は、どちらも固定され、計算上の扱いは基本的に同じです。両方に入力する必要はありません。**
+    """)
+
+    fixed_columns = ["日付"] + ALL_SHIFT_TYPES   # 平日か休日かは、上のカレンダーで自動的に決まるので入力しない
+    fixed_template_df = pd.DataFrame(columns=fixed_columns)
+    fixed_csv_template = fixed_template_df.to_csv(index=False).encode('utf-8-sig')
+
+    col_dl_fixed, col_ul_fixed = st.columns(2)
+    with col_dl_fixed:
+        st.write("▼ Excelで一括入力したい場合")
+        st.download_button(
+            label="📥 ひな形（CSV）をダウンロード",
+            data=fixed_csv_template,
+            file_name="確定当直_ひな形.csv",
+            mime="text/csv",
+        )
+    with col_ul_fixed:
+        fixed_file = st.file_uploader("確定当直（CSV）をアップロード", type="csv", key=f"fixed_csv_{st.session_state.get('uploader_gen', 0)}")
+
+    if fixed_file is not None:
         try:
-            res = period_generate_shift(P, staff_df, custom_holidays, multi_slots, fixed_df, next_special, prio, locked_days)
-            st.session_state["p_result"] = (signature, P.key, res)
+            base_fixed_df = parse_fixed_csv(fixed_file.getvalue())
         except Exception as e:
-            st.session_state.pop("p_result", None)
-            st.error(f"当直計算中にエラーが発生しました。詳細：{e}")
-
-stored = st.session_state.get("p_result")
-if stored and stored[1] == P.key:
-    if stored[0] != signature:
-        st.warning("条件が変わりました。もう一度「当直案を作成」を押してください。下の結果は前回の条件のものです。")
-    df_result, success, messages, past, future = stored[2]
-    if df_result is None:
-        show_schedule_notice(None, messages)
+            st.error(f"確定当直ファイルの読み込みに失敗しました。詳細: {e}")
+            st.stop()
+    elif restored_state and restored_state.get("fixed_csv"):
+        base_fixed_df = parse_fixed_csv(restored_state["fixed_csv"].encode("utf-8"))
     else:
-        matrix_days, matrix_rows = period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_special, comments=comments)
-        alerts = count_alert_messages(matrix_rows, MATRIX_COUNT_ALERTS)
-        show_schedule_notice(df_result, messages, alerts)
+        base_fixed_df = pd.DataFrame(columns=fixed_columns)
+        base_fixed_df.loc[0] = ["" for _ in range(len(fixed_columns))]
+
+    if "日付" not in base_fixed_df.columns:
+        st.error("確定当直CSVに「日付」の列がありません。ひな形の列名を確認してください。")
+        st.stop()
+    # 日付も普通の列として編集できるようにする（行の見出し＝インデックスにすると、既存の行の日付が直せないため）。
+    # 空の列は数字の列とみなされて文字が入らないことがあるので、すべて文字の列にそろえる
+    # 以前のひな形にあった「平日/休日」の列は使わないので外す（入っていても読み込める）
+    base_fixed_df = base_fixed_df.drop(columns=["平日/休日"], errors="ignore").copy()
+    for _c in base_fixed_df.columns:
+        base_fixed_df[_c] = base_fixed_df[_c].apply(
+            lambda x: "" if pd.isna(x) or str(x).strip().lower() in ("nan", "none", "<na>") else str(x)).astype(str)
+    _date_first = ["日付"] + [c for c in base_fixed_df.columns if c != "日付"]
+    base_fixed_df = base_fixed_df[_date_first].reset_index(drop=True)
+
+    st.write("表のセルをクリックして、日付（例：11/1）と担当医師名を入力・編集できます。行は下の「＋」で追加できます。")
+    edited_fixed_df = st.data_editor(
+        base_fixed_df, num_rows="dynamic", use_container_width=True, height=200, hide_index=True,
+        column_config={c: st.column_config.TextColumn(c, help="例：11/1 または 2026/11/1" if c == "日付" else None)
+                       for c in base_fixed_df.columns},
+    )
+    edited_fixed_df = edited_fixed_df.reset_index(drop=True)
+
+section_banner("👩‍⚕️", "医師条件の読み込み・入力", "先生ごとの回数・間隔・希望日を入力します", "必須", anchor="sec-staff")
+st.info("下の表に医師ごとの条件を入力してください。CSVを使う場合は、ひな形をダウンロードして編集し、アップロードします。NG日は、この下の「🚫 先生ごとのNG日設定」で設定します。")
+st.caption("最初に表示される「型1」〜「型9」は、よくある条件の入力例です。名前の欄が型の中身です（例：型4＝A宿直・A日直・外来日直に入る先生）。実際の先生の名前に置き換え、回数などを調整して使ってください。行は「＋」で増やせます。")
+
+# --- 前回の医師条件を引き継ぐ（管理用パスワードが必要） ---
+if remote_is_configured():
+    _co_msg = st.session_state.pop("carry_over_message", None)
+    _co_label = "📋 前回の医師条件を引き継ぐ（NG日・希望日・コメントは空にします）" + "\u200b" * st.session_state.get("carry_over_gen", 0)
+    with (st.popover(_co_label) if hasattr(st, "popover") else st.expander(_co_label, expanded=False)):
+        if admin_logged_in("carry_over_pw"):
+            _co_at, _co_data = _normal_work_state_info()   # 通常版で途中保存した医師条件
+            if _co_data and _co_data.get("staff_csv"):
+                st.write(f"通常版の途中保存：**{_co_at}**（{_co_data.get('year')}年{_co_data.get('month')}月の作業）")
+                st.caption(f"この医師条件（先生の名前・回数・勤務間隔・翌日PM duty・希望優先度・備考など）を、{year}年{month}月用に引き継ぎます。"
+                           "月ごとに変わる NG日・希望日・先生からのコメントは空になります。今の画面の医師条件は置き換わります。")
+                if (int(_co_data.get("year", 0)), int(_co_data.get("month", 0))) == (year, month):
+                    st.warning(f"途中保存は{year}年{month}月（今選んでいる月と同じ）の作業です。NG日なども含めて続きから作業する場合は、"
+                               "上の帯の「📂 前回の作業の続きから始める」を使ってください。")
+                st.button(f"{year}年{month}月用に医師条件を引き継ぐ", key="carry_over_do", type="primary",
+                          on_click=carry_over_staff, args=(year, month))
+            else:
+                st.caption("まだ途中保存された医師条件がありません。上の帯の「💾 作業を途中保存する」で保存すると、翌月に引き継げます。")
+        else:
+            st.caption("引き継ぎには管理用パスワードが必要です。")
+    if _co_msg:
+        (st.success if _co_msg[0] == "success" else st.error)(_co_msg[1])
+with st.expander("入力例：曜日・希望日・備考", expanded=False):
+    st.markdown("""
+| 項目 | 入力方法・意味 |
+| --- | --- |
+| 翌日PM duty | `水,木` のように半角カンマで区切ります。翌日PMにdutyがある曜日を入力します（例：木曜PMにdutyがある場合は「水」）。原則としてその曜日の宿直を外しますが、翌日が休日なら宿直に入る場合があります。日直は対象外です。 |
+| 希望日 | `10,15` はその日のいずれかの枠、`10:A宿直` はその枠を希望します。複数の希望は半角カンマで区切ります。日直は休日（または「休日にする」にした日）だけ指定できます。「別途決定」の日の希望は使いません。 |
+| 指定できる枠 | A宿直・B宿直・外来宿直・A日直・B日直・外来日直。表記を一致させてください。 |
+| 備考 | 管理用のメモです。「学会」などと書いても計算条件には反映されません。休みはNG日で指定してください。 |
+
+曜日にかかわらず勤務できない日は、下の「🚫 先生ごとのNG日設定」のカレンダーでNGにします。
+平日は「宿直」のボタン、休日は「日直」「宿直」のボタンを押してNGにします（休日に終日入れない場合は両方押します）。
+    """)
+with st.expander("回数・勤務間隔の数え方", expanded=False):
+    st.markdown("""
+| 項目 | 意味・入力例 |
+| --- | --- |
+| 最低空ける日数 | 勤務と次の勤務の間に空ける日数です。5日なら、10日の次は16日以降です。 |
+| 月間最小回数 | できるだけ確保したい回数です。条件によっては、この回数に届かないことがあります。 |
+| 月間最大回数 | 日直と宿直を合わせた月間の上限です。 |
+| 休日最大回数 | 土日祝日と「休日にする」にした日に担当する、日直と宿直の合計上限です。 |
+| 宿直上限・日直上限 | A・B・外来を合わせた宿直（日直）の月間の上限です。空欄なら制限しません。 |
+| 各枠の上限 | A宿直など、それぞれの枠を担当する月間の上限です。 |
+
+1つの枠を1回と数えます。確定指定により同じ日に日直と宿直を担当する場合は2回です。
+月間最小回数は、月間最大回数以下に設定してください。
+確定当直や希望優先度100以上の希望がある場合は、上限の例外があります。自動追加勤務の間隔は守り、確定勤務同士の間隔違反は警告します。
+    """)
+with st.expander("希望優先度：通常の希望と、100以上の特別な設定", expanded=False):
+    st.markdown("""
+- **通常は「1」**を使用します。1〜99は、数字が大きいほど希望を優先しますが、NG日・回数上限・勤務間隔などの範囲内で割り当てます。
+- **100以上は、その医師の希望日すべてを確定扱いにする設定**です。「できれば入りたい」という用途には使わないでください。
+- 確定扱いの日はNG日・曜日制限より優先され、回数上限が必要に応じて緩められます。その日と自動追加勤務の間隔は守ります。確定勤務同士の間隔違反は警告します。
+- 一部の勤務だけを確定させたい場合は、上の「📅 先月今月来月の確定当直」へ入力し、希望優先度は通常の値にしてください。
+- 指定の誤りや条件の組み合わせによっては作成できない場合があります。作成後に確定勤務が反映されているか確認してください。
+
+**今月の同じ日・同じ枠を指定した場合、確定当直への入力と「希望優先度100以上」での指定は、どちらも固定され、計算上の扱いは基本的に同じです。両方に入力する必要はありません。**
+    """)
+
+# 入力例：よくある9つの型（名前の欄に型の中身が分かる名前を入れる）。実際の先生に置き換えて使う
+# 型2（A日直だけ・希望日を確定）の希望日は、選んでいる月の最初の休日2日にする（平日の日直は指定できないため）
+# （「休日にする」のチェックで例の表が作り直されないよう、土日祝だけで決める）
+_tmpl_hols = [d for d in range(1, calendar.monthrange(year, month)[1] + 1)
+              if datetime.date(year, month, d).weekday() >= 5 or jpholiday.is_holiday(datetime.date(year, month, d))][:2]
+_tmpl_wish2 = ",".join(f"{d}:A日直" for d in _tmpl_hols)
+_tmpl_rows = [
+    # 名前, 備考, 希望日, 希望優先度, 最低空ける日数, 月間最小, 月間最大, 休日最大, 宿直上限, 日直上限, A宿直, B宿直, 外来宿直, A日直, B日直, 外来日直
+    ("型1_A宿直・A日直", "Aの宿直・日直だけ。月1回", "", 1, 5, 1, 1, 1, 3, 3, 1, 0, 0, 1, 0, 0),
+    ("型2_A日直のみ・希望日確定", "決めた日のA日直だけ（希望優先度100で確定）", _tmpl_wish2, 100, 0, 0, 2, 2, 3, 3, 0, 0, 0, 2, 0, 0),
+    ("型3_外来日直のみ", "外来日直だけ。月1回まで", "", 1, 5, 0, 1, 4, 3, 3, 0, 0, 0, 0, 0, 1),
+    ("型4_A宿直・A日直・外来日直", "Aの宿直・日直と外来日直。月2〜3回", "", 1, 5, 2, 3, 1, 3, 3, 3, 0, 0, 1, 0, 1),
+    ("型5_A・B宿直・A日直・外来日直", "型4にB宿直を追加。月2〜3回", "", 1, 5, 2, 3, 1, 3, 3, 3, 3, 0, 1, 0, 1),
+    ("型6_外来宿直以外すべて", "型5にB日直を追加。月3〜4回", "", 1, 5, 3, 4, 2, 3, 3, 3, 3, 0, 1, 1, 2),
+    ("型7_全枠", "6枠すべて。月3〜4回", "", 1, 5, 3, 4, 2, 3, 3, 3, 3, 3, 1, 1, 2),
+    ("型8_日直のみ", "A・B・外来の日直だけ。月1〜3回", "", 1, 4, 1, 3, 3, 3, 3, 0, 0, 0, 3, 3, 3),
+    ("型9_A以外", "B・外来の宿直と日直。月3〜4回", "", 1, 4, 3, 4, 2, 3, 3, 0, 3, 3, 0, 3, 3),
+]
+_tmpl_cols = ["先生の名前", "備考（メモ・説明など自由記入）", REQUEST_COLUMN, "希望優先度(数字が大きいほど優先)",
+              "最低空ける日数", "月間最小回数", "月間最大回数", "休日最大回数", "宿直上限", "日直上限",
+              "A宿直上限", "B宿直上限", "外来宿直上限", "A日直上限", "B日直上限", "外来日直上限"]
+template_data = {c: [r[k] for r in _tmpl_rows] for k, c in enumerate(_tmpl_cols)}
+template_data["翌日PM duty"] = [""] * len(_tmpl_rows)
+template_data[NG_COLUMN] = [""] * len(_tmpl_rows)
+# 列の並びは、これまでのひな形と同じにする
+template_data = {c: template_data[c] for c in ["先生の名前", "備考（メモ・説明など自由記入）", "翌日PM duty", NG_COLUMN, REQUEST_COLUMN,
+                                               "希望優先度(数字が大きいほど優先)", "最低空ける日数", "月間最小回数", "月間最大回数",
+                                               "休日最大回数", "宿直上限", "日直上限", "A宿直上限", "B宿直上限", "外来宿直上限",
+                                               "A日直上限", "B日直上限", "外来日直上限"]}
+df_template = pd.DataFrame(template_data)
+# 保存用CSVと同じUTF-8（BOM付き）に統一。Excelでもそのまま開ける。
+csv_template = df_template.to_csv(index=False).encode('utf-8-sig')
+
+col_dl, col_ul = st.columns(2)
+with col_dl:
+    st.write("▼ Excelで一括入力したい場合")
+    st.download_button(
+        label="📥 ひな形（CSV）をダウンロード",
+        data=csv_template,
+        file_name="医師条件_ひな形.csv",
+        mime="text/csv",
+    )
+with col_ul:
+    uploaded_file = st.file_uploader("医師条件（以前ダウンロードしたCSVも可）をアップロード", type="csv", key=f"staff_csv_{st.session_state.get('uploader_gen', 0)}")
+
+if uploaded_file is not None:
+    if st.session_state.get('last_uploaded_file_id') != uploaded_file.file_id:
+        for key in list(st.session_state.keys()):
+            if key.startswith("ng_"):
+                del st.session_state[key]
+        st.session_state['last_uploaded_file_id'] = uploaded_file.file_id
+    try:
+        base_df = parse_staff_csv(uploaded_file.getvalue())
+    except Exception as e:
+        st.error(f"医師条件CSVを読み込めませんでした。詳細: {e}")
+        st.stop()
+elif restored_state and restored_state.get("staff_csv"):
+    base_df = parse_staff_csv(restored_state["staff_csv"].encode("utf-8"))
+else:
+    base_df = df_template.copy()
+
+if "先生の名前" not in base_df.columns:
+    st.error("医師条件CSVに「先生の名前」の列がありません。ひな形の列名を確認してください。")
+    st.stop()
+# 宿直上限・日直上限の列がない（以前の）CSVでも、「休日最大回数」の右に空欄の列を足す（空欄＝制限なし）
+for _gc in reversed(list(GROUP_CAP_COLUMNS)):
+    if _gc not in base_df.columns:
+        _pos = list(base_df.columns).index("休日最大回数") + 1 if "休日最大回数" in base_df.columns else len(base_df.columns)
+        base_df.insert(_pos, _gc, None)
+    base_df[_gc] = pd.to_numeric(base_df[_gc], errors="coerce")
+base_df = base_df.set_index("先生の名前")
+
+if "希望優先度(数字が大きいほど優先)" in base_df.columns:
+    base_df["希望優先度(数字が大きいほど優先)"] = pd.to_numeric(base_df["希望優先度(数字が大きいほど優先)"], errors='coerce')
+
+text_cols = ["翌日PM duty", NG_COLUMN, REQUEST_COLUMN, "備考（メモ・説明など自由記入）"]
+for c in text_cols:
+    if c in base_df.columns:
+        base_df[c] = base_df[c].apply(lambda x: "" if pd.isna(x) or str(x).lower() in ["nan", "none", "<na>"] else str(x))
+
+st.markdown("### 👩‍⚕️ 医師条件の入力・編集")
+st.write("セルをクリックして編集できます。列名にマウスを合わせると、入力例や説明が表示されます。医師名は重複しない表記にしてください。")
+
+cap_help = "を担当する月間の上限です。確定指定がある場合は例外があります。"
+edited_df = st.data_editor(
+    base_df,
+    num_rows="dynamic",
+    use_container_width=True,
+    height=300,
+    column_config={
+        "翌日PM duty": st.column_config.TextColumn(
+            "翌日PM duty",
+            help="例：木曜PMにdutyがある場合は水。複数は水,木のように入力。翌日が休日なら宿直に入る場合があります。日直は対象外です。確実に外す日はカレンダーでNGを指定してください。"
+        ),
+        "最低空ける日数": st.column_config.NumberColumn("最低空ける日数", help="勤務間の空き日数。5日なら10日の次は16日以降。確定勤務と追加勤務の間隔も守ります。確定勤務同士の違反は警告します。"),
+        "月間最小回数": st.column_config.NumberColumn("月間最小回数（目標）", help="できるだけ確保したい回数です。条件によっては未達になります。月間最大回数以下にしてください。"),
+        "月間最大回数": st.column_config.NumberColumn("月間最大回数", help="日直・宿直を合わせた上限です。確定指定がある場合は例外があります。"),
+        "休日最大回数": st.column_config.NumberColumn("休日最大回数", help="土日祝と「休日にする」にした日の、日直と宿直の合計上限です。1枠を1回と数えます。"),
+        "宿直上限": st.column_config.NumberColumn("宿直上限", help="A宿直・B宿直・外来宿直を合わせた月間の上限です。空欄なら制限なし。確定指定がある場合は例外があります。", min_value=0, step=1),
+        "日直上限": st.column_config.NumberColumn("日直上限", help="A日直・B日直・外来日直を合わせた月間の上限です。空欄なら制限なし。確定指定がある場合は例外があります。", min_value=0, step=1),
+        **{s + "上限": st.column_config.NumberColumn(s + "上限", help=s + cap_help) for s in ALL_SHIFT_TYPES},
+        NG_COLUMN: None,
+        REQUEST_COLUMN: st.column_config.TextColumn(
+            "希望日",
+            help="例：10,15 または 10:A宿直。複数は半角カンマ区切り。日直は休日（または「休日にする」にした日）だけ指定できます。通常の希望は各種条件の範囲内で割り当てます。"
+        ),
+        "希望優先度(数字が大きいほど優先)": st.column_config.NumberColumn(
+            "希望優先度",
+            help="通常は1。1〜99は数字が大きいほど優先。100以上はこの医師の希望日すべてが確定扱いになり、NG・上限の例外になります。自動追加勤務との間隔は守ります。"
+        ),
+        "備考（メモ・説明など自由記入）": st.column_config.TextColumn(
+            "備考",
+            help="管理用メモです。ここに書いた内容は計算に反映されません。セルをダブルクリックすると全文が表示され、編集できます。表の下の「備考の全文を見る」でも確認できます。",
+        )
+    },
+    # 備考を名前のすぐ右に置き、幅を広くして読みやすくする
+    column_order=[c for c in base_df.columns if str(c).startswith("備考")] + [c for c in base_df.columns if not str(c).startswith("備考")],
+
+)
+
+staff_df = edited_df.reset_index()
+
+# 備考が長くて表の中で読み切れない場合のために、全文の一覧を出す
+_note_cols = [c for c in staff_df.columns if str(c).strip().startswith("備考")]
+_notes = [(clean_text(r.get("先生の名前", "")), "　".join(clean_text(r.get(c, "")) for c in _note_cols if clean_text(r.get(c, ""))))
+          for _, r in staff_df.iterrows()]
+_notes = [(n, t) for n, t in _notes if n and t]
+if _notes:
+    with st.expander(f"📝 備考の全文を見る（{len(_notes)}名）", expanded=False):
+        # st.table は長い文章を折り返して全部表示する
+        st.table(pd.DataFrame(_notes, columns=["先生の名前", "備考"]).set_index("先生の名前"))
+staff_df, staff_input_errors = validate_staff_inputs(staff_df, year, month)
+if staff_input_errors:
+    show_input_errors(staff_input_errors)
+    if create_bar_request:
+        create_bar_show("<div class='cb-res bad'>⚠ 医師条件の入力に誤りがあります。赤い表示を確認してください。</div>")
+    st.stop()
+
+st.markdown("### ⚖️ 必要枠数と担当可能回数の目安")
+st.caption("月間最大回数の合計と必要枠数を比較しています。プラスでも、NG日・勤務間隔・枠別上限などによっては埋まらない場合があります。確定指定で追加される枠や上限の例外は、この目安に含まれません。")
+
+if "月間最大回数" in staff_df.columns:
+    total_max_capacity = int(pd.to_numeric(staff_df["月間最大回数"], errors='coerce').fillna(0).sum())
+    margin = total_max_capacity - total_slots
+    c1, c2, c3 = st.columns(3)
+    c1.metric("🏥 必要な総当直枠数", f"{total_slots} 枠")
+    c2.metric("👩‍⚕️ 医師の月間最大回数の合計", f"{total_max_capacity} 回分")
+    if margin >= 0:
+        c3.metric("✨ 担当可能回数 − 必要枠数", f"+{margin} 回分")
+    else:
+        c3.metric("🚨 担当可能回数 − 必要枠数", f"{margin} 回分", delta_color="inverse")
+section_banner("🚫", "先生ごとのNG日設定", "先生を選んでカレンダーでNG日を指定します。専用URLで集めたNG日の取り込みもここで行います", anchor="sec-ng")
+st.info("先生方に専用URLから入力してもらう場合は、下の「📨 先生方からのNG日入力（専用URL）」を使います。"
+        "管理者が直接入力する場合は、医師を選んでカレンダーの「日直」「宿直」のボタンを押してNGにし、最後に「NG日を反映する」を押してください。")
+with st.expander("NGの種類・一括操作について", expanded=False):
+    st.markdown("""
+カレンダーの各日の「日直」「宿直」のボタンを押すと、その勤務だけ「可」⇔「NG」が切り替わります。
+
+| 表示 | 意味 |
+| --- | --- |
+| 日直 可・宿直 可 | この日についてNGを指定しません（OK）。曜日・回数など、ほかの条件は適用されます。 |
+| 日直NG・宿直NG | 日直・宿直ともに勤務できません（全NG）。休日だけです。 |
+| 日直NGのみ | 日直に勤務できません。宿直は候補になります（日NG）。休日だけです。 |
+| 宿直NGのみ | 宿直に勤務できません。休日なら日直は候補になります（宿NG）。 |
+
+平日は日直がないので、「宿直」のボタンだけあります。
+「全日NGにする」は平日を宿NG、休日を全NGにし、「すべてOKに戻す」はNG指定を解除します。
+一括操作は押すとすぐ反映されます。確定当直・希望優先度100以上の希望は、NGより優先されます。
+灰色の「別途決定」の日は、いちばん上のカレンダーで「別途決定」にした日です。NGは入力できず、当直案でもその日は決めません。
+
+「休日にする」のチェックを外した日は、平日として表示されます（全NG→宿NG として扱い、日NGは平日には関係しません）。
+チェックを戻すと、元のNG指定がそのまま復活します。
+
+**「NG日を反映する」は、今開いている画面の計算条件に入れる操作です。**
+次回も続きから使う場合は、画面左上の「💾 作業を途中保存する」を押してください。
+    """)
+
+ng_layout = st.radio("NGカレンダーの表示", ["月間カレンダー", "1日〜月末を横一列"], horizontal=True, key="ng_calendar_layout")
+ng_horizontal = ng_layout == "1日〜月末を横一列"
+st.caption("表示を切り替える前に、押したNG日を「反映する」で反映してください。反映済みの内容は、どちらの表示でも共通です。")
+if ng_horizontal:
+    st.caption("左右へスクロールして日付を選べます。押した欄の色はすぐに変わります。最後に「NG日を反映する」を押してください。")
+
+day_is_holiday = {d: is_holiday_date(datetime.date(year, month, d), year, month, custom_holidays) for d in range(1, num_days + 1)}
+
+valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
+if not valid_staff.empty:
+    doctor_names = valid_staff["先生の名前"].astype(str).tolist()
+    remote_admin_panel(
+        year, month,
+        [(str(r["先生の名前"]), clean_text(r.get("翌日PM duty", ""))) for _, r in valid_staff.iterrows()],
+        custom_holidays, next_month_special_holiday, day_is_holiday, locked_days,
+    )
+    # 医師の選択はタブではなく選択欄にする。
+    # （タブは表示の切り替えなどで画面が作り直されると先頭の医師に戻ってしまい、入力ミスの原因になるため）
+    # 選択中の医師は「ng_current_doctor」に覚えておく（選択欄そのものの値には頼らない）。
+    # 選択欄の表示（NG日数など）が変わると、Streamlit が選択欄を別物とみなして先頭に戻すことがあるため。
+    if st.session_state.get("ng_current_doctor") not in doctor_names:
+        st.session_state["ng_current_doctor"] = doctor_names[0]
+
+    # 先生方のコメント（専用URLから）と、医師条件の備考。選択欄の💬マークと、カレンダーの上の表示に使う
+    doctor_comments = imported_comments(year, month)
+    # 備考の列名は「備考」「備考（メモ…）」「備考(メモ…)」など、CSVによって少し違うことがあるので、
+    # 「備考」で始まる列をすべて見る
+    note_columns = [c for c in valid_staff.columns if str(c).strip().startswith("備考")]
+    doctor_notes = {
+        str(r["先生の名前"]): "\n".join(clean_text(r.get(c, "")) for c in note_columns if clean_text(r.get(c, "")) and clean_text(r.get(c, "")).lower() not in ("nan", "none"))
+        for _, r in valid_staff.iterrows()
+    }
+
+    def ng_doctor_label(name):
+        count = sum(
+            1 for d in range(1, num_days + 1)
+            if d not in locked_days and effective_ng(st.session_state.get(f"ng_{name}_{year}_{month}_{d}", "OK"), day_is_holiday[d]) != "OK"
+        )
+        mark = "　💬" if name in doctor_comments or doctor_notes.get(name) else ""
+        return (f"{name}（NG {count}日）" if count else f"{name}（NGなし）") + mark
+
+    # --- 反映していない変更があるまま先生を切り替えようとしたときの注意 ---
+    # カレンダーで押しただけの変更は、別の先生に切り替えると消えてしまう。
+    # 1回目の切り替えは止めて注意を出し、もう一度切り替えたら（変更を取り消して）移る。
+    def ng_is_dirty(name):
+        rev = st.session_state.get(f"ng_rev::{name}")
+        return rev is not None and st.session_state.get(f"ng_dirty::{name}") == rev
+
+    def ng_leave_allowed(current):
+        if current and ng_is_dirty(current) and st.session_state.get("ng_leave_ack") != current:
+            st.session_state["ng_leave_ack"] = current
+            st.session_state["ng_leave_warning"] = current
+            return False
+        if current:
+            st.session_state.pop(f"ng_dirty::{current}", None)   # 反映せずに移る＝変更は取り消し
+        st.session_state.pop("ng_leave_ack", None)
+        st.session_state.pop("ng_leave_warning", None)
+        return True
+
+    def move_ng_doctor(step, names):
+        # 名前の一覧は押したときの画面のものを受け取る。
+        # 選択中の医師が一覧にない場合（名前を書き換えた・CSVを読み込み直した直後など）は先頭の医師にする
+        if not names:
+            return
+        current = st.session_state.get("ng_current_doctor")
+        if not ng_leave_allowed(current):
+            return
+        i = names.index(current) if current in names else -step
+        st.session_state["ng_current_doctor"] = names[(i + step) % len(names)]
+
+    def on_ng_doctor_select(widget_key):
+        prev = st.session_state.get("ng_current_doctor")
+        new = st.session_state.get(widget_key)
+        if prev and prev != new and not ng_leave_allowed(prev):
+            st.session_state[widget_key] = prev   # 切り替えを取りやめて、元の先生に戻す
+            return
+        st.session_state["ng_current_doctor"] = new
+
+    sel_col, prev_col, next_col = st.columns([6, 1.2, 1.2])
+    # 選択欄は、表示が変わるたびに作り直し、いつも ng_current_doctor の先生を選んだ状態で表示する
+    _labels = [ng_doctor_label(n) for n in doctor_names]
+    _sel_key = "ng_doctor_select_" + hashlib.sha256("\n".join(_labels).encode("utf-8")).hexdigest()[:12]
+    for _k in [k for k in st.session_state.keys() if str(k).startswith("ng_doctor_select_") and k != _sel_key]:
+        del st.session_state[_k]
+    st.session_state[_sel_key] = st.session_state["ng_current_doctor"]
+    sel_col.selectbox("NG日を入力する医師", doctor_names, key=_sel_key, format_func=ng_doctor_label,
+                      on_change=on_ng_doctor_select, args=(_sel_key,))
+    selected_doc = st.session_state["ng_current_doctor"]
+    # ボタンの高さを選択欄にそろえるための余白
+    prev_col.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
+    next_col.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
+    prev_col.button("◀ 前の医師", key="ng_prev_doctor", on_click=move_ng_doctor, args=(-1, list(doctor_names)), use_container_width=True)
+    next_col.button("次の医師 ▶", key="ng_next_doctor", on_click=move_ng_doctor, args=(1, list(doctor_names)), use_container_width=True)
+    if st.session_state.get("ng_leave_warning") == selected_doc and ng_is_dirty(selected_doc):
+        st.warning(f"**{selected_doc}先生のカレンダーに、まだ反映していない変更があります。** "
+                   "カレンダーの下の「反映する」ボタンを押してください。"
+                   "反映せずにほかの先生へ移る場合は、もう一度切り替えてください（変更は取り消されます）。")
+
+    for t_idx, doc_name in enumerate(doctor_names):
+        original_idx = valid_staff.index[t_idx]
+        doc_row = valid_staff.loc[original_idx]
+        hard_days = pm_duty_weekdays(doc_row.get("翌日PM duty", ""))
+        current_ng_dict = parse_ng_dict(doc_row.get(NG_COLUMN, ""), year, month)
+
+        # 初回だけ、表（CSV）のNG指定を読み込む。以後は画面で保存した内容を使う。
+        for d in range(1, num_days + 1):
+            chk_key = f"ng_{doc_name}_{year}_{month}_{d}"
+            if chk_key not in st.session_state:
+                st.session_state[chk_key] = current_ng_dict.get(d, "OK")
+
+        if doc_name == selected_doc:
+            with st.container(border=True):
+                st.markdown(f"#### 🩺 {doc_name} 先生のNG日")
+                note = doctor_notes.get(doc_name, "")
+                comment, comment_at = doctor_comments.get(doc_name, ("", ""))
+                if note or comment:
+                    with st.container(border=True):
+                        if comment:
+                            st.markdown(f"💬 **先生からのコメント**（専用URLから・{comment_at}）")
+                            st.text(comment)
+                        if note:
+                            st.markdown("📝 **医師条件の備考**")
+                            st.text(note)
+                # 保存値は書き換えず、その日に実際に効く内容だけを表示する
+                # 「別途決定」の日は、別の方法で当番を決めるのでNGとして扱わない
+                shown = {d: "OK" if d in locked_days else effective_ng(st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"], day_is_holiday[d]) for d in range(1, num_days + 1)}
+
+                saved_strs = []
+                for d, val in shown.items():
+                    if val == "全NG": saved_strs.append(_day_label(d))
+                    elif val == "日NG": saved_strs.append(f"{_day_label(d)}(日直NG)")
+                    elif val == "宿NG": saved_strs.append(f"{_day_label(d)}(宿直NG)")
+                if saved_strs:
+                    st.success(f"✅ **反映済みのNG日:** {', '.join(saved_strs)}")
+                else:
+                    st.info("💡 **現在、反映されているNG日はありません**")
+                if import_undo_doctors(year, month, [doc_name]):
+                    cu1, cu2 = st.columns([3, 1.6])
+                    cu1.caption("このNG日には、先生がURLから提出した内容が取り込まれています。"
+                                "取り消すと、取り込む前のNG日に戻ります（取り込み後に手直しした分も戻ります）。")
+                    cu2.button("↩️ 取り込みを取り消す", key=f"undo_import_{doc_name}_{year}_{month}", use_container_width=True,
+                               on_click=undo_remote_import, args=(year, month, [doc_name]))
+
+                component_days = []
+                for d in range(1, num_days + 1):
+                    dt = datetime.date(year, month, d)
+                    hol = day_is_holiday[d]
+                    options = ["OK", "全NG", "日NG", "宿NG"] if hol else ["OK", "宿NG"]
+                    component_days.append({
+                        "day": d, "weekday": WEEKDAYS_JA[dt.weekday()],
+                        "options": options, "value": shown[d],
+                        "warning": pm_duty_restricted(dt, hard_days, year, month, custom_holidays, next_month_special_holiday),
+                        "kind": "saturday" if dt.weekday() == 5 and not jpholiday.is_holiday(dt) and d not in custom_holidays else ("holiday" if hol else "weekday"),
+                        "locked": d in locked_days,
+                    })
+                revision = hashlib.sha256(json.dumps([year, month, doc_name, ng_layout, component_days], ensure_ascii=False).encode()).hexdigest()
+                component_key = f"ng_editor_{'row' if ng_horizontal else 'month'}_{doc_name}_{year}_{month}"
+                st.markdown("<div style='color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:6px;padding:8px 10px;font-size:0.9rem;font-weight:600;'>⚠は、翌日PMにdutyがあるため、原則としてその日の宿直を外すことを示します。翌日が休日の場合は⚠を表示せず、この制限の対象外になります。</div>", unsafe_allow_html=True)
+                if locked_days:
+                    st.caption("灰色の日（" + "・".join(_day_label(d) for d in sorted(locked_days)) + "）は、いちばん上のカレンダーで「別途決定」にした日です。NGは入力できず、当直案でもこの日の当直は決めません（確定当直に入れた分だけ表示されます）。")
+                response = horizontal_ng_component(HORIZONTAL_NG_HTML)(
+                    days=component_days, mode="row" if ng_horizontal else "month",
+                    offset=datetime.date(year, month, 1).weekday(), doctor=doc_name,
+                    version=revision, key=component_key, default=None, report_dirty=True,
+                )
+                st.session_state[f"ng_rev::{doc_name}"] = revision
+                seen_key = component_key + "_last_token"
+                if isinstance(response, dict) and response.get("token") != st.session_state.get(seen_key):
+                    st.session_state[seen_key] = response.get("token")
+                    if response.get("kind") == "dirty":
+                        # カレンダーで押したが、まだ反映していない変更があるかどうか
+                        if response.get("dirty") and response.get("version") == revision:
+                            st.session_state[f"ng_dirty::{doc_name}"] = revision
+                        else:
+                            st.session_state.pop(f"ng_dirty::{doc_name}", None)
+                            st.session_state.pop("ng_leave_warning", None)
+                            st.session_state.pop("ng_leave_ack", None)
+                        response = None
+                if isinstance(response, dict) and response.get("kind") != "dirty" and response.get("token") == st.session_state.get(seen_key) \
+                        and st.session_state.get(seen_key + "_applied") != response.get("token"):
+                    st.session_state[seen_key + "_applied"] = response.get("token")
+                    st.session_state.pop(f"ng_dirty::{doc_name}", None)
+                    st.session_state.pop("ng_leave_warning", None)
+                    st.session_state.pop("ng_leave_ack", None)
+                    values = response.get("values")
+                    if response.get("version") == revision and isinstance(values, list) and len(values) == num_days:
+                        if all(v in item["options"] for v, item in zip(values, component_days)):
+                            changed = False
+                            for d, (value, item) in enumerate(zip(values, component_days), 1):
+                                # 画面で実際に変更した日だけ保存値を更新する
+                                # （休日設定の切り替えで隠れているNG指定を消さないため）
+                                if value != item["value"]:
+                                    st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"] = value
+                                    changed = True
+                            if changed:
+                                st.rerun()
+
+                _, col_btn1, col_btn2 = st.columns([6, 1.5, 1.5])
+                with col_btn1:
+                    st.button("全日NGにする", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "全NG", custom_holidays), use_container_width=True)
+                with col_btn2:
+                    st.button("すべてOKに戻す", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "OK", custom_holidays), use_container_width=True)
+
+        # 保存値（指定したとおりの内容）を医師条件へ書き込む。
+        # 平日の全NGは計算上は宿NGと同じ、平日の日NGは計算に影響しない。
+        ng_items = []
+        for d in range(1, num_days + 1):
+            val = st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", "OK")
+            if d in locked_days:
+                continue   # 「別途決定」の日のNGは計算に使わない
+            if val == "全NG":
+                ng_items.append(str(d))
+            elif val != "OK":
+                ng_items.append(f"{d}:{val}")
+        staff_df.at[original_idx, NG_COLUMN] = ",".join(ng_items)
+
+
+
+st.divider()
+st.markdown("### 📂 医師条件をCSVでダウンロード（手元にファイルで残す場合）")
+st.write("医師名・回数・勤務間隔・希望日・NG日・備考をCSVファイルとしてパソコンなどにダウンロードします。このファイルは「医師条件」のアップロード欄から読み込めます。")
+st.caption("ダウンロードの前に、各医師の「NG日を反映する」を押してください。対象年月・休日と別途決定の日・増員設定・確定当直・作成した当直案・色分けとそのメモは、このCSVには含まれません。"
+           "続きから作業するだけなら、CSVではなく「💾 途中保存」を使うほうが簡単です。")
+
+# ダウンロードするCSVも、画面と同じく「先生の名前 → 備考 → その他」の順にそろえる（読み込みは列名で行うので、古い並びのCSVもそのまま使える）
+_first = ["先生の名前"] + [c for c in staff_df.columns if str(c).startswith("備考")]
+current_csv = staff_df[_first + [c for c in staff_df.columns if c not in _first]].to_csv(index=False).encode('utf-8-sig')
+st.download_button(
+    label="📥 医師条件をCSVでダウンロード",
+    data=current_csv,
+    file_name=f"医師条件_{P.start.isoformat()}_{P.end.isoformat()}.csv",
+    mime="text/csv",
+    use_container_width=True
+)
+
+
+# ==========================================
+# 4. 実行ボタンと結果表示
+# ==========================================
+st.markdown("""
+<style>
+.create-guide{border:2px dashed #ff4b4b;background:#fff5f5;color:#9b1c1c;border-radius:10px;padding:14px 16px;font-size:1.05rem;text-align:center}
+.create-guide span{display:block;font-size:.85rem;color:#7a4a4a;margin-top:2px}
+.st-key-create_duty_action button {
+    width: 100%;
+    min-height: 60px;
+}
+.st-key-create_duty_action button p {
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+</style>
+""", unsafe_allow_html=True)
+section_banner("🎯", "当直案の作成・確認", "不足時の優先順位を確認して、当直案を作ります", anchor="sec-create")
+
+# --- 先生方のコメント・備考の一覧（当直案を作る前後にまとめて見られるように） ---
+def comment_note_rows(staff, year, month):
+    comments = imported_comments(year, month)
+    note_cols = [c for c in staff.columns if str(c).strip().startswith("備考")]
+    rows = []
+    for _, r in staff.iterrows():
+        name = clean_text(r.get("先生の名前", ""))
+        if not name:
+            continue
+        note = "\n".join(clean_text(r.get(c, "")) for c in note_cols
+                         if clean_text(r.get(c, "")) and clean_text(r.get(c, "")).lower() not in ("nan", "none"))
+        comment, at = comments.get(name, ("", ""))
+        if comment or note:
+            rows.append((name, comment, at, note))
+    return rows
+
+_cn_rows = comment_note_rows(staff_df, year, month)
+# 見出しの文字は固定にする（文字が変わると、開いている欄が閉じてしまうため）
+with st.expander("💬 先生方のコメント・備考の一覧", expanded=False):
+    if _cn_rows:
+        st.caption(f"{len(_cn_rows)}名分。コメントは、URLから提出されたNG日を取り込んだ先生の分だけ表示します。備考は医師条件の「備考」列です。")
+        _parts = []
+        for n, c, t, no in _cn_rows:
+            empty = "<span class='e'>—</span>"
+            c_html = html_escape(c).replace("\n", "<br>") if c else empty
+            if c and t:
+                c_html += "<div class='t'>" + html_escape(t) + "</div>"
+            no_html = html_escape(no).replace("\n", "<br>") if no else empty
+            _parts.append("<tr><td class='n'>" + html_escape(n) + "</td><td>" + c_html + "</td><td>" + no_html + "</td></tr>")
+        _body = "".join(_parts)
+        st.markdown(
+            "<style>.cn-table{width:100%;border-collapse:collapse;font-size:.92rem}"
+            ".cn-table th,.cn-table td{border:1px solid rgba(128,144,160,.35);padding:6px 9px;vertical-align:top;text-align:left;overflow-wrap:anywhere}"
+            ".cn-table th{background:rgba(128,144,160,.12);white-space:nowrap}.cn-table td.n{white-space:nowrap;font-weight:700}"
+            ".cn-table .t{font-size:.78rem;color:#7a8494;margin-top:2px}.cn-table .e{color:#b0b7c3}</style>"
+            "<table class='cn-table'><thead><tr><th>先生</th><th>💬 先生からのコメント</th><th>📝 備考</th></tr></thead>"
+            f"<tbody>{_body}</tbody></table>", unsafe_allow_html=True)
+    else:
+        st.caption("表示するコメント・備考はありません。コメントは、URLから提出されたNG日を取り込むと表示されます。")
+
+st.subheader("🎯 人数が足りないときに優先して埋める枠（任意）")
+st.info("全員の条件を満たす当直表が作れない場合に、どの枠から優先して埋めるかを決めます。数字が小さいほど優先し、同じ数字の枠は同順位として扱います。")
+st.caption("人数が足りている月は、この設定は結果に影響しません。初期設定は、A宿直・B宿直・A日直・B日直が1、外来宿直が2、外来日直が3です。")
+
+priority_options = list(range(1, len(ALL_SHIFT_TYPES) + 1))
+shortage_priority = {}
+priority_cols = st.columns(len(ALL_SHIFT_TYPES))
+for col, s in zip(priority_cols, NIGHT_SHIFTS + DAY_SHIFTS):
+    if f"shortage_priority_{s}" not in st.session_state:
+        st.session_state[f"shortage_priority_{s}"] = DEFAULT_SHORTAGE_PRIORITY[s]
+    shortage_priority[s] = col.selectbox(s, priority_options, key=f"shortage_priority_{s}")
+
+
+def reset_shortage_priority():
+    for s, rank in DEFAULT_SHORTAGE_PRIORITY.items():
+        st.session_state[f"shortage_priority_{s}"] = rank
+
+st.button("優先順位を初期設定に戻す", key="reset_shortage_priority", on_click=reset_shortage_priority)
+priority_order = shortage_priority_groups(shortage_priority)
+st.caption("現在の優先順位：" + " ＞ ".join("・".join(g) for g in priority_order))
+
+# --- 作業の途中保存 ---
+work_snapshot = {
+    "year": year, "month": month,
+    "holidays": sorted(int(d) for d in custom_holidays),
+    "locked": sorted(int(d) for d in locked_days),
+    "next_special": bool(next_month_special_holiday),
+    "multi": [[_day_label(d), s, int(c)] for (d, s), c in multi_slots_dict.items()],
+    "extra": extra,
+    "fixed_csv": edited_fixed_df.to_csv(index=False),
+    "staff_csv": staff_df.to_csv(index=False),
+    "priority": {k: int(v) for k, v in shortage_priority.items()},
+    "comments": {n: list(v) for n, v in imported_comments(year, month).items()},
+    "alerts": {k: int(st.session_state.get(f"alert_{k}", v) or 0) for k, v in MATRIX_COUNT_ALERTS.items()},
+}
+# 右上の途中保存ボタンが押されていたら、ここで（全部の入力を読み終えてから）保存する
+if work_save_request:
+    _slot = WORK_SAVE_SLOT or st.empty()
+    try:
+        work_state_save(work_snapshot)
+        st.session_state["work_save_note"] = remote_now()[-8:-3]
+        st.session_state.pop("work_restore_note", None)
+        st.session_state["work_save_toast"] = True
+        # カレンダーで押したまま反映していない変更は、途中保存に入らないので知らせる
+        st.session_state["work_save_dirty"] = [
+            k.split("::", 1)[1] for k in list(st.session_state.keys())
+            if k.startswith("ng_dirty::") and st.session_state[k] == st.session_state.get("ng_rev::" + k.split("::", 1)[1])]
+        _saved_ok = True
+    except Exception as e:
+        _saved_ok = False
+        _slot.markdown("<span class='work-save-note bad'>⚠ 途中保存できませんでした</span>", unsafe_allow_html=True)
+        st.error(f"途中保存できませんでした。通信状態を確認して、もう一度押してください。詳細：{e}")
+    if _saved_ok:
+        # 画面右上の「前回の作業の続きから始める」に新しい保存日時が出るよう、画面を作り直す
+        st.rerun()
+
+create_button_container = st.container(key="create_duty_action")
+result_notice_container = st.container()
+
+staff_df = staff_df[staff_df['先生の名前'].astype(str).str.strip() != '']
+staff_df = staff_df.dropna(subset=['先生の名前']).reset_index(drop=True)
+
+fixed_df, fixed_input_errors = validate_fixed_inputs(edited_fixed_df, staff_df['先生の名前'].tolist(), year, month, custom_holidays)
+if fixed_input_errors:
+    show_input_errors(fixed_input_errors)
+    if create_bar_request:
+        create_bar_show("<div class='cb-res bad'>⚠ 確定当直の入力に誤りがあります。赤い表示を確認してください。</div>")
+    st.stop()
+current_signature = (input_signature(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority), tuple(sorted(locked_days)))
+if 'generated_df' in st.session_state and st.session_state.get('generated_signature') != current_signature:
+    for key in ['generated_df', 'past_worked_dates', 'future_worked_dates', 'generated_warnings', 'generated_signature', 'generated_year', 'generated_month']:
+        st.session_state.pop(key, None)
+    st.session_state['result_needs_refresh'] = True
+    st.session_state.pop("create_bar_summary", None)
+    if not create_bar_request:
+        create_bar_show("<div class='cb-res wait'>条件が変わりました。もう一度作成してください。</div>")
+if st.session_state.get('result_needs_refresh'):
+    st.warning("条件が変更されています。画面下の帯の「🚀 当直案を作成」で作り直してください。前回の結果表示とダウンロードは停止しました。")
+
+if len(staff_df) > 0:
+    with create_button_container:
+        # 作成ボタンは画面の端の「🚀 当直案を作成」1つだけにする（同じ働きのボタンが2つあると迷うため）
+        create_clicked = create_bar_request
+        st.markdown("<div class='create-guide'>🚀 当直案は、画面のいちばん下の帯にある<b>「当直案を作成」</b>ボタンで作ります"
+                    "<span>（どこまでスクロールしていても押せます）</span></div>", unsafe_allow_html=True)
+        st.caption("※ 押すたびに、同じ条件でも違うパターンの当直表を作ります。気に入った案は、結果の緑のボタン「📥 この一覧をExcelでダウンロード」で保存してください（作成した当直案は途中保存には含まれません）。")
+    if create_clicked:
+        with st.spinner("当直案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
+            try:
+                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority, locked_days)
+
+                if df_result is not None:
+                    st.session_state['generated_signature'] = current_signature
+                    st.session_state['generated_year'] = year
+                    st.session_state['generated_month'] = month
+                    st.session_state['generated_warnings'] = error_reasons
+                    st.session_state['result_needs_refresh'] = False
+                if df_result is not None and not df_result.empty:
+                    st.session_state['generated_df'] = df_result
+                    st.session_state['past_worked_dates'] = past_worked_dates or {}
+                    st.session_state['future_worked_dates'] = future_worked_dates or {}
+                else:
+                    st.session_state.pop('generated_df', None)
+                    with result_notice_container:
+                        show_schedule_notice(None, error_reasons)
+            except Exception as e:
+                st.session_state.pop('generated_df', None)
+                with result_notice_container:
+                    show_schedule_notice(None, [f"当直計算中にエラーが発生しました。詳細: {e}"])
+        if 'generated_df' not in st.session_state:
+            st.session_state.pop("create_bar_summary", None)
+            create_bar_show("<div class='cb-res bad'>⚠ 当直案を作れませんでした。「結果」で理由を確認してください。</div>")
+
+    if 'generated_df' in st.session_state:
+        year = st.session_state['generated_year']
+        month = st.session_state['generated_month']
+        df_result = st.session_state['generated_df'].reindex(columns=RESULT_COLUMNS)
+        past_worked_dates = st.session_state.get('past_worked_dates', {})
+        future_worked_dates = st.session_state.get('future_worked_dates', {})
+
+        shift_columns = ALL_SHIFT_TYPES
+        doctors_list = staff_df['先生の名前'].astype(str).tolist()
+
+        def split_names(value):
+            return [x.strip() for x in re.split(r'[、,]', str(value))]
+
+        st.markdown("<div id='sec-result'></div>", unsafe_allow_html=True)
         st.subheader("🗓️ 医師別の当直一覧")
-        st.caption("回数（右端）は、この期間全体での回数です。")
-        st.markdown(duty_matrix_html(matrix_days, matrix_rows, year, month, MATRIX_COUNT_ALERTS), unsafe_allow_html=True)
+        st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。希望日が通った当直は茶色の太い枠で囲み、回数が多い先生は右端の回数を赤い枠で示します。マスにカーソルを合わせると、その先生の行とその日の列が黄色く色付きます。")
+        matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday,
+                                                     comments=imported_comments(year, month))
+        missing_total = sum(len(info['shortage']) for info in matrix_days)
+        # 下の帯の「当直案を作成」ボタンの横に、結果のまとめを出す
+        _t = remote_now()[-8:-3]
+        _summary = (f"<div class='cb-res bad'>⚠ {_t} 作成：未決定 {missing_total}枠</div>" if missing_total
+                    else f"<div class='cb-res ok'>✅ {_t} 作成：全枠決定</div>")
+        if create_clicked or not st.session_state.get("create_bar_summary"):
+            st.session_state["create_bar_summary"] = _summary
+        create_bar_show(st.session_state["create_bar_summary"])
+        # アラートの基準（この回数以上で赤く表示）。0はアラートなし
+        for _k, _v in MATRIX_COUNT_ALERTS.items():
+            if f"alert_{_k}" not in st.session_state:
+                st.session_state[f"alert_{_k}"] = _v
+
+        def _reset_alerts():
+            for _k2, _v2 in MATRIX_COUNT_ALERTS.items():
+                st.session_state[f"alert_{_k2}"] = _v2
+
+        with st.expander("⚠ アラートの基準（回数が多い先生を赤く表示）", expanded=False):
+            st.caption("それぞれの回数がこの数以上の先生を、表の右端で赤く表示します。0にすると、その項目はアラートを出しません。")
+            _acols = st.columns(len(MATRIX_COUNT_ALERTS))
+            for _col, _k in zip(_acols, MATRIX_COUNT_ALERTS):
+                _col.number_input(f"{MATRIX_ALERT_LABELS[_k]}（回以上）", min_value=0, max_value=31, step=1, key=f"alert_{_k}")
+            st.button("初期設定に戻す（宿直4回以上・休日3回以上）", key="alert_reset", on_click=_reset_alerts)
+        alert_limits = {_k: int(st.session_state.get(f"alert_{_k}", _v) or 0) for _k, _v in MATRIX_COUNT_ALERTS.items()}
+        _alerts = count_alert_messages(matrix_rows, alert_limits)
+        # 計算結果のまとめ（不足・注意事項・当直回数のアラート）は、作成ボタンの下の1か所にまとめて出す
+        with result_notice_container:
+            show_schedule_notice(st.session_state['generated_df'], st.session_state.get('generated_warnings', []), _alerts)
+        st.markdown(duty_matrix_html(matrix_days, matrix_rows, year, month, alert_limits), unsafe_allow_html=True)
         try:
-            st.download_button("📥 この一覧をExcelでダウンロード（印刷用）",
-                               data=duty_matrix_xlsx(matrix_days, matrix_rows, year, month, MATRIX_COUNT_ALERTS, title=P.title()),
-                               file_name=f"当直一覧_{P.start.isoformat()}_{P.end.isoformat()}.xlsx",
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="p_xlsx")
+            # 上下の帯の赤いボタン（途中保存・当直案を作成）と見分けやすいよう、Excelらしい緑にする
+            st.markdown("<style>.st-key-xlsx_download button{background:#1d6f42 !important;border:1px solid #1d6f42 !important;color:#fff !important;font-weight:700}"
+                        ".st-key-xlsx_download button:hover{background:#155a35 !important;border-color:#155a35 !important}"
+                        ".st-key-xlsx_download button p{color:#fff !important}</style>", unsafe_allow_html=True)
+            with st.container(key="xlsx_download"):
+                st.download_button(
+                    label="📥 この一覧をExcelでダウンロード（印刷用）",
+                    data=duty_matrix_xlsx(matrix_days, matrix_rows, year, month, alert_limits),
+                    file_name=f"当直一覧_{P.start.isoformat()}_{P.end.isoformat()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
         except ImportError:
-            st.error("Excelでダウンロードするには openpyxl が必要です。")
-        st.subheader("📅 作成した当直案（日付ごと）")
-        st.dataframe(df_result, hide_index=True, use_container_width=True)
-        st.download_button("📥 当直案をCSVでダウンロード", df_result.to_csv(index=False).encode("utf-8-sig"),
-                           file_name=f"当直案_{P.start.isoformat()}_{P.end.isoformat()}.csv", mime="text/csv", key="p_csv")
+            st.error("Excelでダウンロードするには、Excelを扱う部品（openpyxl）が必要です。requirements.txt に「openpyxl」の1行を追加してください。")
+
+        st.divider()
+        st.subheader("📅 作成した当直案")
+        table_container = st.container()
+
+        st.divider()
+        # (見出し, 選択欄のキー, メモ欄のキー, セルの色)
+        highlight_colors = [
+            ("🟨 **黄色**", "hl_yellow", "memo_y", 'background-color: #fff200; color: #000000; font-weight: bold; border: 2px solid #ffcc00;'),
+            ("🟥 **赤色**", "hl_red", "memo_r", 'background-color: #ffcccc; color: #000000; font-weight: bold; border: 2px solid #ff6666;'),
+            ("🟦 **水色**", "hl_blue", "memo_b", 'background-color: #cce5ff; color: #000000; font-weight: bold; border: 2px solid #66b2ff;'),
+            ("🟩 **緑色**", "hl_green", "memo_g", 'background-color: #ccffcc; color: #000000; font-weight: bold; border: 2px solid #66ff66;'),
+            ("🟧 **オレンジ**", "hl_orange", "memo_o", 'background-color: #ffe5b4; color: #000000; font-weight: bold; border: 2px solid #ffb347;'),
+            ("🟫 **茶色**", "hl_brown", "memo_br", 'background-color: #e6ccb3; color: #000000; font-weight: bold; border: 2px solid #c68c53;'),
+            ("🟪 **紫色**", "hl_purple", "memo_p", 'background-color: #e6ccff; color: #000000; font-weight: bold; border: 2px solid #b366ff;'),
+            ("💗 **ピンク**", "hl_pink", "memo_pi", 'background-color: #ffccff; color: #000000; font-weight: bold; border: 2px solid #ff66ff;'),
+        ]
+        # 見出しの文字は固定にする（文字が変わると、選んでいる途中で欄が閉じてしまうため）
+        with st.expander("🔍 特定の医師の当直を色別でハイライト（任意・クリックで開く）", expanded=False):
+            st.write("※各色のすぐ下にあるメモ欄に「神経内科」「呼吸器内科」など自由に書き込めます。")
+
+            selected_by_color = []
+            for pair_start in range(0, len(highlight_colors), 2):
+                columns = st.columns(2)
+                for column, (title, select_key, memo_key, style) in zip(columns, highlight_colors[pair_start:pair_start + 2]):
+                    with column:
+                        st.markdown(title)
+                        label = title.replace("*", "").split(" ", 1)[-1]
+                        selected = st.multiselect(label, options=doctors_list, default=[], key=select_key, label_visibility="collapsed")
+                        st.text_input(label + "メモ", key=memo_key, placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+                        selected_by_color.append((set(selected), style))
+                st.write("")
+
+        def color_highlighted_doctor(val):
+            val_str = str(val)
+            if val_str in ("-", ""):
+                return ''
+            if "⚠️不足" in val_str:
+                return 'background-color: #ffe6e6; color: #cc0000; font-weight: bold; border: 2px solid #cc0000;'
+            for doc in split_names(val_str):
+                for selected, style in selected_by_color:
+                    if doc in selected:
+                        return style
+            return ''
+
+        with table_container:
+            if locked_days:
+                st.caption("「別途決定」にした日（" + "・".join(P.label(d) for d in sorted(locked_days)) + "）は、このアプリでは当直を決めていません（確定当直に入れた分だけ表示）。")
+            # 表の中身はデータとして渡す。部品（一時ファイル）は1つのまま増えない。
+            horizontal_ng_component(HOVER_TABLE_HTML)(
+                table=hover_schedule_data(df_result, shift_columns, doctors_list, color_highlighted_doctor),
+                key="hover_schedule_table",
+                default=None,
+            )
+
+            csv_result = df_result.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                label="📥 表示中の当直案をCSVでダウンロード",
+                data=csv_result,
+                file_name=f"当直案_{P.start.isoformat()}_{P.end.isoformat()}.csv",
+                mime="text/csv",
+            )
+
+
+else:
+    st.warning("☝️ 表に先生の名前を入力するか、CSVファイルをアップロードしてください。")
