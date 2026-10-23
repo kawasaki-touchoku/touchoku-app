@@ -776,7 +776,7 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
         ratio = info.get('ng_count', 0) / n_doctors
         bg = '#ffffff' if ratio == 0 else ('#ffefdc' if ratio < 0.25 else ('#ffd2a1' if ratio < 0.5 else '#ffad5c'))
         ng_tr.append(f'<td class="c{info["day"]}" style="background:{bg};text-align:center;font-weight:700;color:#7a3a00">{info.get("ng_count", 0)}</td>')
-    ng_tr.append(f'<td class="sum" colspan="{len(MATRIX_COUNT_COLUMNS)}" style="font-size:11px;color:#566174">／{len(rows)}名中</td></tr>')
+    ng_tr.append(f'<td class="sum" colspan="{len(MATRIX_COUNT_COLUMNS)}" style="font-size:11px;background:#ffe2c2;color:#7a3a00;font-weight:800">／{len(rows)}名中</td></tr>')
     body.append(''.join(ng_tr))
     for idx, row in enumerate(rows):
         tip_up = idx >= max(len(rows) - 6, 6)
@@ -935,7 +935,9 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None):
         c.font = Font(bold=True, color='7A3A00'); c.alignment = center; c.border = border
     for col in range(1, first_day_col):
         ws.cell(row=ng_row, column=col).border = border
-    ws.cell(row=ng_row, column=sum_col, value=f"／{len(rows)}名中").font = Font(size=9, color='566174')
+    ws.cell(row=ng_row, column=sum_col, value=f"／{len(rows)}名中").font = Font(bold=True, size=9, color='7A3A00')
+    for j in range(n_counts):
+        ws.cell(row=ng_row, column=sum_col + j).fill = fill('#FFE2C2')
     ws.row_dimensions[ng_row].height = 20
 
     for r_idx, row in enumerate(rows, header_row + 2):
