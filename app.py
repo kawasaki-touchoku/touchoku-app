@@ -21,6 +21,8 @@ ALL_SHIFT_TYPES = ['A宿直', 'B宿直', '外来宿直', 'A日直', 'B日直', '
 RESULT_COLUMNS = ["日付", "平日/休日", "A日直", "A宿直", "B日直", "B宿直", "外来日直", "外来宿直"]
 NUMERIC_DEFAULTS = {'希望優先度(数字が大きいほど優先)': 1, '最低空ける日数': 5, '月間最小回数': 0, '月間最大回数': 5, '休日最大回数': 4, **{s + '上限': 2 for s in ALL_SHIFT_TYPES}}
 NG_COLUMN = 'NG日(半角カンマ区切り)'
+# 宿直・日直それぞれの月間上限（A・B・外来を合わせた回数）。空欄なら制限なし
+GROUP_CAP_COLUMNS = {'宿直上限': ['A宿直', 'B宿直', '外来宿直'], '日直上限': ['A日直', 'B日直', '外来日直']}
 REQUEST_COLUMN = '希望日(半角カンマ区切り)'
 
 
@@ -1150,9 +1152,11 @@ def validate_staff_inputs(df, year, month):
     for col, default in NUMERIC_DEFAULTS.items():
         if col not in df:
             df[col] = default
-    for col in [NG_COLUMN, REQUEST_COLUMN, '翌日PM duty']:
+    for col in [NG_COLUMN, REQUEST_COLUMN, '翌日PM duty'] + list(GROUP_CAP_COLUMNS):
         if col not in df:
             df[col] = ''
+    for col in GROUP_CAP_COLUMNS:
+        df[col] = df[col].astype(object)   # 空欄（制限なし）と数字が混ざるため
     for i, row in df.iterrows():
         name = row['先生の名前']
         if any(c in name for c in ',、') or name == '-' or '⚠️不足' in name:
@@ -1171,6 +1175,19 @@ def validate_staff_inputs(df, year, month):
                 errors.append(f'{name}：月間最小回数は月間最大回数以下にしてください。')
         except (ValueError, TypeError):
             pass
+        # 宿直上限・日直上限は空欄なら制限なし
+        for col in GROUP_CAP_COLUMNS:
+            raw = clean_text(row.get(col, ''))
+            if raw.lower() in ('', 'nan', 'none', '<na>'):
+                df.at[i, col] = ''
+                continue
+            try:
+                n = float(raw)
+                if not math.isfinite(n) or n < 0 or n != int(n) or n > 1000:
+                    raise ValueError()
+                df.at[i, col] = int(n)
+            except (TypeError, ValueError, OverflowError):
+                errors.append(f'{name}：{col}は0以上の整数にしてください（空欄なら制限なし）。')
         for col, ng in [(NG_COLUMN, True), (REQUEST_COLUMN, False)]:
             try:
                 items = checked_day_items(row[col], year, month, ng)
@@ -1288,7 +1305,9 @@ def audit_schedule(result, staff, year, month, holidays, multi, past, future, ne
         total = sum(counts.values())
         if total < int(row['月間最小回数']):
             warnings.append(f'{name}：月間最小回数の目標{int(row["月間最小回数"])}回に対し、{total}回です。')
-        for label, value, cap in [('月間最大回数', total, int(row['月間最大回数'])), ('休日最大回数', hol_count, int(row['休日最大回数']))] + [(s + '上限', counts[s], int(row[s + '上限'])) for s in ALL_SHIFT_TYPES]:
+        group_items = [(col, sum(counts[s] for s in slots), int(row[col])) for col, slots in GROUP_CAP_COLUMNS.items()
+                       if clean_text(row.get(col, '')) not in ('', 'nan')]
+        for label, value, cap in [('月間最大回数', total, int(row['月間最大回数'])), ('休日最大回数', hol_count, int(row['休日最大回数']))] + group_items + [(s + '上限', counts[s], int(row[s + '上限'])) for s in ALL_SHIFT_TYPES]:
             if value > cap:
                 warnings.append(f'{name}：確定指定に伴い{label}を超えています（設定{cap}回／結果{value}回）。')
         dates = sorted(set(worked) | set((past or {}).get(name, [])) | set((future or {}).get(name, [])))
@@ -1343,6 +1362,7 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
     max_shifts_total = {}
     max_hol_shifts_per_doc = {}
     max_shifts_per_type = {}
+    group_caps = {}
 
     absolute_req_days = {doc: [] for doc in doctors}
     absolute_req_specific = {doc: [] for doc in doctors}
@@ -1384,6 +1404,7 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
         max_shifts_total[doc] = safe_int(row.get('月間最大回数'), 5)
         max_hol_shifts_per_doc[doc] = safe_int(row.get('休日最大回数'), 4)
         max_shifts_per_type[doc] = {s: safe_int(row.get(s + '上限'), 2) for s in ALL_SHIFT_TYPES}
+        group_caps[doc] = {col: safe_int(row.get(col), None) for col in GROUP_CAP_COLUMNS}
 
     # --- その日に存在する枠（平日は宿直のみ、休日は日直・宿直） ---
     daily_active_shifts = {d: (NIGHT_SHIFTS + DAY_SHIFTS) if is_holiday(d) else list(NIGHT_SHIFTS) for d in days}
@@ -1476,6 +1497,18 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
                 worked = [x[(d, doc, s_type)] for d in active_days]
                 forced_vars = [x[(d, doc, s_type)] for d in active_days if (d, s_type) in absolute_req_specific[doc] or d in absolute_req_days[doc]]
                 add_type_cap(model, worked, forced_vars, max_shifts_per_type[doc][s_type], num_days)
+
+            # 宿直上限・日直上限（A・B・外来を合わせた回数。空欄なら制限なし）
+            for col, slots in GROUP_CAP_COLUMNS.items():
+                cap = group_caps[doc].get(col)
+                if cap is None:
+                    continue
+                worked = [x[(d, doc, s)] for d in days for s in daily_active_shifts[d] if s in slots]
+                if not worked:
+                    continue
+                forced_vars = [x[(d, doc, s)] for d in days for s in daily_active_shifts[d] if s in slots
+                               and ((d, s) in absolute_req_specific[doc] or d in absolute_req_days[doc])]
+                add_type_cap(model, worked, forced_vars, cap, num_days)
 
             # 月間上限
             all_vars = [x[(d, doc, s)] for d in days for s in daily_active_shifts[d]]
@@ -3482,6 +3515,7 @@ with st.expander("回数・勤務間隔の数え方", expanded=False):
 | 月間最小回数 | できるだけ確保したい回数です。条件によっては、この回数に届かないことがあります。 |
 | 月間最大回数 | 日直と宿直を合わせた月間の上限です。 |
 | 休日最大回数 | 土日祝日と「休日にする」にした日に担当する、日直と宿直の合計上限です。 |
+| 宿直上限・日直上限 | A・B・外来を合わせた宿直（日直）の月間の上限です。空欄なら制限しません。 |
 | 各枠の上限 | A宿直など、それぞれの枠を担当する月間の上限です。 |
 
 1つの枠を1回と数えます。確定指定により同じ日に日直と宿直を担当する場合は2回です。
@@ -3510,6 +3544,8 @@ template_data = {
     "月間最小回数": [1, 2, 0, 1, 0],
     "月間最大回数": [5, 6, 4, 5, 7],
     "休日最大回数": [2, 2, 2, 2, 2],
+    "宿直上限": [4, 4, 3, "", ""],
+    "日直上限": [2, 2, 2, "", ""],
     "A宿直上限": [2, 2, 2, 2, 2],
     "B宿直上限": [2, 2, 2, 2, 2],
     "外来宿直上限": [2, 2, 2, 2, 2],
@@ -3552,6 +3588,12 @@ else:
 if "先生の名前" not in base_df.columns:
     st.error("医師条件CSVに「先生の名前」の列がありません。ひな形の列名を確認してください。")
     st.stop()
+# 宿直上限・日直上限の列がない（以前の）CSVでも、「休日最大回数」の右に空欄の列を足す（空欄＝制限なし）
+for _gc in reversed(list(GROUP_CAP_COLUMNS)):
+    if _gc not in base_df.columns:
+        _pos = list(base_df.columns).index("休日最大回数") + 1 if "休日最大回数" in base_df.columns else len(base_df.columns)
+        base_df.insert(_pos, _gc, None)
+    base_df[_gc] = pd.to_numeric(base_df[_gc], errors="coerce")
 base_df = base_df.set_index("先生の名前")
 
 if "希望優先度(数字が大きいほど優先)" in base_df.columns:
@@ -3580,6 +3622,8 @@ edited_df = st.data_editor(
         "月間最小回数": st.column_config.NumberColumn("月間最小回数（目標）", help="できるだけ確保したい回数です。条件によっては未達になります。月間最大回数以下にしてください。"),
         "月間最大回数": st.column_config.NumberColumn("月間最大回数", help="日直・宿直を合わせた上限です。確定指定がある場合は例外があります。"),
         "休日最大回数": st.column_config.NumberColumn("休日最大回数", help="土日祝と「休日にする」にした日の、日直と宿直の合計上限です。1枠を1回と数えます。"),
+        "宿直上限": st.column_config.NumberColumn("宿直上限", help="A宿直・B宿直・外来宿直を合わせた月間の上限です。空欄なら制限なし。確定指定がある場合は例外があります。", min_value=0, step=1),
+        "日直上限": st.column_config.NumberColumn("日直上限", help="A日直・B日直・外来日直を合わせた月間の上限です。空欄なら制限なし。確定指定がある場合は例外があります。", min_value=0, step=1),
         **{s + "上限": st.column_config.NumberColumn(s + "上限", help=s + cap_help) for s in ALL_SHIFT_TYPES},
         NG_COLUMN: None,
         REQUEST_COLUMN: st.column_config.TextColumn(
