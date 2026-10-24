@@ -740,6 +740,10 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
 /* 行の境目を見やすくする：先生の行を1行おきに薄いグレーにする（休日の色・斜線などの上に薄く重ねる） */
 /* 右端の回数の列（色をマスごとに指定している）まで同じ縞にするため !important を付ける */
 .dm tbody tr:not(.ngcount):nth-child(odd) td{background-image:linear-gradient(rgba(36,64,95,.075),rgba(36,64,95,.075)) !important}
+/* 休日の翌日PM dutyのマス（下半分が斜線）は、縞の行でも斜線を消さない */
+.dm tbody tr:not(.ngcount):nth-child(odd) td.pmhalf{background-image:linear-gradient(rgba(36,64,95,.075),rgba(36,64,95,.075)),
+  repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px) !important;
+  background-size:100% 50%,100% 50% !important;background-position:left top,left bottom !important;background-repeat:no-repeat !important}
 .dm tr.short.first td{border-top:2px solid #c0392b}
 .dm tr.short td.nm{color:#c0392b}
 .dm th.miss{background:#fde2e0}
