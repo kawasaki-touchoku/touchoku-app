@@ -78,6 +78,20 @@ def _day_label(d):
     return f"{dt.day}日" if dt.month == P.month else f"{dt.month}/{dt.day}"
 
 
+# 「当直の枠は足りそう？」の日ごとの表：翌月の日は「1/3」と表示する
+def capacity_day_of(dt, year, month):
+    return P.index(dt)
+
+
+def capacity_day_head(d, year, month):
+    dt = P.date(d)
+    return str(dt.day) if dt.month == P.month else f"{dt.month}/{dt.day}"
+
+
+def capacity_day_text(d, year, month):
+    return _day_label(d)
+
+
 # 途中保存は通常版と別の場所に保存する（通常版の途中保存は上書きしない）
 REMOTE_SHEETS["saved_state_period"] = ["項目", "値"]
 _normal_work_state_info = work_state_info
@@ -611,7 +625,9 @@ with st.expander("📖 使い方（期間指定版・作業の流れ・結果の
 3. **人数を増やす枠（任意）**：1つの枠を2名以上にする日があれば設定します。
 4. **確定当直（任意）**：すでに決まっている当直や、期間の前（先月末など）・後の当直を入れます。勤務間隔の計算に使われます。
 5. **医師条件**：「📋 前回の医師条件を引き継ぐ」で、通常版で途中保存した医師条件を読み込みます。NG日・希望日は空になります。
+   入力したら、すぐ下の「⚖️ 当直の枠は足りそう？」で、全体と枠の種類ごとに足りているか（赤い棒がないか）を確認します。
 6. **NG日を集める**：「📨 先生方からのNG日入力（専用URL）」で受付を開始し、提出されたNG日を取り込みます（「NG日の集め方」のタブを参照）。
+   取り込んだら、NG日の欄の下の「📊 日ごとの見通し」で、入れる先生がいない日（赤い所）がないかを確認します。
 7. **不足時の優先順位（任意）**
 8. **当直案を作る**：下の帯の「🚀 当直案を作成」を押します（計算に最大1分少々かかります）。
 9. **確認してダウンロード**：「医師別の当直一覧」をExcelでダウンロードします。
@@ -1051,7 +1067,7 @@ for d in range(1, num_days + 1):
             shift_counts[s] += multi_slots_dict.get((d, s), 1)
 
 total_slots = sum(shift_counts.values())
-holiday_total_placeholder.metric("🏥 必要な総当直枠数", f"{total_slots} 枠")
+holiday_total_placeholder.metric("🏥 埋める必要がある枠", f"{total_slots} 枠")
 
 # ==========================================
 # 3. メイン画面：データの読み込み＆画面入力
@@ -1334,19 +1350,47 @@ if staff_input_errors:
         create_bar_show("<div class='cb-res bad'>⚠ 医師条件の入力に誤りがあります。赤い表示を確認してください。</div>")
     st.stop()
 
-st.markdown("### ⚖️ 必要枠数と担当可能回数の目安")
-st.caption("月間最大回数の合計と必要枠数を比較しています。プラスでも、NG日・勤務間隔・枠別上限などによっては埋まらない場合があります。確定指定で追加される枠や上限の例外は、この目安に含まれません。")
+st.markdown("### ⚖️ 当直の枠は足りそう？（目安）")
+st.caption("埋める必要がある枠の数と、先生方が入れる回数の合計を比べています。先生ごとの回数は、期間全体での「月間最大回数」と各枠の上限・休日最大回数のうち、"
+           "いちばん少ないものを使います。足りていても、NG日・勤務の間隔などによっては埋まらないことがあります（日ごとの見通しは、NG日の欄の下にあります）。"
+           "確定当直で追加される枠や上限の例外は、この目安に含まれません。")
 
-if "月間最大回数" in staff_df.columns:
-    total_max_capacity = int(pd.to_numeric(staff_df["月間最大回数"], errors='coerce').fillna(0).sum())
-    margin = total_max_capacity - total_slots
-    c1, c2, c3 = st.columns(3)
-    c1.metric("🏥 必要な総当直枠数", f"{total_slots} 枠")
-    c2.metric("👩‍⚕️ 医師の最大回数（期間全体）の合計", f"{total_max_capacity} 回分")
-    if margin >= 0:
-        c3.metric("✨ 担当可能回数 − 必要枠数", f"+{margin} 回分")
+st.markdown(CAPACITY_CSS, unsafe_allow_html=True)
+cap_needs = slot_needs(year, month, num_days, custom_holidays, locked_days, multi_slots_dict)
+cap_rows, total_max_capacity = capacity_rows(staff_df, cap_needs)
+margin = total_max_capacity - total_slots
+c1, c2, c3 = st.columns(3)
+c1.metric("🏥 埋める必要がある枠", f"{total_slots} 枠")
+c2.metric("👩‍⚕️ 先生方が入れる回数（上限の合計）", f"{total_max_capacity} 回")
+if margin >= 0:
+    c3.metric("✨ 差し引き", f"{margin} 回分の余裕")
+else:
+    c3.metric("🚨 差し引き", f"{-margin} 枠 足りません")
+cap_short = [r for r in cap_rows[1:] if capacity_status(r[1], r[2]) == "short"]   # 1行目は全体
+cap_tight = [r for r in cap_rows if capacity_status(r[1], r[2]) == "tight"]
+if margin < 0:
+    st.error(f"🚨 **全体で{-margin}枠足りません。** 先生方の「月間最大回数」や各枠の上限を増やすか、担当できる先生を追加してください。")
+elif cap_short:
+    st.warning(f"⚠️ **全体では足りています（あと{margin}回分の余裕）が、枠の種類別では"
+               + "・".join(f"「{r[0]}」" for r in cap_short) + "が足りません。** 下の横棒で確認してください。")
+elif cap_tight:
+    _others = [r for r in cap_tight if r is not cap_rows[0]]
+    if cap_rows and cap_tight[0] is cap_rows[0]:
+        _msg = f"足りていますが、全体の余裕があと{margin}回分しかありません。"
+        if _others:
+            _msg += "・".join(f"「{r[0]}」" for r in _others) + "も余裕が少なめです。"
     else:
-        c3.metric("🚨 担当可能回数 − 必要枠数", f"{margin} 回分", delta_color="inverse")
+        _msg = f"全体（あと{margin}回分の余裕）・枠の種類別ともに足りていますが、" + "・".join(f"「{r[0]}」" for r in _others) + "は余裕が少なめです。"
+    st.warning("🟧 " + _msg + "NG日が多いと埋まらない可能性があります。")
+else:
+    st.success(f"✅ 全体でも枠の種類別でも足りています（あと{margin}回分の余裕）。")
+
+st.markdown("##### 枠の種類ごとの見通し")
+st.markdown(capacity_bars_html(cap_rows), unsafe_allow_html=True)
+if cap_short:
+    st.error("🚨 " + "、".join(f"{r[0]}が{r[1] - r[2]}枠" for r in cap_short) + "足りません。"
+             + "該当する先生の" + "・".join(dict.fromkeys(f"「{r[3]}」" for r in cap_short))
+             + "を増やすか、担当できる先生を追加してください（「月間最大回数」が小さいと、上限を増やしても回数は増えません）。")
 section_banner("🚫", "先生ごとのNG日設定", "先生を選んでカレンダーでNG日を指定します。専用URLで集めたNG日の取り込みもここで行います", anchor="sec-ng")
 st.info("先生方に専用URLから入力してもらう場合は、下の「📨 先生方からのNG日入力（専用URL）」を使います。"
         "管理者が直接入力する場合は、医師を選んでカレンダーの「日直」「宿直」のボタンを押してNGにし、最後に「NG日を反映する」を押してください。")
@@ -1589,6 +1633,31 @@ if not valid_staff.empty:
                 ng_items.append(f"{d}:{val}")
         staff_df.at[original_idx, NG_COLUMN] = ",".join(ng_items)
 
+
+# --- 日ごとの見通し：その日その枠に入れる先生の人数（NG日・翌日PM dutyを反映） ---
+cap_cells, cap_totals = daily_capacity(staff_df, year, month, num_days, custom_holidays, locked_days, multi_slots_dict,
+                                       fixed_slot_set(edited_fixed_df, year, month), next_month_special_holiday)
+cap_short_cells, cap_short_days = daily_capacity_problems(cap_cells, cap_totals, year, month)
+cap_tight_n = sum(1 for n, need in cap_cells.values() if n is not None and need <= n <= need + 1)
+_cap_label = "📊 日ごとの見通し：その日に入れる先生の人数（NG日を反映）"
+if cap_short_cells or cap_short_days:
+    _cap_label += f"　🟥 入れる先生が足りない所が{len(cap_short_cells) + len(cap_short_days)}か所"
+elif cap_tight_n:
+    _cap_label += f"　🟧 ぎりぎりの枠が{cap_tight_n}か所"
+with st.expander(_cap_label, expanded=False):
+    st.caption("数字は、その日その枠に入れる先生の人数です（NG日・翌日PM duty・回数の上限が0の枠を反映。勤務の間隔は考えていません）。"
+               "「その日の合計」は、その日に何かしらの枠に入れる先生の人数です（1人1日1勤務のため、その日の枠の数より少ないと埋まりません）。"
+               "NG日は「反映する」を押した内容で数えます。")
+    st.markdown("🟥 必要な人数より少ない（必ず不足）　🟧 必要な人数と同じか1人多いだけ（ぎりぎり）　🟩 余裕あり　"
+                "<span style='background:#e3ecf8;color:#34557f;padding:0 4px'>確</span> 確定当直で埋まっている　"
+                "<span style='background:#f7f7f7;color:#999;padding:0 4px'>別</span> 別途決定の日", unsafe_allow_html=True)
+    st.markdown(daily_capacity_html(cap_cells, cap_totals, year, month, num_days, custom_holidays, locked_days), unsafe_allow_html=True)
+    if cap_short_cells or cap_short_days:
+        lines = [f"・{capacity_day_text(d, year, month)}の{s}：必要{need}名に対して、入れる先生が{n}名" for d, s, n, need in cap_short_cells]
+        lines += [f"・{capacity_day_text(d, year, month)}（その日の合計）：枠が{need}つに対して、その日に入れる先生が{n}名" for d, n, need in cap_short_days]
+        st.error("🚨 **次の所は、このままでは埋まりません。** NG日の重なりや、その枠の上限が0の先生が多いことが原因です。\n\n" + "\n".join(lines))
+    else:
+        st.success("✅ どの日・どの枠にも、入れる先生が必要な人数以上います。")
 
 
 st.divider()
