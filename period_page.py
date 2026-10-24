@@ -479,6 +479,7 @@ def work_state_restore():
     # 読み込んだことは、上の帯のボタンの右に1か所だけ出す（次に途中保存するまで表示しておく）
     st.session_state["work_restore_note"] = f"{str(saved_at)[5:16]} 保存分（{_tp.title()}）を読み込みました"
     st.session_state.pop("work_save_note", None)
+    st.session_state["work_note_fresh"] = True   # スマートフォンでは、読み込んだ直後に画面上部へ数秒だけ表示する
     # 読み込んだあとは「続きから」の小さな枠を閉じる（見出しを目に見えない形で変えると、閉じた状態で作り直される）
     st.session_state["work_restore_gen"] = st.session_state.get("work_restore_gen", 0) + 1
 
@@ -556,13 +557,16 @@ def work_save_floating():
 
         # --- 保存・読み込みの結果（ボタンの右に1行） ---
         if logged_in:
+            # 「続きから読み込んだ」「途中保存した」のどちらも、同じ場所に1行だけ出す（次の保存・読み込みまで表示しておく）
             WORK_SAVE_SLOT = st.empty()
+            _fresh = ""
+            if st.session_state.pop("work_note_fresh", False):
+                st.session_state["work_note_count"] = st.session_state.get("work_note_count", 0) + 1
+                _fresh = f" fresh n{st.session_state['work_note_count'] % 2}"
             if st.session_state.get("work_restore_note"):
-                WORK_SAVE_SLOT.markdown(f"<span class='work-save-note'>📂 {st.session_state['work_restore_note']}</span>", unsafe_allow_html=True)
+                WORK_SAVE_SLOT.markdown(f"<span class='work-save-note{_fresh}'>📂 {st.session_state['work_restore_note']}</span>", unsafe_allow_html=True)
             elif st.session_state.get("work_save_note"):
-                WORK_SAVE_SLOT.markdown(f"<span class='work-save-note'>✅ {st.session_state['work_save_note']} 途中保存しました</span>", unsafe_allow_html=True)
-            if st.session_state.pop("work_save_toast", False):
-                st.toast("途中保存しました。次回は画面上の「📂 前回の作業の続きから始める」から読み込めます。", icon="💾")
+                WORK_SAVE_SLOT.markdown(f"<span class='work-save-note{_fresh}'>✅ {st.session_state['work_save_note']} 途中保存しました</span>", unsafe_allow_html=True)
             _dirty = st.session_state.pop("work_save_dirty", None)
             if _dirty:
                 st.toast(f"{'・'.join(_dirty)}先生のカレンダーに、反映していない変更があります。"
@@ -1702,11 +1706,12 @@ work_snapshot = {
 # 右上の途中保存ボタンが押されていたら、ここで（全部の入力を読み終えてから）保存する
 if work_save_request:
     _slot = WORK_SAVE_SLOT or st.empty()
+    _slot.markdown("<span class='work-save-note busy fresh'>💾 途中保存しています…</span>", unsafe_allow_html=True)
     try:
         work_state_save(work_snapshot)
         st.session_state["work_save_note"] = remote_now()[-8:-3]
         st.session_state.pop("work_restore_note", None)
-        st.session_state["work_save_toast"] = True
+        st.session_state["work_note_fresh"] = True   # スマートフォンでは、保存の直後に画面上部へ数秒だけ表示する
         # カレンダーで押したまま反映していない変更は、途中保存に入らないので知らせる
         st.session_state["work_save_dirty"] = [
             k.split("::", 1)[1] for k in list(st.session_state.keys())
@@ -1714,7 +1719,7 @@ if work_save_request:
         _saved_ok = True
     except Exception as e:
         _saved_ok = False
-        _slot.markdown("<span class='work-save-note bad'>⚠ 途中保存できませんでした</span>", unsafe_allow_html=True)
+        _slot.markdown("<span class='work-save-note bad fresh'>⚠ 途中保存できませんでした</span>", unsafe_allow_html=True)
         st.error(f"途中保存できませんでした。通信状態を確認して、もう一度押してください。詳細：{e}")
     if _saved_ok:
         # 画面右上の「前回の作業の続きから始める」に新しい保存日時が出るよう、画面を作り直す
