@@ -876,9 +876,13 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
     center = Alignment(horizontal='center', vertical='center', wrap_text=True)
     def fill(color):
         return PatternFill('solid', fgColor=color.lstrip('#'))
-    PM_FILL = PatternFill('lightUp', fgColor='E0A800', bgColor='FFF5D9')
-    # 休日の翌日PM dutyの日（日直は入れる）：上は休日の色、下に向かって黄色（Excelは斜線を半分だけにできないため、上から下への色の変化で表す）
-    PM_HALF_FILL = GradientFill(type='linear', degree=90, stop=(Stop('FDF1F1', 0), Stop('F2C75C', 1)))
+    # 翌日PM dutyの日：Excelでは斜線を使わず、薄い黄色の塗りで表す
+    PM_COLOR = 'F7DC8A'
+    PM_FILL = fill(PM_COLOR)
+    # 休日の翌日PM dutyの日（上＝日直、下＝宿直）：上半分は休日の薄い色のまま、下半分を黄色にする
+    # （Excelはマスの半分だけを塗れないため、途中から色が変わる塗りで表す）
+    PM_HALF_FILL = GradientFill(type='linear', degree=90, stop=(Stop('FDF1F1', 0), Stop('FDF1F1', 0.45),
+                                                                Stop(PM_COLOR, 0.6), Stop(PM_COLOR, 1)))
 
     ws.cell(row=1, column=1, value=f"{year}年{month}月分 当直表" if title is None else f"{title} 当直表").font = Font(bold=True, size=14)
     header_row, first_day_col = 3, 4
@@ -1102,7 +1106,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
 
     s1 = legend_line(1, '×：その日の当直NG。休日のマスは上＝日直、下＝宿直で、上の×＝日直NG、下の×＝宿直NG（上下とも×＝終日NG）')
     s1.value = '×'; s1.font = Font(bold=True, color='C0392B')
-    legend_line(2, '斜線だけ：翌日PM dutyで宿直を外す日（NGは付いていない）　　斜線に×：翌日PM dutyの日で、NGも付いている').fill = PM_FILL
+    legend_line(2, '黄色だけ：翌日PM dutyで宿直を外す日（NGは付いていない）　　黄色に×：翌日PM dutyの日で、NGも付いている').fill = PM_FILL
     legend_line(3, '薄い赤の列：土日祝・休日にした日').fill = fill('#FDF1F1')
     s4 = legend_line(4, '茶色の太い枠：希望日が通った当直')
     # 枠が見えやすいよう、淡い色の枠名を見本にする
@@ -1117,7 +1121,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
     s6.value = '💬📝'; s6.border = Border()
     s8 = legend_line(8, '見出しのすぐ下の行：その日にNGの先生の数（翌日PM dutyで宿直を外す先生を含む）')
     s8.value = 3; s8.fill = fill('#FFD2A1'); s8.font = Font(bold=True, color='7A3A00')
-    legend_line(9, '下だけ黄色：休日の翌日PM dutyの日（上＝日直、下＝宿直）。上が空欄なら日直には入れる。上に×＝日直NG、下に×＝宿直NGも付いている').fill = PM_HALF_FILL
+    legend_line(9, '下半分だけ黄色：休日の翌日PM dutyの日（上＝日直、下＝宿直）。上が空欄なら日直には入れる。上に×＝日直NG、下に×＝宿直NGも付いている').fill = PM_HALF_FILL
     if count_alert_text(alerts):
         s7 = legend_line(7, '右端の赤い枠の回数：' + count_alert_text(alerts))
         s7.value = next(v for k, v in alerts.items() if v) if alerts else 4
@@ -4134,7 +4138,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 - **茶色の太い枠**：希望日が、希望どおりに通った当直
 - **×**：当直NGの日。休日のマスは上半分＝日直、下半分＝宿直で、上に×＝日直NG、下に×＝宿直NG（上下とも×＝終日NG）
 - **黄色の斜線**：翌日PM dutyのため宿直を外す日。斜線だけならNGは付いておらず、斜線に×があればNGも付いている日です
-- **下半分だけ黄色の斜線**：休日で、翌日PM dutyのため宿直を外す日です（上半分＝日直、下半分＝宿直）。上半分が空欄なら日直には入れます。上半分に×があれば日直NG、下半分に×があれば宿直NGも付いています。ダウンロードしたExcelでは、下に向かって黄色になる色で表します
+- **下半分だけ黄色の斜線**：休日で、翌日PM dutyのため宿直を外す日です（上半分＝日直、下半分＝宿直）。上半分が空欄なら日直には入れます。上半分に×があれば日直NG、下半分に×があれば宿直NGも付いています。ダウンロードしたExcelでは斜線を使わず、黄色の塗り（休日は下半分だけ黄色）で表します
 - **赤線の下の「⚠️ 未決定」**：人数が足りず、担当が決まっていない枠
 - **右端の回数**：宿直・日直／病棟・外来／平日・休日／合計。回数が多い先生は**赤い枠**で表示されます。該当する先生は、作成ボタンの下の「計算状況・条件の注意事項と対処方法」にも一覧で出ます。基準は表のすぐ上の「⚠ アラートの基準」で変えられます（初期設定は宿直4回以上・休日3回以上。0にした項目はアラートなし）。
 - **メモ欄**：💬は先生からのコメント（取り込んだ先生だけ）、📝は医師条件の備考です。カーソルを合わせると全文が出ます。全員分は「💬 先生方のコメント・備考の一覧」でまとめて見られます。
