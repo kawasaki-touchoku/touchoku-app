@@ -737,6 +737,8 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
 .dm td.half span{position:absolute;left:0;right:0;height:50%;display:flex;align-items:center;justify-content:center;color:#c0392b;font-weight:700;font-size:13px;line-height:1}
 .dm td.half span.t{top:0} .dm td.half span.b{bottom:0}
 .dm td.half::after{content:"";position:absolute;left:5px;right:5px;top:50%;border-top:1px dashed #dcb8b8}
+/* 行の境目を見やすくする：先生の行を1行おきに薄いグレーにする（休日の色・斜線などの上に薄く重ねる） */
+.dm tbody tr:not(.ngcount):nth-child(odd) td{background-image:linear-gradient(rgba(36,64,95,.075),rgba(36,64,95,.075))}
 .dm tr.short.first td{border-top:2px solid #c0392b}
 .dm tr.short td.nm{color:#c0392b}
 .dm th.miss{background:#fde2e0}
