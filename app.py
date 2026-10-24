@@ -769,16 +769,16 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
     for s, (bg, fg) in MATRIX_SHIFT_COLORS.items():
         legend.append(f'<span><i style="background:{bg};color:{fg}">{s}</i></span>')
     legend.append(f'<span><i style="box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME}">&nbsp;&nbsp;&nbsp;</i>茶色の枠：希望日が通った当直</span>')
-    legend.append('<span><i style="color:#c0392b">×</i>当直NG</span>')
+    legend.append('<span><i style="background:#fdf1f1">&nbsp;</i>薄い赤の列：土日祝・休日にした日</span>')
+    legend.append('<span><i style="color:#c0392b">×</i>当直NG（平日は宿直NG）</span>')
     legend.append('<span><i style="color:#c0392b;background:#fdf1f1;line-height:1;padding:0 4px">×<br>&nbsp;</i>'
-                  '休日のマスは上半分＝日直、下半分＝宿直：上に×＝日直NG、下に×＝宿直NG（上下とも×＝終日NG）</span>')
+                  '休日のマス：上半分＝日直、下半分＝宿直。上の×＝日直NG、下の×＝宿直NG（上下とも×＝終日NG）</span>')
+    legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>斜線：翌日PM dutyで宿直を外す日（×があればNGも付いている）</span>')
+    legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px) left bottom/100% 50% no-repeat,#fdf1f1">&nbsp;</i>'
+                  '下半分だけ斜線：休日の翌日PM dutyの日。宿直は外し、日直には入れる（×の意味は休日のマスと同じ）</span>')
     legend.append('<span><i>💬📝</i>メモ欄：先生からのコメント・備考（カーソルを合わせると全文）</span>')
-    legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>斜線だけ：翌日PM dutyで宿直を外す日（NGは付いていない）</span>')
-    legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px);color:#c0392b">×</i>斜線に×：翌日PM dutyの日で、NGも付いている</span>')
-    legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px) left bottom/100% 50% no-repeat">&nbsp;</i>'
-                  '下半分だけ斜線：休日の翌日PM dutyの日（上半分＝日直、下半分＝宿直）。上半分が空欄なら日直には入れる。上半分に×＝日直NG、下半分に×＝宿直NGも付いている</span>')
     legend.append('<span><i style="color:#c0392b;border-color:#c0392b">⚠️ 未決定</i>赤線の下：当直が決まっていない枠</span>')
-    legend.append('<span><i style="background:#ffd2a1;color:#7a3a00">3</i>いちばん上の行：その日にNGの先生の数（翌日PM dutyで宿直を外す先生を含む）</span>')
+    legend.append('<span><i style="background:#ffd2a1;color:#7a3a00">3</i>NG人数の行：その日にNGの先生の数（翌日PM dutyで宿直を外す先生を含む）</span>')
     if count_alert_text(alerts):
         legend.append('<span><i style="color:#c0392b;background:#ffd8d8;border-color:#e03131">⚠</i>右端の赤いマス：' + count_alert_text(alerts) + '</span>')
     legend.append('</div>')
@@ -1131,26 +1131,26 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
         sample.border = border; sample.alignment = one_line
         return sample
 
-    s1 = legend_line(1, '×：その日の当直NG。休日のマスは上＝日直、下＝宿直で、上の×＝日直NG、下の×＝宿直NG（上下とも×＝終日NG）')
+    s1 = legend_line(1, '×：当直NG（平日は宿直NG）。休日のマスは上＝日直、下＝宿直で、上の×＝日直NG、下の×＝宿直NG（上下とも×＝終日NG）')
     s1.value = '×'; s1.font = Font(bold=True, color='C0392B')
-    legend_line(2, '黄色だけ：翌日PM dutyで宿直を外す日（NGは付いていない）　　黄色に×：翌日PM dutyの日で、NGも付いている').fill = PM_FILL
-    legend_line(3, '薄い赤の列：土日祝・休日にした日').fill = fill('#FDF1F1')
-    s4 = legend_line(4, '茶色の太い枠：希望日が通った当直')
+    legend_line(2, '黄色：翌日PM dutyで宿直を外す日（×があればNGも付いている）').fill = PM_FILL
+    legend_line(4, '薄い赤の列：土日祝・休日にした日').fill = fill('#FDF1F1')
+    s4 = legend_line(5, '茶色の太い枠：希望日が通った当直')
     # 枠が見えやすいよう、淡い色の枠名を見本にする
     sample_slot = 'B日直' if 'B日直' in MATRIX_SHIFT_COLORS else next(iter(MATRIX_SHIFT_COLORS))
     first_bg, first_fg = MATRIX_SHIFT_COLORS[sample_slot]
     s4.value = sample_slot; s4.fill = fill(first_bg)
     s4.font = Font(bold=True, size=8, color=first_fg.lstrip('#')); s4.border = wish_border
-    s5 = legend_line(5, '赤線より下の「⚠️ 未決定」の行：当直が決まっていない枠（その枠の色で表示）')
+    s5 = legend_line(6, '赤線より下の「⚠️ 未決定」の行：当直が決まっていない枠（その枠の色で表示）')
     s5.border = Border(left=thin, right=thin, bottom=thin, top=red)
     s5.value = '未決定'; s5.font = Font(bold=True, size=8, color='C0392B')
-    s6 = legend_line(6, 'メモ：💬＝先生からのコメント、📝＝備考（セルにカーソルを乗せると全文。「メモ全文」シートにも一覧）')
+    s6 = legend_line(7, 'メモ：💬＝先生からのコメント、📝＝備考（セルにカーソルを乗せると全文。「メモ全文」シートにも一覧）')
     s6.value = '💬📝'; s6.border = Border()
-    s8 = legend_line(8, '見出しのすぐ下の行：その日にNGの先生の数（翌日PM dutyで宿直を外す先生を含む）')
+    s8 = legend_line(8, 'NG人数の行（見出しのすぐ下）：その日にNGの先生の数（翌日PM dutyで宿直を外す先生を含む）')
     s8.value = 3; s8.fill = fill('#FFD2A1'); s8.font = Font(bold=True, color='7A3A00')
-    legend_line(9, '下半分だけ黄色：休日の翌日PM dutyの日（上＝日直、下＝宿直）。上が空欄なら日直には入れる。上に×＝日直NG、下に×＝宿直NGも付いている').fill = PM_HALF_FILL
+    legend_line(3, '下半分だけ黄色：休日の翌日PM dutyの日。宿直は外し、日直には入れる（×の意味は休日のマスと同じ）').fill = PM_HALF_FILL
     if count_alert_text(alerts):
-        s7 = legend_line(7, '右端の赤い枠の回数：' + count_alert_text(alerts))
+        s7 = legend_line(9, '右端の赤い枠の回数：' + count_alert_text(alerts))
         s7.value = next(v for k, v in alerts.items() if v) if alerts else 4
         s7.fill = fill('#FFD8D8'); s7.font = Font(bold=True, color='C0392B')
         s7.border = Border(left=red_side, right=red_side, top=red_side, bottom=red_side)
@@ -1291,11 +1291,11 @@ def validate_fixed_inputs(df, doctors, year, month, holidays=None):
                 continue
             if (holidays is not None and s in DAY_SHIFTS and (dt.year, dt.month) == (year, month)
                     and not is_holiday_date(dt, year, month, holidays)):
-                errors.append(f'確定当直 {dt} {s}：平日には日直がありません。この日に日直を設ける場合は、上のカレンダーで「休日にする」にチェックを入れてください。')
+                errors.append(f'確定当直 {dt.month}/{dt.day} {s}：平日には日直がありません。この日に日直を設ける場合は、上のカレンダーで「休日にする」にチェックを入れてください。')
             names = list(dict.fromkeys(n.strip() for n in re.split('[、,]', val)))
             for name in names:
                 if name not in doctors:
-                    errors.append(f'確定当直 {dt} {s}：医師名「{name}」が名簿と一致しません。')
+                    errors.append(f'確定当直 {dt.month}/{dt.day} {s}：医師名「{name}」が名簿と一致しません。')
             df.at[i, s] = '、'.join(names)
     return df, errors
 
@@ -1362,9 +1362,9 @@ def audit_schedule(result, staff, year, month, holidays, multi, past, future, ne
                 kind = ng.get(dt.day, 'OK')
                 night = slot in NIGHT_SHIFTS
                 if kind == '全NG' or (kind == '宿NG' and night) or (kind == '日NG' and not night):
-                    warnings.append(f'{name}：{dt} {slot}はNG指定より確定指定を優先しました。')
+                    warnings.append(f'{name}：{dt.month}/{dt.day} {slot}はNG指定より確定指定を優先しました。')
                 if night and pm_duty_restricted(dt, pm_weekdays, year, month, holidays, next_month_special_holiday):
-                    warnings.append(f'{name}：{dt} {slot}は翌日PM dutyの制限より確定指定を優先しました。')
+                    warnings.append(f'{name}：{dt.month}/{dt.day} {slot}は翌日PM dutyの制限より確定指定を優先しました。')
         total = sum(counts.values())
         if total < int(row['月間最小回数']):
             warnings.append(f'{name}：月間最小回数の目標{int(row["月間最小回数"])}回に対し、{total}回です。')
@@ -1378,7 +1378,7 @@ def audit_schedule(result, staff, year, month, holidays, multi, past, future, ne
             if (a.year, a.month) != (year, month) and (b.year, b.month) != (year, month): continue
             gap = (b - a).days - 1
             if gap < int(row['最低空ける日数']):
-                warnings.append(f'{name}：確定勤務同士の間隔が設定未満です（{a}→{b}、空き{gap}日／設定{int(row["最低空ける日数"])}日）。確定勤務を維持しました。')
+                warnings.append(f'{name}：確定勤務同士の間隔が設定未満です（{a.month}/{a.day}→{b.month}/{b.day}、空き{gap}日／設定{int(row["最低空ける日数"])}日）。確定勤務を維持しました。')
     for _, r in result.iterrows():
         d = parse_shift_date(r['日付'], year, month).day
         for s in ALL_SHIFT_TYPES:
@@ -3883,11 +3883,11 @@ def period_validate_fixed_inputs(df, doctors, P, holidays=None):
                 continue
             if (holidays is not None and s in DAY_SHIFTS and P.index(dt) is not None
                     and not period_is_holiday_date(P, dt, holidays)):
-                errors.append(f'確定当直 {dt} {s}：平日には日直がありません。この日に日直を設ける場合は、上のカレンダーで「休日にする」にチェックを入れてください。')
+                errors.append(f'確定当直 {dt.month}/{dt.day} {s}：平日には日直がありません。この日に日直を設ける場合は、上のカレンダーで「休日にする」にチェックを入れてください。')
             names = list(dict.fromkeys(n.strip() for n in re.split('[、,]', val)))
             for name in names:
                 if name not in doctors:
-                    errors.append(f'確定当直 {dt} {s}：医師名「{name}」が名簿と一致しません。')
+                    errors.append(f'確定当直 {dt.month}/{dt.day} {s}：医師名「{name}」が名簿と一致しません。')
             df.at[i, s] = '、'.join(names)
     return df, errors
 
@@ -3910,9 +3910,9 @@ def period_audit_schedule(result, staff, P, holidays, multi, past, future, next_
                 kind = ng.get(P.index(dt), 'OK')
                 night = slot in NIGHT_SHIFTS
                 if kind == '全NG' or (kind == '宿NG' and night) or (kind == '日NG' and not night):
-                    warnings.append(f'{name}：{dt} {slot}はNG指定より確定指定を優先しました。')
+                    warnings.append(f'{name}：{dt.month}/{dt.day} {slot}はNG指定より確定指定を優先しました。')
                 if night and period_pm_restricted(P, P.index(dt), pm_weekdays, holidays, next_month_special_holiday):
-                    warnings.append(f'{name}：{dt} {slot}は翌日PM dutyの制限より確定指定を優先しました。')
+                    warnings.append(f'{name}：{dt.month}/{dt.day} {slot}は翌日PM dutyの制限より確定指定を優先しました。')
         total = sum(counts.values())
         if total < int(row['月間最小回数']):
             warnings.append(f'{name}：月間最小回数の目標{int(row["月間最小回数"])}回に対し、{total}回です。')
@@ -3926,7 +3926,7 @@ def period_audit_schedule(result, staff, P, holidays, multi, past, future, next_
             if P.index(a) is None and P.index(b) is None: continue
             gap = (b - a).days - 1
             if gap < int(row['最低空ける日数']):
-                warnings.append(f'{name}：確定勤務同士の間隔が設定未満です（{a}→{b}、空き{gap}日／設定{int(row["最低空ける日数"])}日）。確定勤務を維持しました。')
+                warnings.append(f'{name}：確定勤務同士の間隔が設定未満です（{a.month}/{a.day}→{b.month}/{b.day}、空き{gap}日／設定{int(row["最低空ける日数"])}日）。確定勤務を維持しました。')
     for _, r in result.iterrows():
         d = int(r['_idx'])
         for s in ALL_SHIFT_TYPES:
@@ -4163,20 +4163,25 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 
 - 枠名のマス：決まった当直（色は枠の種類）
 - **茶色の太い枠**：希望日が、希望どおりに通った当直
-- **×**：当直NGの日。休日のマスは上半分＝日直、下半分＝宿直で、上に×＝日直NG、下に×＝宿直NG（上下とも×＝終日NG）
-- **黄色の斜線**：翌日PM dutyのため宿直を外す日。斜線だけならNGは付いておらず、斜線に×があればNGも付いている日です
-- **下半分だけ黄色の斜線**：休日で、翌日PM dutyのため宿直を外す日です（上半分＝日直、下半分＝宿直）。上半分が空欄なら日直には入れます。上半分に×があれば日直NG、下半分に×があれば宿直NGも付いています。ダウンロードしたExcelでは斜線を使わず、黄色の塗り（休日は下半分だけ黄色）で表します
+- **薄い赤の列**：土日祝と「休日にする」にした日
+- **×**：当直NGの日（平日は宿直NG）
+- **休日のマス**：上半分＝日直、下半分＝宿直です。上に×＝日直NG、下に×＝宿直NG、上下とも×＝終日NG
+- **黄色の斜線**：翌日PM dutyのため宿直を外す日。×があれば、NGも付いている日です
+- **下半分だけ黄色の斜線**：休日の翌日PM dutyの日。宿直は外しますが、日直には入れます（×の意味は休日のマスと同じ）
+- **NG人数の行**（見出しのすぐ下）：その日にNGの先生の数。翌日PM dutyで宿直を外す先生も数えます。多い日ほど濃いオレンジです
 - **赤線の下の「⚠️ 未決定」**：人数が足りず、担当が決まっていない枠
 - **右端の回数**：宿直・日直／病棟・外来／平日・休日／合計。回数が多い先生は**赤い枠**で表示されます。該当する先生は、作成ボタンの下の「計算状況・条件の注意事項と対処方法」にも一覧で出ます。基準は表のすぐ上の「⚠ アラートの基準」で変えられます（初期設定は宿直4回以上・休日3回以上。0にした項目はアラートなし）。
 - **メモ欄**：💬は先生からのコメント（取り込んだ先生だけ）、📝は医師条件の備考です。カーソルを合わせると全文が出ます。全員分は「💬 先生方のコメント・備考の一覧」でまとめて見られます。
+- 行の見間違いを防ぐため、先生の行は1行おきに薄いグレーになっています。
 - マスにカーソルを合わせると、その先生の行と、その日の列が黄色く色付きます。
 
 **📥 Excelでダウンロード（緑のボタン）**
 
 印刷用の表（A3横・1枚）がダウンロードされます。Excelで最終調整もできます。
 
+- 画面の表と同じ見た目ですが、翌日PM dutyの日は斜線ではなく黄色の塗り（休日は下半分だけ黄色）で表します。
 - 右の回数は計算式になっているので、マスに「A宿直」「外来日直」などの枠名を書き足したり消したりすると、自動で変わります。赤い枠も自動で付きます。
-- 「⚠️ 未決定」の行の枠を、表の中のマスへドラッグして移せます。移すと、未決定の「○枠」と、移した先の先生の回数が自動で変わります。
+- 「⚠️ 未決定」の行の枠を、表の中のマスへドラッグして移せます。移すと、未決定の「○枠」と、移した先の先生の回数が自動で変わります（移した元のマスは色のない白になります）。
 - メモ欄にはメモの全文が入っています。マスを選ぶと上の入力欄で全文が読めます。「メモ全文」シートにも一覧があります。
 
 **📅 作成した当直案**（日付ごとの表）
@@ -4186,7 +4191,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
         """)
     with tab_trouble:
         st.markdown("""
-- **「未決定」の枠が出る**：作成ボタンの下の「計算状況・条件の注意事項と対処方法」を見てください。NG日・回数の上限・勤務間隔の条件が厳しすぎる可能性があります。月間最大回数を増やす、勤務間隔を短くするなどして、下の帯の「🚀 当直案を作成」で作り直してください。少しだけなら、Excelで手で埋めることもできます。
+- **「未決定」の枠が出る**：作成ボタンの下の「計算状況・条件の注意事項と対処方法」を見てください。医師条件の下の「⚖️ 当直の枠は足りそう？」で、赤い棒（足りない枠）がないかも確認します。NG日・回数の上限・勤務間隔の条件が厳しすぎる可能性があります。月間最大回数を増やす、勤務間隔を短くするなどして、下の帯の「🚀 当直案を作成」で作り直してください。少しだけなら、Excelで手で埋めることもできます。
 - **アプリを開くと入力した内容が消えている**：しばらく使わないと画面がリセットされます。上の帯の「📂 前回の作業の続きから始める」で読み込んでください。先生方の提出内容と専用URLはスプレッドシートに残っているので消えません。
 - **英語の画面（Zzzz…）が出る**：アプリが休止しています。青いボタン「Yes, get this app back up!」を押して1分ほど待つと開きます。
 - **先生のNG日が当直案に入っていない**：管理画面で「⬇️ 選んだ先生のNG日を取り込む」を押したか確認してください。
@@ -5330,7 +5335,8 @@ if len(staff_df) > 0:
 
         st.markdown("<div id='sec-result'></div>", unsafe_allow_html=True)
         st.subheader("🗓️ 医師別の当直一覧")
-        st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。希望日が通った当直は茶色の太い枠で囲み、回数が多い先生は右端の回数を赤い枠で示します。マスにカーソルを合わせると、その先生の行とその日の列が黄色く色付きます。")
+        st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。休日のマスは上半分が日直、下半分が宿直です。"
+                   "希望日が通った当直は茶色の太い枠で囲み、回数が多い先生は右端の回数を赤い枠で示します。マスにカーソルを合わせると、その先生の行とその日の列が黄色く色付きます。")
         matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday,
                                                      comments=imported_comments(year, month))
         missing_total = sum(len(info['shortage']) for info in matrix_days)
