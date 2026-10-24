@@ -605,17 +605,14 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
             kind = ng.get(d)
             pm = pm_duty_restricted(datetime.date(year, month, d), pm_days, year, month, custom_holidays, next_month_special_holiday)
             # 翌日PM dutyの日にNGも付いている場合は、斜線の上に×を出す（斜線だけ＝NGは付いていない）
-            if pm and info['holiday'] and kind in (None, '宿NG', '日NG'):
-                # 休日の翌日PM dutyの日：上半分＝日直、下半分＝宿直（斜線）に分けて表示する。
-                # 日直NGなら上半分に×、宿直NGも付いていれば下半分に×
-                cells.append({'type': 'pmhalf', 'top': '×' if kind == '日NG' else '', 'bottom': '×' if kind == '宿NG' else '',
-                              'text': '×' if kind in ('日NG', '宿NG') else ''})
-            elif kind == '全NG' or (kind == '宿NG' and not info['holiday']):
+            if info['holiday'] and (pm or kind in ('全NG', '宿NG', '日NG')):
+                # 休日は、上半分＝日直、下半分＝宿直に分けて、NGの側に×を出す（全NGは上下とも×）。
+                # 翌日PM dutyで宿直を外す日は、下半分を斜線にする
+                top = '×' if kind in ('全NG', '日NG') else ''
+                bottom = '×' if kind in ('全NG', '宿NG') else ''
+                cells.append({'type': 'pmhalf' if pm else 'half', 'top': top, 'bottom': bottom, 'text': '×' if (top or bottom) else ''})
+            elif kind in ('全NG', '宿NG'):
                 cells.append({'type': 'ng', 'text': '×', 'pm': pm})
-            elif kind in ('宿NG', '日NG') and info['holiday']:
-                # 休日の宿直だけNG・日直だけNG：上半分＝日直、下半分＝宿直に分けて、NGの側に×を出す
-                cells.append({'type': 'half', 'top': '×' if kind == '日NG' else '', 'bottom': '×' if kind == '宿NG' else '',
-                              'text': '×'})
             elif pm:
                 cells.append({'type': 'pm', 'text': ''})
             else:
@@ -767,7 +764,7 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
     legend.append(f'<span><i style="box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME}">&nbsp;&nbsp;&nbsp;</i>茶色の枠：希望日が通った当直</span>')
     legend.append('<span><i style="color:#c0392b">×</i>当直NG</span>')
     legend.append('<span><i style="color:#c0392b;background:#fdf1f1;line-height:1;padding:0 4px">×<br>&nbsp;</i>'
-                  '休日のマスは上半分＝日直、下半分＝宿直：上に×＝日直だけNG、下に×＝宿直だけNG</span>')
+                  '休日のマスは上半分＝日直、下半分＝宿直：上に×＝日直NG、下に×＝宿直NG（上下とも×＝終日NG）</span>')
     legend.append('<span><i>💬📝</i>メモ欄：先生からのコメント・備考（カーソルを合わせると全文）</span>')
     legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>斜線だけ：翌日PM dutyで宿直を外す日（NGは付いていない）</span>')
     legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px);color:#c0392b">×</i>斜線に×：翌日PM dutyの日で、NGも付いている</span>')
@@ -1000,13 +997,13 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
                 # 休日の日直だけNG・宿直だけNG：×を小さめにして、上（日直）・下（宿直）に寄せる
                 c.fill = fill('#FDF1F1')
                 c.font = Font(bold=True, size=8, color='C0392B')
-                c.value = '×\n ' if cell.get('top') else ' \n×'   # 2行にして、×を上の行（日直）か下の行（宿直）に置く
+                c.value = f"{cell.get('top') or ' '}\n{cell.get('bottom') or ' '}"   # 2行にして、×を上の行（日直）・下の行（宿直）に置く
                 c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
             elif cell['type'] == 'pmhalf':
                 c.fill = PM_HALF_FILL
                 c.font = Font(bold=True, size=8, color='C0392B')
                 if cell.get('top') or cell.get('bottom'):
-                    c.value = '×\n ' if cell.get('top') else ' \n×'
+                    c.value = f"{cell.get('top') or ' '}\n{cell.get('bottom') or ' '}"
                 c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
             elif info['holiday']:
                 c.fill = fill('#FDF1F1')
@@ -1103,7 +1100,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
         sample.border = border; sample.alignment = one_line
         return sample
 
-    s1 = legend_line(1, '×：その日の当直NG。休日のマスは上＝日直、下＝宿直で、上に寄せた×＝日直だけNG、下に寄せた×＝宿直だけNG')
+    s1 = legend_line(1, '×：その日の当直NG。休日のマスは上＝日直、下＝宿直で、上の×＝日直NG、下の×＝宿直NG（上下とも×＝終日NG）')
     s1.value = '×'; s1.font = Font(bold=True, color='C0392B')
     legend_line(2, '斜線だけ：翌日PM dutyで宿直を外す日（NGは付いていない）　　斜線に×：翌日PM dutyの日で、NGも付いている').fill = PM_FILL
     legend_line(3, '薄い赤の列：土日祝・休日にした日').fill = fill('#FDF1F1')
@@ -3984,17 +3981,14 @@ def period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month
             kind = ng.get(d)
             pm = period_pm_restricted(P, d, pm_days, custom_holidays, next_month_special_holiday)
             # 翌日PM dutyの日にNGも付いている場合は、斜線の上に×を出す（斜線だけ＝NGは付いていない）
-            if pm and info['holiday'] and kind in (None, '宿NG', '日NG'):
-                # 休日の翌日PM dutyの日：上半分＝日直、下半分＝宿直（斜線）に分けて表示する。
-                # 日直NGなら上半分に×、宿直NGも付いていれば下半分に×
-                cells.append({'type': 'pmhalf', 'top': '×' if kind == '日NG' else '', 'bottom': '×' if kind == '宿NG' else '',
-                              'text': '×' if kind in ('日NG', '宿NG') else ''})
-            elif kind == '全NG' or (kind == '宿NG' and not info['holiday']):
+            if info['holiday'] and (pm or kind in ('全NG', '宿NG', '日NG')):
+                # 休日は、上半分＝日直、下半分＝宿直に分けて、NGの側に×を出す（全NGは上下とも×）。
+                # 翌日PM dutyで宿直を外す日は、下半分を斜線にする
+                top = '×' if kind in ('全NG', '日NG') else ''
+                bottom = '×' if kind in ('全NG', '宿NG') else ''
+                cells.append({'type': 'pmhalf' if pm else 'half', 'top': top, 'bottom': bottom, 'text': '×' if (top or bottom) else ''})
+            elif kind in ('全NG', '宿NG'):
                 cells.append({'type': 'ng', 'text': '×', 'pm': pm})
-            elif kind in ('宿NG', '日NG') and info['holiday']:
-                # 休日の宿直だけNG・日直だけNG：上半分＝日直、下半分＝宿直に分けて、NGの側に×を出す
-                cells.append({'type': 'half', 'top': '×' if kind == '日NG' else '', 'bottom': '×' if kind == '宿NG' else '',
-                              'text': '×'})
             elif pm:
                 cells.append({'type': 'pm', 'text': ''})
             else:
@@ -4138,7 +4132,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 
 - 枠名のマス：決まった当直（色は枠の種類）
 - **茶色の太い枠**：希望日が、希望どおりに通った当直
-- **×**：当直NGの日。休日のマスは上半分＝日直、下半分＝宿直で、上に×＝日直だけNG、下に×＝宿直だけNG
+- **×**：当直NGの日。休日のマスは上半分＝日直、下半分＝宿直で、上に×＝日直NG、下に×＝宿直NG（上下とも×＝終日NG）
 - **黄色の斜線**：翌日PM dutyのため宿直を外す日。斜線だけならNGは付いておらず、斜線に×があればNGも付いている日です
 - **下半分だけ黄色の斜線**：休日で、翌日PM dutyのため宿直を外す日です（上半分＝日直、下半分＝宿直）。上半分が空欄なら日直には入れます。上半分に×があれば日直NG、下半分に×があれば宿直NGも付いています。ダウンロードしたExcelでは、下に向かって黄色になる色で表します
 - **赤線の下の「⚠️ 未決定」**：人数が足りず、担当が決まっていない枠
