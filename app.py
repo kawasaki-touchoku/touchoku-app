@@ -883,6 +883,12 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
     center = Alignment(horizontal='center', vertical='center', wrap_text=True)
     def fill(color):
         return PatternFill('solid', fgColor=color.lstrip('#'))
+
+    def stripe_color(rgb):
+        """色に薄いグレー（画面の縞と同じ紺色を7.5%）を重ねた色。"""
+        rgb = str(rgb)[-6:]
+        base = [int(rgb[k:k + 2], 16) for k in (0, 2, 4)]
+        return ''.join(f"{round(v * 0.925 + t * 0.075):02X}" for v, t in zip(base, (36, 64, 95)))
     # 翌日PM dutyの日：Excelでは斜線を使わず、薄い黄色の塗りで表す
     PM_COLOR = 'F7DC8A'
     PM_FILL = fill(PM_COLOR)
@@ -1056,6 +1062,20 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
         max_lines = max([str(cell['text']).count('/') + 1 for cell in row['cells']
                          if cell['type'] == 'shift' and '/' in str(cell['text'])] or [1])
         ws.row_dimensions[r_idx].height = max(20, 11 * max_lines + 6)
+        # 画面と同じく、先生の行を1行おきに薄いグレーにする（当直の枠の色はそのまま。休日・PM dutyなどの色は少し暗くする）
+        if (r_idx - header_row - 2) % 2 == 1:
+            shift_cols = {first_day_col + i for i, cell in enumerate(row['cells']) if cell['type'] == 'shift'}
+            for col in range(1, sum_col + n_counts):
+                if col in shift_cols:
+                    continue
+                c = ws.cell(row=r_idx, column=col)
+                if isinstance(c.fill, GradientFill):
+                    c.fill = GradientFill(type='linear', degree=90, stop=[
+                        Stop(stripe_color(st.color.rgb), st.position) for st in c.fill.stop])
+                elif c.fill is not None and c.fill.fill_type == 'solid':
+                    c.fill = fill(stripe_color(c.fill.fgColor.rgb))
+                else:
+                    c.fill = fill(stripe_color('FFFFFF'))
 
     # 当直が決まっていない枠：枠ごとに1行、その枠の色で表示
     last_row = header_row + 1 + len(rows)
