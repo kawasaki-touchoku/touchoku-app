@@ -100,6 +100,69 @@ def parse_fixed_csv(file_bytes):
     return df
 
 
+# 確定当直の表の列：下の「作成した当直案」と同じ並び（平日か休日かは上のカレンダーで決まるので入力しない）
+FIXED_SLOT_COLUMNS = [c for c in RESULT_COLUMNS[2:]]
+
+
+def fixed_rows_for_editor(df):
+    """
+    確定当直の表を、画面で編集しやすい形にそろえる。
+    ・列は「日付」＋当直案と同じ並びの枠（ほかの列は後ろに残す。入力チェックで知らせるため）
+    ・1つのマスに「佐藤、鈴木」のように複数人いる場合は、同じ日付の行を増やして1マス1人にする
+      （名前は一覧から選ぶので、1マスに1人だけ入れる形にする）
+    """
+    df = df.drop(columns=["平日/休日"], errors="ignore").copy()
+    for c in ["日付"] + FIXED_SLOT_COLUMNS:
+        if c not in df.columns:
+            df[c] = ""
+    extra = [c for c in df.columns if c not in ["日付"] + FIXED_SLOT_COLUMNS]
+    df = df[["日付"] + FIXED_SLOT_COLUMNS + extra]
+
+    def _text(v):
+        return "" if v is None or (not isinstance(v, str) and pd.isna(v)) or str(v).strip().lower() in ("nan", "none", "<na>") else str(v).strip()
+
+    rows = []
+    for _, r in df.iterrows():
+        base = {c: _text(r[c]) for c in df.columns}
+        names = {s: [n.strip() for n in re.split(r"[、,]+", base[s]) if n.strip()] for s in FIXED_SLOT_COLUMNS}
+        k = max([len(v) for v in names.values()] + [1])
+        for i in range(k):
+            row = dict(base)
+            for s_ in FIXED_SLOT_COLUMNS:
+                row[s_] = names[s_][i] if i < len(names[s_]) else ""
+            if i > 0:
+                for c in extra:
+                    row[c] = ""
+            rows.append(row)
+    out = pd.DataFrame(rows, columns=df.columns)
+    if out.empty:
+        out.loc[0] = ["" for _ in out.columns]
+    return out.astype(str).reset_index(drop=True)
+
+
+def apply_fixed_edits(widget_key):
+    """確定当直の表で変更があったとき（コールバック）：変更を保存用の表に書き込み、表を作り直す。"""
+    edits = st.session_state.get(widget_key) or {}
+    df = st.session_state.get("fixed_rows")
+    if df is None:
+        return
+    df = df.copy()
+    for idx, changes in (edits.get("edited_rows") or {}).items():
+        idx = int(idx)
+        if 0 <= idx < len(df):
+            for col, val in changes.items():
+                if col in df.columns:
+                    df.at[idx, col] = "" if val is None else str(val).strip()
+    deleted = [int(i) for i in (edits.get("deleted_rows") or []) if 0 <= int(i) < len(df)]
+    if deleted:
+        df = df.drop(index=deleted)
+    for added in (edits.get("added_rows") or []):
+        df.loc[len(df) + 10 ** 6] = [("" if added.get(c) is None else str(added.get(c)).strip()) for c in df.columns]
+    st.session_state["fixed_rows"] = df.reset_index(drop=True).astype(str)
+    # 表を作り直す（同じ変更が二重に入らないように、新しい表として出し直す）
+    st.session_state["fixed_editor_gen"] = st.session_state.get("fixed_editor_gen", 0) + 1
+
+
 def parse_shift_date(date_value, target_year, target_month):
     if pd.isna(date_value): return None
     if isinstance(date_value, datetime.datetime): return date_value.date()
@@ -1282,7 +1345,7 @@ def validate_fixed_inputs(df, doctors, year, month, holidays=None):
             continue
         dt = parse_shift_date(raw, year, month)
         if dt is None:
-            errors.append(f'確定当直 {i+1}行目：日付「{raw}」を確認してください。「11/1」または「2026/11/1」の形で入力します。')
+            errors.append(f'確定当直 {i+1}行目：日付「{raw}」を確認してください。「{month}/1」または「{year}/{month}/1」の形で入力します。')
             continue
         df.at[i, '日付'] = dt.isoformat()
         for s in ALL_SHIFT_TYPES:
@@ -2274,6 +2337,7 @@ def work_state_restore():
     for slot, rank in (data.get("priority") or {}).items():
         st.session_state[f"shortage_priority_{slot}"] = int(rank)
     st.session_state["restored_state"] = data
+    st.session_state.pop("fixed_src", None)   # 確定当直の表も、読み込んだ内容で作り直す
     st.session_state["multi_editor_gen"] = st.session_state.get("multi_editor_gen", 0) + 1   # 増員設定の表を読み込んだ内容で作り直す
     # ファイルのアップロード欄を空にして、復元した内容を使う
     st.session_state["uploader_gen"] = st.session_state.get("uploader_gen", 0) + 1
@@ -3874,7 +3938,7 @@ def period_validate_fixed_inputs(df, doctors, P, holidays=None):
             continue
         dt = parse_shift_date(raw, year, month)
         if dt is None:
-            errors.append(f'確定当直 {i+1}行目：日付「{raw}」を確認してください。「11/1」または「2026/11/1」の形で入力します。')
+            errors.append(f'確定当直 {i+1}行目：日付「{raw}」を確認してください。「{P.example()}」または「{P.year}/{P.example()}」の形で入力します。')
             continue
         df.at[i, '日付'] = dt.isoformat()
         for s in ALL_SHIFT_TYPES:
@@ -4584,9 +4648,9 @@ with st.container(key="fixed_section"), st.expander("📅 先月今月来月の�
     with (st.popover("確定当直の入力例と扱い") if hasattr(st, "popover") else st.container()):
         st.markdown("""
 - CSVのアップロードと、下の表への直接入力のどちらでも入力できます。
-- 日付は `2026/10/1` または `10/1` の形式で入力します。
-- 担当する枠の欄に、医師条件と同じ名前を入力します。複数人の場合は `佐藤、鈴木` のように「、」で区切ります。
-- 医師名の区切りには「、」を使ってください。名前に含まれる空白は区切りません。医師条件と同じ表記にしてください。
+- 日付は `年/月/日` または `月/日`（例：`11/1`）の形で入力します。先月・来月の日付も入れられます。
+- 担当する先生は、枠の欄をクリックすると出る一覧（医師条件の名前）から選びます。
+- 同じ日・同じ枠を2人以上で担当する場合は、同じ日付の行を追加して、もう1人を選びます。CSVで `佐藤、鈴木` のように「、」で区切って入れた場合は、読み込むと自動で2行に分かれます。
 - 未確定の枠は空欄で構いません。
 - 今月の平日に日直を入力する場合は、先に上のカレンダーでその日を「休日にする」にしてください。
 - 「別途決定」にした日（年末年始など）の当番が決まったら、ここに入れておくと、当直案と一覧に表示され、前後の勤務間隔の計算にも使われます。
@@ -4595,7 +4659,7 @@ with st.container(key="fixed_section"), st.expander("📅 先月今月来月の�
 **今月の同じ日・同じ枠を指定した場合、確定当直への入力と「希望優先度100以上」での指定は、どちらも固定され、計算上の扱いは基本的に同じです。両方に入力する必要はありません。**
     """)
 
-    fixed_columns = ["日付"] + ALL_SHIFT_TYPES   # 平日か休日かは、上のカレンダーで自動的に決まるので入力しない
+    fixed_columns = ["日付"] + FIXED_SLOT_COLUMNS   # 当直案と同じ並び。平日か休日かは、上のカレンダーで自動的に決まるので入力しない
     fixed_template_df = pd.DataFrame(columns=fixed_columns)
     fixed_csv_template = fixed_template_df.to_csv(index=False).encode('utf-8-sig')
 
@@ -4611,38 +4675,53 @@ with st.container(key="fixed_section"), st.expander("📅 先月今月来月の�
     with col_ul_fixed:
         fixed_file = st.file_uploader("確定当直（CSV）をアップロード", type="csv", key=f"fixed_csv_{st.session_state.get('uploader_gen', 0)}")
 
+    # 表の中身は画面の裏（session_state）に持っておき、CSVを読み込んだときや途中保存から読み込んだときだけ置き換える
     if fixed_file is not None:
-        try:
-            base_fixed_df = parse_fixed_csv(fixed_file.getvalue())
-        except Exception as e:
-            st.error(f"確定当直ファイルの読み込みに失敗しました。詳細: {e}")
-            st.stop()
+        _fixed_src = ("file", fixed_file.name, fixed_file.size)
     elif restored_state and restored_state.get("fixed_csv"):
-        base_fixed_df = parse_fixed_csv(restored_state["fixed_csv"].encode("utf-8"))
+        _fixed_src = ("restored", hashlib.sha256(restored_state["fixed_csv"].encode("utf-8")).hexdigest())
     else:
-        base_fixed_df = pd.DataFrame(columns=fixed_columns)
-        base_fixed_df.loc[0] = ["" for _ in range(len(fixed_columns))]
+        _fixed_src = ("empty",)
+    if st.session_state.get("fixed_src") != _fixed_src or "fixed_rows" not in st.session_state:
+        if _fixed_src[0] == "file":
+            try:
+                base_fixed_df = parse_fixed_csv(fixed_file.getvalue())
+            except Exception as e:
+                st.error(f"確定当直ファイルの読み込みに失敗しました。詳細: {e}")
+                st.stop()
+            if "日付" not in base_fixed_df.columns:
+                st.error("確定当直CSVに「日付」の列がありません。ひな形の列名を確認してください。")
+                st.stop()
+        elif _fixed_src[0] == "restored":
+            base_fixed_df = parse_fixed_csv(restored_state["fixed_csv"].encode("utf-8"))
+        else:
+            base_fixed_df = pd.DataFrame(columns=fixed_columns)
+        st.session_state["fixed_rows"] = fixed_rows_for_editor(base_fixed_df)
+        st.session_state["fixed_src"] = _fixed_src
+        st.session_state["fixed_editor_gen"] = st.session_state.get("fixed_editor_gen", 0) + 1
+    base_fixed_df = st.session_state["fixed_rows"]
 
-    if "日付" not in base_fixed_df.columns:
-        st.error("確定当直CSVに「日付」の列がありません。ひな形の列名を確認してください。")
-        st.stop()
-    # 日付も普通の列として編集できるようにする（行の見出し＝インデックスにすると、既存の行の日付が直せないため）。
-    # 空の列は数字の列とみなされて文字が入らないことがあるので、すべて文字の列にそろえる
-    # 以前のひな形にあった「平日/休日」の列は使わないので外す（入っていても読み込める）
-    base_fixed_df = base_fixed_df.drop(columns=["平日/休日"], errors="ignore").copy()
-    for _c in base_fixed_df.columns:
-        base_fixed_df[_c] = base_fixed_df[_c].apply(
-            lambda x: "" if pd.isna(x) or str(x).strip().lower() in ("nan", "none", "<na>") else str(x)).astype(str)
-    _date_first = ["日付"] + [c for c in base_fixed_df.columns if c != "日付"]
-    base_fixed_df = base_fixed_df[_date_first].reset_index(drop=True)
-
-    st.write("表のセルをクリックして、日付（例：11/1）と担当医師名を入力・編集できます。行は下の「＋」で追加できます。")
-    edited_fixed_df = st.data_editor(
-        base_fixed_df, num_rows="dynamic", use_container_width=True, height=200, hide_index=True,
-        column_config={c: st.column_config.TextColumn(c, help="例：11/1 または 2026/11/1" if c == "日付" else None)
-                       for c in base_fixed_df.columns},
+    # 担当医師は、医師条件の名前から選ぶ（日本語を打たなくてよいので、入力の切り替えで文字が崩れない）
+    _fixed_names = list(dict.fromkeys(
+        list(st.session_state.get("fixed_name_options", []))
+        + [v for s_ in FIXED_SLOT_COLUMNS for v in base_fixed_df[s_].tolist() if v]))
+    st.write(f"日付（例：{month}/1）を入力し、担当する先生を枠の欄の一覧から選びます。行は下の「＋」で追加できます。")
+    if not _fixed_names:
+        st.caption("先に下の「医師条件」に先生の名前を入れると、ここで名前を選べるようになります。")
+    _fixed_key = f"fixed_editor_{st.session_state.get('fixed_editor_gen', 0)}"
+    _fixed_view = base_fixed_df.copy()
+    for s_ in FIXED_SLOT_COLUMNS:
+        _fixed_view[s_] = _fixed_view[s_].astype(object).where(_fixed_view[s_] != "", None)
+    _fixed_config = {"日付": st.column_config.TextColumn("日付", help=f"例：{month}/1 または {year}/{month}/1")}
+    _fixed_config.update({s_: st.column_config.SelectboxColumn(s_, options=_fixed_names, help="担当する先生を一覧から選びます。消すときはマスを選んで Delete キー。")
+                          for s_ in FIXED_SLOT_COLUMNS})
+    _fixed_config.update({c: st.column_config.TextColumn(c) for c in base_fixed_df.columns if c not in _fixed_config})
+    st.data_editor(
+        _fixed_view, num_rows="dynamic", use_container_width=True, height=200, hide_index=True,
+        column_config=_fixed_config, key=_fixed_key, on_change=apply_fixed_edits, args=(_fixed_key,),
     )
-    edited_fixed_df = edited_fixed_df.reset_index(drop=True)
+    st.caption("同じ日・同じ枠を2人以上で担当する場合は、同じ日付の行をもう1行追加して、もう1人を選んでください。")
+    edited_fixed_df = st.session_state["fixed_rows"].copy()
 
 section_banner("👩‍⚕️", "医師条件の読み込み・入力", "先生ごとの回数・間隔・希望日を入力します", "必須", anchor="sec-staff")
 st.info("下の表に医師ごとの条件を入力してください。CSVを使う場合は、ひな形をダウンロードして編集し、アップロードします。NG日は、この下の「🚫 先生ごとのNG日設定」で設定します。")
@@ -4829,6 +4908,15 @@ edited_df = st.data_editor(
 )
 
 staff_df = edited_df.reset_index()
+
+# 確定当直の表で選べる先生の名前を、医師条件に合わせる（名前が変わったときは、確定当直の表の一覧も作り直す）
+_names_now = list(dict.fromkeys(n for n in (clean_text(v) for v in staff_df.get("先生の名前", pd.Series(dtype=str)).tolist())
+                                if n and n.lower() not in ("nan", "none")))
+if st.session_state.get("fixed_name_options") != _names_now:
+    st.session_state["fixed_name_options"] = _names_now
+    st.session_state["fixed_editor_gen"] = st.session_state.get("fixed_editor_gen", 0) + 1
+    if not (create_bar_request or work_save_request):
+        st.rerun()
 
 # 備考が長くて表の中で読み切れない場合のために、全文の一覧を出す
 _note_cols = [c for c in staff_df.columns if str(c).strip().startswith("備考")]
