@@ -4175,7 +4175,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
     - **休日にする**：病院独自の休みなど、平日でも土日祝と同じ扱いにする日。日直の枠ができます。
     - **別途決定**：年末年始など、別の方法で当番を決める日。このアプリではその日の当直を決めず、先生もNGを入力できなくなります。
 3. **人数を増やす枠（任意）**：1つの枠を2名以上にする日があれば、行を足して設定します。
-4. **確定当直（任意）**：「📅 先月今月来月の確定当直」の帯を押して開き、すでに決まっている当直や、先月末・来月初めの当直を入れます。勤務の間隔の計算に使われます。
+4. **確定当直（任意）**：「📅 先月今月来月の確定当直」の欄に、すでに決まっている当直や、先月末・来月初めの当直を入れます。勤務の間隔の計算に使われます。
 5. **医師条件**：新しい月なら、医師条件の欄の「📋 前回の医師条件を引き継ぐ」を押します。途中保存してある医師条件（回数・間隔・翌日PM duty・備考など）が入り、NG日・希望日・先生のコメントは空になります。
    初めての場合は、ひな形（CSV）をダウンロードして先生の名前や回数の上限などを入れ、アップロードします。表の中で直接直すこともできます。希望日もここに入れます。
    入力したら、すぐ下の「⚖️ 当直の枠は足りそう？」で、全体と枠の種類ごとに足りているか（赤い棒がないか）を確認します。
@@ -4322,13 +4322,7 @@ st.markdown("""
 #sec-staff,#sec-ng,#sec-create,#sec-result{scroll-margin-top:5.5rem}
 .sec-banner[id]{scroll-margin-top:5.5rem}
 /* 折りたたみ式の項目（確定当直）も、同じ帯の見た目にする */
-.st-key-fixed_section{margin:2.6rem 0 .4rem}
-.st-key-fixed_section [data-testid="stExpander"] details{border:0;border-radius:12px;overflow:hidden;box-shadow:0 2px 6px rgba(31,52,82,.18)}
-.st-key-fixed_section [data-testid="stExpander"] details > summary{background:linear-gradient(90deg,#2f4a6d 0%,#47749b 100%);color:#fff;padding:14px 18px}
-.st-key-fixed_section [data-testid="stExpander"] details > summary p{color:#fff;font-size:1.35rem;font-weight:800}
-.st-key-fixed_section [data-testid="stExpander"] details > summary svg{color:#fff;fill:#fff}
-.st-key-fixed_section [data-testid="stExpanderDetails"]{padding-top:1rem}
-@media (max-width:600px){.sec-banner{padding:11px 13px;gap:10px}.sec-banner .t,.st-key-fixed_section summary p{font-size:1.12rem !important}.sec-banner .s{display:none}}
+@media (max-width:600px){.sec-banner{padding:11px 13px;gap:10px}.sec-banner .t{font-size:1.12rem !important}.sec-banner .s{display:none}}
 </style>""", unsafe_allow_html=True)
 
 
@@ -4632,18 +4626,9 @@ holiday_total_placeholder.metric("🏥 埋める必要がある枠", f"{total_sl
 # ==========================================
 # 3. メイン画面：データの読み込み＆画面入力
 # ==========================================
-# あまり使わない項目なので、ふだんは折りたたんでおく（途中保存から読み込んだ確定当直があるときは開く）
-def _fixed_csv_has_entries(text):
-    """途中保存の確定当直に、空でない入力が1つでもあるか。"""
-    try:
-        df = parse_fixed_csv(text.encode("utf-8"))
-    except Exception:
-        return False
-    return any(str(v).strip() not in ("", "nan", "None") for v in df.drop(columns=["平日/休日"], errors="ignore").values.ravel())
-
-
-_has_fixed = bool(restored_state and restored_state.get("fixed_csv") and _fixed_csv_has_entries(restored_state["fixed_csv"]))
-with st.container(key="fixed_section"), st.expander("📅 先月今月来月の確定当直（押すと開きます）", expanded=_has_fixed):
+# 確定当直：いつも開いた状態で表示する（任意の項目）
+with st.container(key="fixed_section"):
+    section_banner("📅", "先月今月来月の確定当直", "すでに決まっている当直や、先月末・来月初めの当直を入れます", "任意", anchor="sec-fixed")
     st.info("先月・今月・来月の、担当者が決まっている当直を入力してください。先月末の勤務は、月初の勤務間隔の確認に使います。入力がなければ、この項目は飛ばせます。")
     with (st.popover("確定当直の入力例と扱い") if hasattr(st, "popover") else st.container()):
         st.markdown("""
