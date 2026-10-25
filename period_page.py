@@ -753,13 +753,7 @@ st.markdown("""
 #sec-staff,#sec-ng,#sec-create,#sec-result{scroll-margin-top:5.5rem}
 .sec-banner[id]{scroll-margin-top:5.5rem}
 /* 折りたたみ式の項目（確定当直）も、同じ帯の見た目にする */
-.st-key-fixed_section{margin:2.6rem 0 .4rem}
-.st-key-fixed_section [data-testid="stExpander"] details{border:0;border-radius:12px;overflow:hidden;box-shadow:0 2px 6px rgba(31,52,82,.18)}
-.st-key-fixed_section [data-testid="stExpander"] details > summary{background:linear-gradient(90deg,#5b3a1e 0%,#a0662f 100%);color:#fff;padding:14px 18px}
-.st-key-fixed_section [data-testid="stExpander"] details > summary p{color:#fff;font-size:1.35rem;font-weight:800}
-.st-key-fixed_section [data-testid="stExpander"] details > summary svg{color:#fff;fill:#fff}
-.st-key-fixed_section [data-testid="stExpanderDetails"]{padding-top:1rem}
-@media (max-width:600px){.sec-banner{padding:11px 13px;gap:10px}.sec-banner .t,.st-key-fixed_section summary p{font-size:1.12rem !important}.sec-banner .s{display:none}}
+@media (max-width:600px){.sec-banner{padding:11px 13px;gap:10px}.sec-banner .t{font-size:1.12rem !important}.sec-banner .s{display:none}}
 </style>""", unsafe_allow_html=True)
 
 
@@ -1064,23 +1058,14 @@ holiday_total_placeholder.metric("🏥 埋める必要がある枠", f"{total_sl
 # ==========================================
 # 3. メイン画面：データの読み込み＆画面入力
 # ==========================================
-# あまり使わない項目なので、ふだんは折りたたんでおく（途中保存から読み込んだ確定当直があるときは開く）
-def _fixed_csv_has_entries(text):
-    """途中保存の確定当直に、空でない入力が1つでもあるか。"""
-    try:
-        df = parse_fixed_csv(text.encode("utf-8"))
-    except Exception:
-        return False
-    return any(str(v).strip() not in ("", "nan", "None") for v in df.drop(columns=["平日/休日"], errors="ignore").values.ravel())
-
-
-_has_fixed = bool(restored_state and restored_state.get("fixed_csv") and _fixed_csv_has_entries(restored_state["fixed_csv"]))
-with st.container(key="fixed_section"), st.expander("📅 確定当直（期間の前後・期間中）（押すと開きます）", expanded=_has_fixed):
+# 確定当直：いつも開いた状態で表示する（任意の項目）
+with st.container(key="fixed_section"):
+    section_banner("📅", "確定当直（期間の前後・期間中）", "すでに決まっている当直や、期間の前（先月末など）・後の当直を入れます", "任意", anchor="sec-fixed")
     st.info("期間の前（先月末など）・期間中・期間の後の、担当者が決まっている当直を入力してください。期間の前後の勤務は、勤務間隔の確認に使います。入力がなければ、この項目は飛ばせます。")
     with (st.popover("確定当直の入力例と扱い") if hasattr(st, "popover") else st.container()):
         st.markdown("""
 - CSVのアップロードと、下の表への直接入力のどちらでも入力できます。
-- 日付は `2026/10/1` または `10/1` の形式で入力します。
+- 日付は `年/月/日` または `月/日`（例：`11/1`）の形で入力します。先月・来月の日付も入れられます。
 - 担当する先生は、枠の欄をクリックすると出る一覧（医師条件の名前）から選びます。
 - 同じ日・同じ枠を2人以上で担当する場合は、同じ日付の行を追加して、もう1人を選びます。CSVで `佐藤、鈴木` のように「、」で区切って入れた場合は、読み込むと自動で2行に分かれます。
 - 未確定の枠は空欄で構いません。
@@ -1137,14 +1122,14 @@ with st.container(key="fixed_section"), st.expander("📅 確定当直（期間�
     _fixed_names = list(dict.fromkeys(
         list(st.session_state.get("fixed_name_options", []))
         + [v for s_ in FIXED_SLOT_COLUMNS for v in base_fixed_df[s_].tolist() if v]))
-    st.write("日付（例：11/1）を入力し、担当する先生を枠の欄の一覧から選びます。行は下の「＋」で追加できます。")
+    st.write(f"日付（例：{month}/1）を入力し、担当する先生を枠の欄の一覧から選びます。行は下の「＋」で追加できます。")
     if not _fixed_names:
         st.caption("先に下の「医師条件」に先生の名前を入れると、ここで名前を選べるようになります。")
     _fixed_key = f"fixed_editor_{st.session_state.get('fixed_editor_gen', 0)}"
     _fixed_view = base_fixed_df.copy()
     for s_ in FIXED_SLOT_COLUMNS:
         _fixed_view[s_] = _fixed_view[s_].astype(object).where(_fixed_view[s_] != "", None)
-    _fixed_config = {"日付": st.column_config.TextColumn("日付", help="例：11/1 または 2026/11/1")}
+    _fixed_config = {"日付": st.column_config.TextColumn("日付", help=f"例：{month}/1 または {year}/{month}/1")}
     _fixed_config.update({s_: st.column_config.SelectboxColumn(s_, options=_fixed_names, help="担当する先生を一覧から選びます。消すときはマスを選んで Delete キー。")
                           for s_ in FIXED_SLOT_COLUMNS})
     _fixed_config.update({c: st.column_config.TextColumn(c) for c in base_fixed_df.columns if c not in _fixed_config})
