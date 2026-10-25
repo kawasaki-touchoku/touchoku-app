@@ -835,7 +835,7 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
     legend.append('<span><i style="background:#fdf1f1">&nbsp;</i>薄い赤の列：土日祝・休日にした日</span>')
     legend.append('<span><i style="color:#c0392b">×</i>当直NG（平日は宿直NG）</span>')
     legend.append('<span><i style="color:#c0392b;background:#fdf1f1;line-height:1;padding:0 4px">×<br>&nbsp;</i>'
-                  '休日のマス：上半分＝日直、下半分＝宿直。上の×＝日直NG、下の×＝宿直NG（上下とも×＝終日NG）</span>')
+                  '休日のマス：上半分＝日直、下半分＝宿直。上の×＝日直NG、下の×＝宿直NG（上下とも×＝全NG）</span>')
     legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>斜線：翌日PM dutyで宿直を外す日（×があればNGも付いている）</span>')
     legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px) left bottom/100% 50% no-repeat,#fdf1f1">&nbsp;</i>'
                   '下半分だけ斜線：休日の翌日PM dutyの日。宿直は外し、日直には入れる（×の意味は休日のマスと同じ）</span>')
@@ -1194,7 +1194,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
         sample.border = border; sample.alignment = one_line
         return sample
 
-    s1 = legend_line(1, '×：当直NG（平日は宿直NG）。休日のマスは上＝日直、下＝宿直で、上の×＝日直NG、下の×＝宿直NG（上下とも×＝終日NG）')
+    s1 = legend_line(1, '×：当直NG（平日は宿直NG）。休日のマスは上＝日直、下＝宿直で、上の×＝日直NG、下の×＝宿直NG（上下とも×＝全NG）')
     s1.value = '×'; s1.font = Font(bold=True, color='C0392B')
     legend_line(2, '黄色：翌日PM dutyで宿直を外す日（×があればNGも付いている）').fill = PM_FILL
     legend_line(4, '薄い赤の列：土日祝・休日にした日').fill = fill('#FDF1F1')
@@ -1271,10 +1271,10 @@ def validate_staff_inputs(df, year, month):
     blank = df['先生の名前'].eq('')
     for i, row in df[blank].iterrows():
         if any(clean_text(v) for k, v in row.items() if k != '先生の名前'):
-            errors.append(f'医師条件 {i+1}行目：条件が入力されていますが医師名が空欄です。')
+            errors.append(f'医師条件 {i+1}行目：条件が入力されていますが先生の名前が空欄です。')
     df = df[~blank].reset_index(drop=True)
     for name in df.loc[df['先生の名前'].duplicated(), '先生の名前'].unique():
-        errors.append(f'医師名「{name}」が重複しています。')
+        errors.append(f'先生の名前「{name}」が重複しています。')
     for col, default in NUMERIC_DEFAULTS.items():
         if col not in df:
             df[col] = default
@@ -1286,7 +1286,7 @@ def validate_staff_inputs(df, year, month):
     for i, row in df.iterrows():
         name = row['先生の名前']
         if any(c in name for c in ',、') or name == '-' or '⚠️不足' in name:
-            errors.append(f'医師名「{name}」：カンマ・読点・不足表示・単独の「-」は使用できません。')
+            errors.append(f'先生の名前「{name}」：カンマ・読点・不足表示・単独の「-」は使用できません。')
         for col, default in NUMERIC_DEFAULTS.items():
             raw = row[col]
             try:
@@ -1358,7 +1358,7 @@ def validate_fixed_inputs(df, doctors, year, month, holidays=None):
             names = list(dict.fromkeys(n.strip() for n in re.split('[、,]', val)))
             for name in names:
                 if name not in doctors:
-                    errors.append(f'確定当直 {dt.month}/{dt.day} {s}：医師名「{name}」が名簿と一致しません。')
+                    errors.append(f'確定当直 {dt.month}/{dt.day} {s}：先生の名前「{name}」が医師条件の名前と一致しません。')
             df.at[i, s] = '、'.join(names)
     return df, errors
 
@@ -1425,9 +1425,9 @@ def audit_schedule(result, staff, year, month, holidays, multi, past, future, ne
                 kind = ng.get(dt.day, 'OK')
                 night = slot in NIGHT_SHIFTS
                 if kind == '全NG' or (kind == '宿NG' and night) or (kind == '日NG' and not night):
-                    warnings.append(f'{name}：{dt.month}/{dt.day} {slot}はNG指定より確定指定を優先しました。')
+                    warnings.append(f'{name}：{dt.month}/{dt.day} {slot}は確定当直のため、NG日より優先して入れました。')
                 if night and pm_duty_restricted(dt, pm_weekdays, year, month, holidays, next_month_special_holiday):
-                    warnings.append(f'{name}：{dt.month}/{dt.day} {slot}は翌日PM dutyの制限より確定指定を優先しました。')
+                    warnings.append(f'{name}：{dt.month}/{dt.day} {slot}は確定当直のため、翌日PM dutyより優先して入れました。')
         total = sum(counts.values())
         if total < int(row['月間最小回数']):
             warnings.append(f'{name}：月間最小回数の目標{int(row["月間最小回数"])}回に対し、{total}回です。')
@@ -1435,13 +1435,13 @@ def audit_schedule(result, staff, year, month, holidays, multi, past, future, ne
                        if clean_text(row.get(col, '')) not in ('', 'nan')]
         for label, value, cap in [('月間最大回数', total, int(row['月間最大回数'])), ('休日最大回数', hol_count, int(row['休日最大回数']))] + group_items + [(s + '上限', counts[s], int(row[s + '上限'])) for s in ALL_SHIFT_TYPES]:
             if value > cap:
-                warnings.append(f'{name}：確定指定に伴い{label}を超えています（設定{cap}回／結果{value}回）。')
+                warnings.append(f'{name}：確定当直のため{label}を超えています（設定{cap}回／結果{value}回）。')
         dates = sorted(set(worked) | set((past or {}).get(name, [])) | set((future or {}).get(name, [])))
         for a, b in zip(dates, dates[1:]):
             if (a.year, a.month) != (year, month) and (b.year, b.month) != (year, month): continue
             gap = (b - a).days - 1
             if gap < int(row['最低空ける日数']):
-                warnings.append(f'{name}：確定勤務同士の間隔が設定未満です（{a.month}/{a.day}→{b.month}/{b.day}、空き{gap}日／設定{int(row["最低空ける日数"])}日）。確定勤務を維持しました。')
+                warnings.append(f'{name}：確定当直同士の間隔が「最低空ける日数」より短くなっています（{a.month}/{a.day}→{b.month}/{b.day}、空き{gap}日／設定{int(row["最低空ける日数"])}日）。確定当直のまま残しました。')
     for _, r in result.iterrows():
         d = parse_shift_date(r['日付'], year, month).day
         for s in ALL_SHIFT_TYPES:
@@ -1800,13 +1800,13 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
                         reasons.append(f"・{s}： 計 {count} 枠不足")
             return partial_df, False, reasons, past_worked_dates, future_worked_dates
         if relax_status == cp_model.INFEASIBLE:
-            reasons.append("不足枠を許容しても条件が矛盾し、当直案を作成できませんでした。確定指定と上限を確認してください。")
+            reasons.append("不足枠を許容しても条件が矛盾し、当直案を作成できませんでした。確定当直と回数の上限を確認してください。")
         elif relax_status == cp_model.MODEL_INVALID:
             reasons.append("不足枠計算のモデルが無効です。入力値を確認してください。")
         else:
             reasons.append("不足枠を含む案も時間内に見つかりませんでした。条件が不可能と確定したわけではありません。")
     except Exception as e:
-        reasons.append(f"⚠️ 部分的な当直表の作成中にもエラーが発生しました。詳細: {e}")
+        reasons.append(f"⚠️ 不足を含む当直案の作成中にもエラーが発生しました。詳細: {e}")
 
     return None, False, reasons, None, None
 
@@ -2598,7 +2598,7 @@ def doctor_entry_page(key):
  <div style="font-weight:800;font-size:1.05rem;color:#22345a">⚠ 休日は「日直」と「宿直」を別々に指定します</div>
  <div style="margin-top:4px;font-size:.95rem;color:#243247">終日入れない日は、<b>両方</b>押してください。</div>
  <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:.82rem;font-weight:700">
-  <div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">日直<span>NG</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">宿直<span>NG</span></div></div></div><div style="margin-top:4px;color:#243247">終日NG</div></div><div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#fff;color:#243041;">日直<span style="color:#2f8a5b">可</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">宿直<span>NG</span></div></div></div><div style="margin-top:4px;color:#243247">宿直だけNG<br><span style="color:#566174">日直は入れる</span></div></div><div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">日直<span>NG</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#fff;color:#243041;border-top:1px solid #e3e7ed;">宿直<span style="color:#2f8a5b">可</span></div></div></div><div style="margin-top:4px;color:#243247">日直だけNG<br><span style="color:#566174">宿直は入れる</span></div></div>
+  <div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">日直<span>NG</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">宿直<span>NG</span></div></div></div><div style="margin-top:4px;color:#243247">全NG</div></div><div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#fff;color:#243041;">日直<span style="color:#2f8a5b">可</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">宿直<span>NG</span></div></div></div><div style="margin-top:4px;color:#243247">宿直だけNG<br><span style="color:#566174">日直は入れる</span></div></div><div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">日直<span>NG</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#fff;color:#243041;border-top:1px solid #e3e7ed;">宿直<span style="color:#2f8a5b">可</span></div></div></div><div style="margin-top:4px;color:#243247">日直だけNG<br><span style="color:#566174">宿直は入れる</span></div></div>
  </div>
 </div>""", unsafe_allow_html=True)
 
@@ -2746,7 +2746,7 @@ def doctor_entry_page_period(key):
  <div style="font-weight:800;font-size:1.05rem;color:#22345a">⚠ 休日は「日直」と「宿直」を別々に指定します</div>
  <div style="margin-top:4px;font-size:.95rem;color:#243247">終日入れない日は、<b>両方</b>押してください。</div>
  <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:.82rem;font-weight:700">
-  <div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">日直<span>NG</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">宿直<span>NG</span></div></div></div><div style="margin-top:4px;color:#243247">終日NG</div></div><div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#fff;color:#243041;">日直<span style="color:#2f8a5b">可</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">宿直<span>NG</span></div></div></div><div style="margin-top:4px;color:#243247">宿直だけNG<br><span style="color:#566174">日直は入れる</span></div></div><div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">日直<span>NG</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#fff;color:#243041;border-top:1px solid #e3e7ed;">宿直<span style="color:#2f8a5b">可</span></div></div></div><div style="margin-top:4px;color:#243247">日直だけNG<br><span style="color:#566174">宿直は入れる</span></div></div>
+  <div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">日直<span>NG</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">宿直<span>NG</span></div></div></div><div style="margin-top:4px;color:#243247">全NG</div></div><div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#fff;color:#243041;">日直<span style="color:#2f8a5b">可</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">宿直<span>NG</span></div></div></div><div style="margin-top:4px;color:#243247">宿直だけNG<br><span style="color:#566174">日直は入れる</span></div></div><div style="width:104px;text-align:center"><div style="background:#fff6f5;border:1px solid #f0dcdc;border-radius:10px;padding:6px"><div style="border:1px solid #d8dee6;border-radius:7px;overflow:hidden"><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#cf6a35;color:#fff">日直<span>NG</span></div><div style="display:flex;justify-content:center;gap:6px;padding:5px 0;background:#fff;color:#243041;border-top:1px solid #e3e7ed;">宿直<span style="color:#2f8a5b">可</span></div></div></div><div style="margin-top:4px;color:#243247">日直だけNG<br><span style="color:#566174">宿直は入れる</span></div></div>
  </div>
 </div>""", unsafe_allow_html=True)
 
@@ -3843,13 +3843,13 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
                         reasons.append(f"・{s}： 計 {count} 枠不足")
             return partial_df, False, reasons, past_worked_dates, future_worked_dates
         if relax_status == cp_model.INFEASIBLE:
-            reasons.append("不足枠を許容しても条件が矛盾し、当直案を作成できませんでした。確定指定と上限を確認してください。")
+            reasons.append("不足枠を許容しても条件が矛盾し、当直案を作成できませんでした。確定当直と回数の上限を確認してください。")
         elif relax_status == cp_model.MODEL_INVALID:
             reasons.append("不足枠計算のモデルが無効です。入力値を確認してください。")
         else:
             reasons.append("不足枠を含む案も時間内に見つかりませんでした。条件が不可能と確定したわけではありません。")
     except Exception as e:
-        reasons.append(f"⚠️ 部分的な当直表の作成中にもエラーが発生しました。詳細: {e}")
+        reasons.append(f"⚠️ 不足を含む当直案の作成中にもエラーが発生しました。詳細: {e}")
 
     return None, False, reasons, None, None
 
@@ -3863,10 +3863,10 @@ def period_validate_staff_inputs(df, P):
     blank = df['先生の名前'].eq('')
     for i, row in df[blank].iterrows():
         if any(clean_text(v) for k, v in row.items() if k != '先生の名前'):
-            errors.append(f'医師条件 {i+1}行目：条件が入力されていますが医師名が空欄です。')
+            errors.append(f'医師条件 {i+1}行目：条件が入力されていますが先生の名前が空欄です。')
     df = df[~blank].reset_index(drop=True)
     for name in df.loc[df['先生の名前'].duplicated(), '先生の名前'].unique():
-        errors.append(f'医師名「{name}」が重複しています。')
+        errors.append(f'先生の名前「{name}」が重複しています。')
     for col, default in NUMERIC_DEFAULTS.items():
         if col not in df:
             df[col] = default
@@ -3878,7 +3878,7 @@ def period_validate_staff_inputs(df, P):
     for i, row in df.iterrows():
         name = row['先生の名前']
         if any(c in name for c in ',、') or name == '-' or '⚠️不足' in name:
-            errors.append(f'医師名「{name}」：カンマ・読点・不足表示・単独の「-」は使用できません。')
+            errors.append(f'先生の名前「{name}」：カンマ・読点・不足表示・単独の「-」は使用できません。')
         for col, default in NUMERIC_DEFAULTS.items():
             raw = row[col]
             try:
@@ -3951,7 +3951,7 @@ def period_validate_fixed_inputs(df, doctors, P, holidays=None):
             names = list(dict.fromkeys(n.strip() for n in re.split('[、,]', val)))
             for name in names:
                 if name not in doctors:
-                    errors.append(f'確定当直 {dt.month}/{dt.day} {s}：医師名「{name}」が名簿と一致しません。')
+                    errors.append(f'確定当直 {dt.month}/{dt.day} {s}：先生の名前「{name}」が医師条件の名前と一致しません。')
             df.at[i, s] = '、'.join(names)
     return df, errors
 
@@ -3974,9 +3974,9 @@ def period_audit_schedule(result, staff, P, holidays, multi, past, future, next_
                 kind = ng.get(P.index(dt), 'OK')
                 night = slot in NIGHT_SHIFTS
                 if kind == '全NG' or (kind == '宿NG' and night) or (kind == '日NG' and not night):
-                    warnings.append(f'{name}：{dt.month}/{dt.day} {slot}はNG指定より確定指定を優先しました。')
+                    warnings.append(f'{name}：{dt.month}/{dt.day} {slot}は確定当直のため、NG日より優先して入れました。')
                 if night and period_pm_restricted(P, P.index(dt), pm_weekdays, holidays, next_month_special_holiday):
-                    warnings.append(f'{name}：{dt.month}/{dt.day} {slot}は翌日PM dutyの制限より確定指定を優先しました。')
+                    warnings.append(f'{name}：{dt.month}/{dt.day} {slot}は確定当直のため、翌日PM dutyより優先して入れました。')
         total = sum(counts.values())
         if total < int(row['月間最小回数']):
             warnings.append(f'{name}：月間最小回数の目標{int(row["月間最小回数"])}回に対し、{total}回です。')
@@ -3984,13 +3984,13 @@ def period_audit_schedule(result, staff, P, holidays, multi, past, future, next_
                        if clean_text(row.get(col, '')) not in ('', 'nan')]
         for label, value, cap in [('月間最大回数', total, int(row['月間最大回数'])), ('休日最大回数', hol_count, int(row['休日最大回数']))] + group_items + [(s + '上限', counts[s], int(row[s + '上限'])) for s in ALL_SHIFT_TYPES]:
             if value > cap:
-                warnings.append(f'{name}：確定指定に伴い{label}を超えています（設定{cap}回／結果{value}回）。')
+                warnings.append(f'{name}：確定当直のため{label}を超えています（設定{cap}回／結果{value}回）。')
         dates = sorted(set(worked) | set((past or {}).get(name, [])) | set((future or {}).get(name, [])))
         for a, b in zip(dates, dates[1:]):
             if P.index(a) is None and P.index(b) is None: continue
             gap = (b - a).days - 1
             if gap < int(row['最低空ける日数']):
-                warnings.append(f'{name}：確定勤務同士の間隔が設定未満です（{a.month}/{a.day}→{b.month}/{b.day}、空き{gap}日／設定{int(row["最低空ける日数"])}日）。確定勤務を維持しました。')
+                warnings.append(f'{name}：確定当直同士の間隔が「最低空ける日数」より短くなっています（{a.month}/{a.day}→{b.month}/{b.day}、空き{gap}日／設定{int(row["最低空ける日数"])}日）。確定当直のまま残しました。')
     for _, r in result.iterrows():
         d = int(r['_idx'])
         for s in ALL_SHIFT_TYPES:
@@ -4131,14 +4131,14 @@ if _mode == "period":
     st.stop()
 
 st.title("当直作成アプリ")
-st.caption("年月・勤務条件・NG日を入力して、当直表の案を作成します。")
+st.caption("年月・勤務条件・NG日を入力して、当直案を作成します。")
 with st.expander("📖 使い方（初めての方・毎月の流れ・結果の見方）", expanded=False):
     tab_intro, tab_flow, tab_ng, tab_result, tab_trouble = st.tabs(["はじめに", "毎月の流れ", "NG日の集め方", "結果の見方・Excel", "困ったとき"])
     with tab_intro:
         st.markdown("""
 **このアプリでできること**
 
-先生方の条件（回数・間隔・希望日・NG日など）をもとに、毎月の当直表の案を自動で作ります。
+先生方の条件（回数・間隔・希望日・NG日など）をもとに、毎月の当直案を自動で作ります。
 先生方には専用のURL（QRコード）から、スマートフォンでNG日を入力してもらえます。
 
 **画面のつくり**
@@ -4175,7 +4175,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
     - **休日にする**：病院独自の休みなど、平日でも土日祝と同じ扱いにする日。日直の枠ができます。
     - **別途決定**：年末年始など、別の方法で当番を決める日。このアプリではその日の当直を決めず、先生もNGを入力できなくなります。
 3. **人数を増やす枠（任意）**：1つの枠を2名以上にする日があれば、行を足して設定します。
-4. **確定当直（任意）**：「📅 先月今月来月の確定当直」の欄に、すでに決まっている当直や、先月末・来月初めの当直を入れます。勤務の間隔の計算に使われます。
+4. **確定当直（任意）**：「📅 先月今月来月の確定当直」の欄に、すでに決まっている当直や、先月末・来月初めの当直を入れます。勤務間隔の計算に使われます。
 5. **医師条件**：新しい月なら、医師条件の欄の「📋 前回の医師条件を引き継ぐ」を押します。途中保存してある医師条件（回数・間隔・翌日PM duty・備考など）が入り、NG日・希望日・先生のコメントは空になります。
    初めての場合は、ひな形（CSV）をダウンロードして先生の名前や回数の上限などを入れ、アップロードします。表の中で直接直すこともできます。希望日もここに入れます。
    入力したら、すぐ下の「⚖️ 当直の枠は足りそう？」で、全体と枠の種類ごとに足りているか（赤い棒がないか）を確認します。
@@ -4229,7 +4229,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 - **茶色の太い枠**：希望日が、希望どおりに通った当直
 - **薄い赤の列**：土日祝と「休日にする」にした日
 - **×**：当直NGの日（平日は宿直NG）
-- **休日のマス**：上半分＝日直、下半分＝宿直です。上に×＝日直NG、下に×＝宿直NG、上下とも×＝終日NG
+- **休日のマス**：上半分＝日直、下半分＝宿直です。上に×＝日直NG、下に×＝宿直NG、上下とも×＝全NG
 - **黄色の斜線**：翌日PM dutyのため宿直を外す日。×があれば、NGも付いている日です
 - **下半分だけ黄色の斜線**：休日の翌日PM dutyの日。宿直は外しますが、日直には入れます（×の意味は休日のマスと同じ）
 - **NG人数の行**（見出しのすぐ下）：その日にNGの先生の数。翌日PM dutyで宿直を外す先生も数えます。多い日ほど濃いオレンジです
@@ -4639,7 +4639,8 @@ with st.container(key="fixed_section"):
 - 未確定の枠は空欄で構いません。
 - 今月の平日に日直を入力する場合は、先に上のカレンダーでその日を「休日にする」にしてください。
 - 「別途決定」にした日（年末年始など）の当番が決まったら、ここに入れておくと、当直案と一覧に表示され、前後の勤務間隔の計算にも使われます。
-- 今月の確定勤務はNG日・曜日制限より優先され、回数上限も必要に応じて緩められます。確定勤務を基準に追加勤務の間隔を守ります。確定勤務同士が近すぎる場合は、確定内容を維持して警告します。
+- 今月の確定当直は、NG日や翌日PM duty（宿直を外す曜日）よりも優先されます。回数の上限（月間最大回数・休日最大回数・各枠の上限など）を超える場合も、確定した分はそのまま入ります。
+- ほかの勤務は、確定当直から「最低空ける日数」以上あけて自動で入れます。確定当直同士の間隔が近すぎる場合は、確定内容をそのまま残し、注意を表示します。
 
 **今月の同じ日・同じ枠を指定した場合、確定当直への入力と「希望優先度100以上」での指定は、どちらも固定され、計算上の扱いは基本的に同じです。両方に入力する必要はありません。**
         """)
@@ -4709,7 +4710,7 @@ with st.container(key="fixed_section"):
     edited_fixed_df = st.session_state["fixed_rows"].copy()
 
 section_banner("👩‍⚕️", "医師条件の読み込み・入力", "先生ごとの回数・間隔・希望日を入力します", "必須", anchor="sec-staff")
-st.info("下の表に医師ごとの条件を入力してください。CSVを使う場合は、ひな形をダウンロードして編集し、アップロードします。NG日は、この下の「🚫 先生ごとのNG日設定」で設定します。")
+st.info("下の表に先生ごとの条件を入力してください。CSVを使う場合は、ひな形をダウンロードして編集し、アップロードします。NG日は、この下の「🚫 先生ごとのNG日設定」で設定します。")
 st.caption("最初に表示される「型1」〜「型9」は、よくある条件の入力例です。名前の欄が型の中身です（例：型4＝A宿直・A日直・外来日直に入る先生）。実際の先生の名前に置き換え、回数などを調整して使ってください。行は「＋」で増やせます。")
 
 # --- 前回の医師条件を引き継ぐ（管理用パスワードが必要） ---
@@ -4757,17 +4758,17 @@ with st.expander("回数・勤務間隔の数え方", expanded=False):
 | 宿直上限・日直上限 | A・B・外来を合わせた宿直（日直）の月間の上限です。空欄なら制限しません。 |
 | 各枠の上限 | A宿直など、それぞれの枠を担当する月間の上限です。 |
 
-1つの枠を1回と数えます。確定指定により同じ日に日直と宿直を担当する場合は2回です。
+1つの枠を1回と数えます。確定当直で同じ日に日直と宿直を担当する場合は2回です。
 月間最小回数は、月間最大回数以下に設定してください。
-確定当直や希望優先度100以上の希望がある場合は、上限の例外があります。自動追加勤務の間隔は守り、確定勤務同士の間隔違反は警告します。
+確定当直や希望優先度100以上の希望がある場合は、上限を超えることがあります。ほかの勤務は確定当直から「最低空ける日数」以上あけて入れ、確定当直同士が近すぎる場合は注意を表示します。
     """)
 with st.expander("希望優先度：通常の希望と、100以上の特別な設定", expanded=False):
     st.markdown("""
 - **通常は「1」**を使用します。1〜99は、数字が大きいほど希望を優先しますが、NG日・回数上限・勤務間隔などの範囲内で割り当てます。
-- **100以上は、その医師の希望日すべてを確定扱いにする設定**です。「できれば入りたい」という用途には使わないでください。
-- 確定扱いの日はNG日・曜日制限より優先され、回数上限が必要に応じて緩められます。その日と自動追加勤務の間隔は守ります。確定勤務同士の間隔違反は警告します。
+- **100以上は、その先生の希望日すべてを確定当直と同じ扱いにする設定**です。「できれば入りたい」という用途には使わないでください。
+- 確定にした日は、NG日や翌日PM duty（宿直を外す曜日）よりも優先されます。回数の上限を超える場合も、確定した分はそのまま入ります。ほかの勤務は、確定の日から「最低空ける日数」以上あけて入れます。確定当直同士の間隔が近すぎる場合は、注意を表示します。
 - 一部の勤務だけを確定させたい場合は、上の「📅 先月今月来月の確定当直」へ入力し、希望優先度は通常の値にしてください。
-- 指定の誤りや条件の組み合わせによっては作成できない場合があります。作成後に確定勤務が反映されているか確認してください。
+- 指定の誤りや条件の組み合わせによっては作成できない場合があります。作成後に、確定にした日が当直案に入っているか確認してください。
 
 **今月の同じ日・同じ枠を指定した場合、確定当直への入力と「希望優先度100以上」での指定は、どちらも固定され、計算上の扱いは基本的に同じです。両方に入力する必要はありません。**
     """)
@@ -4853,9 +4854,9 @@ for c in text_cols:
         base_df[c] = base_df[c].apply(lambda x: "" if pd.isna(x) or str(x).lower() in ["nan", "none", "<na>"] else str(x))
 
 st.markdown("### 👩‍⚕️ 医師条件の入力・編集")
-st.write("セルをクリックして編集できます。列名にマウスを合わせると、入力例や説明が表示されます。医師名は重複しない表記にしてください。")
+st.write("セルをクリックして編集できます。列名にカーソルを合わせると、入力例や説明が表示されます。先生の名前は、ほかの先生と重ならない表記にしてください。")
 
-cap_help = "を担当する月間の上限です。確定指定がある場合は例外があります。"
+cap_help = "を担当する月間の上限です。確定当直がある場合は、超えることがあります。"
 edited_df = st.data_editor(
     base_df,
     num_rows="dynamic",
@@ -4866,12 +4867,12 @@ edited_df = st.data_editor(
             "翌日PM duty",
             help="例：木曜PMにdutyがある場合は水。複数は水,木のように入力。翌日が休日なら宿直に入る場合があります。日直は対象外です。確実に外す日はカレンダーでNGを指定してください。"
         ),
-        "最低空ける日数": st.column_config.NumberColumn("最低空ける日数", help="勤務間の空き日数。5日なら10日の次は16日以降。確定勤務と追加勤務の間隔も守ります。確定勤務同士の違反は警告します。"),
+        "最低空ける日数": st.column_config.NumberColumn("最低空ける日数", help="勤務と勤務の間に空ける日数。5日なら10日の次は16日以降。確定当直とほかの勤務の間も空けます。確定当直同士が近すぎる場合は注意を表示します。"),
         "月間最小回数": st.column_config.NumberColumn("月間最小回数（目標）", help="できるだけ確保したい回数です。条件によっては未達になります。月間最大回数以下にしてください。"),
-        "月間最大回数": st.column_config.NumberColumn("月間最大回数", help="日直・宿直を合わせた上限です。確定指定がある場合は例外があります。"),
+        "月間最大回数": st.column_config.NumberColumn("月間最大回数", help="日直・宿直を合わせた月間の上限です。確定当直がある場合は、超えることがあります。"),
         "休日最大回数": st.column_config.NumberColumn("休日最大回数", help="土日祝と「休日にする」にした日の、日直と宿直の合計上限です。1枠を1回と数えます。"),
-        "宿直上限": st.column_config.NumberColumn("宿直上限", help="A宿直・B宿直・外来宿直を合わせた月間の上限です。空欄なら制限なし。確定指定がある場合は例外があります。", min_value=0, step=1),
-        "日直上限": st.column_config.NumberColumn("日直上限", help="A日直・B日直・外来日直を合わせた月間の上限です。空欄なら制限なし。確定指定がある場合は例外があります。", min_value=0, step=1),
+        "宿直上限": st.column_config.NumberColumn("宿直上限", help="A宿直・B宿直・外来宿直を合わせた月間の上限です。空欄なら制限なし。確定当直がある場合は、超えることがあります。", min_value=0, step=1),
+        "日直上限": st.column_config.NumberColumn("日直上限", help="A日直・B日直・外来日直を合わせた月間の上限です。空欄なら制限なし。確定当直がある場合は、超えることがあります。", min_value=0, step=1),
         **{s + "上限": st.column_config.NumberColumn(s + "上限", help=s + cap_help) for s in ALL_SHIFT_TYPES},
         NG_COLUMN: None,
         REQUEST_COLUMN: st.column_config.TextColumn(
@@ -4880,7 +4881,7 @@ edited_df = st.data_editor(
         ),
         "希望優先度(数字が大きいほど優先)": st.column_config.NumberColumn(
             "希望優先度",
-            help="通常は1。1〜99は数字が大きいほど優先。100以上はこの医師の希望日すべてが確定扱いになり、NG・上限の例外になります。自動追加勤務との間隔は守ります。"
+            help="通常は1。1〜99は数字が大きいほど優先。100以上はこの先生の希望日すべてが確定当直と同じ扱いになり、NG日・上限より優先されます。ほかの勤務との間隔は空けます。"
         ),
         "備考（メモ・説明など自由記入）": st.column_config.TextColumn(
             "備考",
@@ -4921,7 +4922,7 @@ if staff_input_errors:
 
 st.markdown("### ⚖️ 当直の枠は足りそう？（目安）")
 st.caption("埋める必要がある枠の数と、先生方が入れる回数の合計を比べています。先生ごとの回数は、「月間最大回数」と各枠の上限・休日最大回数のうち、"
-           "いちばん少ないものを使います。足りていても、NG日・勤務の間隔などによっては埋まらないことがあります。"
+           "いちばん少ないものを使います。足りていても、NG日・勤務間隔などによっては埋まらないことがあります。"
            "確定当直で追加される枠や上限の例外は、この目安に含まれません。")
 
 st.markdown(CAPACITY_CSS, unsafe_allow_html=True)
@@ -5205,8 +5206,8 @@ if not valid_staff.empty:
 
 st.divider()
 st.markdown("### 📂 医師条件をCSVでダウンロード（手元にファイルで残す場合）")
-st.write("医師名・回数・勤務間隔・希望日・NG日・備考をCSVファイルとしてパソコンなどにダウンロードします。このファイルは「医師条件」のアップロード欄から読み込めます。")
-st.caption("ダウンロードの前に、各医師の「NG日を反映する」を押してください。対象年月・休日と別途決定の日・増員設定・確定当直・作成した当直案・色分けとそのメモは、このCSVには含まれません。"
+st.write("先生の名前・回数・勤務間隔・希望日・NG日・備考をCSVファイルとしてパソコンなどにダウンロードします。このファイルは「医師条件」のアップロード欄から読み込めます。")
+st.caption("ダウンロードの前に、各先生の「NG日を反映する」を押してください。作る年月・休日と別途決定の日・増員設定・確定当直・作成した当直案・色分けとそのメモは、このCSVには含まれません。"
            "続きから作業するだけなら、CSVではなく「💾 途中保存」を使うほうが簡単です。")
 
 # ダウンロードするCSVも、画面と同じく「先生の名前 → 備考 → その他」の順にそろえる（読み込みは列名で行うので、古い並びのCSVもそのまま使える）
@@ -5281,7 +5282,7 @@ with st.expander("💬 先生方のコメント・備考の一覧", expanded=Fal
         st.caption("表示するコメント・備考はありません。コメントは、URLから提出されたNG日を取り込むと表示されます。")
 
 st.subheader("🎯 人数が足りないときに優先して埋める枠（任意）")
-st.info("全員の条件を満たす当直表が作れない場合に、どの枠から優先して埋めるかを決めます。数字が小さいほど優先し、同じ数字の枠は同順位として扱います。")
+st.info("全員の条件を満たす当直案が作れない場合に、どの枠から優先して埋めるかを決めます。数字が小さいほど優先し、同じ数字の枠は同順位として扱います。")
 st.caption("人数が足りている月は、この設定は結果に影響しません。初期設定は、A宿直・B宿直・A日直・B日直が1、外来宿直が2、外来日直が3です。")
 
 priority_options = list(range(1, len(ALL_SHIFT_TYPES) + 1))
@@ -5365,7 +5366,7 @@ if len(staff_df) > 0:
         create_clicked = create_bar_request
         st.markdown("<div class='create-guide'>🚀 当直案は、画面のいちばん下の帯にある<b>「当直案を作成」</b>ボタンで作ります"
                     "<span>（どこまでスクロールしていても押せます）</span></div>", unsafe_allow_html=True)
-        st.caption("※ 押すたびに、同じ条件でも違うパターンの当直表を作ります。気に入った案は、結果の緑のボタン「📥 この一覧をExcelでダウンロード」で保存してください（作成した当直案は途中保存には含まれません）。")
+        st.caption("※ 押すたびに、同じ条件でも違うパターンの当直案を作ります。気に入った案は、結果の緑のボタン「📥 この一覧をExcelでダウンロード」で保存してください（作成した当直案は途中保存には含まれません）。")
     if create_clicked:
         with st.spinner("当直案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
             try:
