@@ -1166,7 +1166,7 @@ if remote_is_configured():
 .st-key-carry_over_box .co-lead{font-weight:800;color:#1d4e89;margin:0 0 6px}
 </style>""", unsafe_allow_html=True)
     with st.container(key="carry_over_box"):
-        st.markdown("<div class='co-lead'>🔁 まずここで、通常版で途中保存した医師条件を読み込みます</div>", unsafe_allow_html=True)
+        st.markdown("<div class='co-lead'>🔁 ここで、通常版で途中保存した医師条件を読み込むこともできます</div>", unsafe_allow_html=True)
         st.caption("通常版で最後に「💾 作業を途中保存する」で保存した医師条件（回数・勤務間隔・翌日PM duty・備考など）を読み込みます。NG日・希望日・先生のコメントは空になります。")
         _co_box = st.popover(_co_label) if hasattr(st, "popover") else st.expander(_co_label, expanded=False)
     with _co_box:
