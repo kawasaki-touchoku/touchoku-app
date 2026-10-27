@@ -4157,7 +4157,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 
 **管理用パスワード**
 
-途中保存・続きからの読み込み・前回の医師条件の引き継ぎ・専用URLの管理（受付・取り込みなど）には、管理用パスワードが必要です。
+途中保存・続きからの読み込み・先月の医師条件の引き継ぎ・専用URLの管理（受付・取り込みなど）には、管理用パスワードが必要です。
 一度入れると、画面を閉じるまでほかの場所でも入力不要です。
 
 **大事なこと**
@@ -4176,7 +4176,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
     - **別途決定**：年末年始など、別の方法で当番を決める日。このアプリではその日の当直を決めず、先生もNGを入力できなくなります。
 3. **人数を増やす枠（任意）**：1つの枠を2名以上にする日があれば、行を足して設定します。
 4. **確定当直（任意）**：「📅 先月今月来月の確定当直」の欄に、すでに決まっている当直や、先月末・来月初めの当直を入れます。勤務間隔の計算に使われます。
-5. **医師条件**：新しい月なら、医師条件の欄の「📋 前回の医師条件を引き継ぐ」を押します。途中保存してある医師条件（回数・間隔・翌日PM duty・備考など）が入り、NG日・希望日・先生のコメントは空になります。
+5. **医師条件**：新しい月なら、医師条件の欄の「📋 先月の医師条件を引き継ぐ」を押します。途中保存してある医師条件（回数・間隔・翌日PM duty・備考など）が入り、NG日・希望日・先生のコメントは空になります。
    初めての場合は、ひな形（CSV）をダウンロードして先生の名前や回数の上限などを入れ、アップロードします。表の中で直接直すこともできます。希望日もここに入れます。
    入力したら、すぐ下の「⚖️ 当直の枠は足りそう？」で、全体と枠の種類ごとに足りているか（赤い棒がないか）を確認します。
 6. **NG日を集める**：先生方に専用URLから入力してもらい、取り込みます（「NG日の集め方」のタブを参照）。
@@ -4184,7 +4184,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 8. **当直案を作る**：下の帯の「🚀 当直案を作成」を押します（計算に最大1分少々かかります）。押すたびに違うパターンの案ができるので、気に入るまで押し直して構いません。
    未決定の枠が出たら、条件を直して作り直します。下の帯の移動ボタンで、条件と結果を行き来できます。
 9. **確認してダウンロード**：「医師別の当直一覧」をExcelでダウンロードします（「結果の見方・Excel」のタブを参照）。
-10. **途中保存**：最後に上の帯の「💾 作業を途中保存する」を押しておくと、翌月は「📋 前回の医師条件を引き継ぐ」で、この医師条件から始められます。
+10. **途中保存**：最後に上の帯の「💾 作業を途中保存する」を押しておくと、翌月は「📋 先月の医師条件を引き継ぐ」で、この医師条件から始められます。
 
 途中保存には、年月・休日・別途決定の日・増員設定・確定当直・医師条件（NG日を含む）・取り込んだ先生のコメント・不足時の優先順位・アラートの基準が入ります。
         """)
@@ -4713,11 +4713,31 @@ section_banner("👩‍⚕️", "医師条件の読み込み・入力", "先生�
 st.info("下の表に先生ごとの条件を入力してください。CSVを使う場合は、ひな形をダウンロードして編集し、アップロードします。NG日は、この下の「🚫 先生ごとのNG日設定」で設定します。")
 st.caption("最初に表示される「型1」〜「型9」は、よくある条件の入力例です。名前の欄が型の中身です（例：型4＝A宿直・A日直・外来日直に入る先生）。実際の先生の名前に置き換え、回数などを調整して使ってください。行は「＋」で増やせます。")
 
-# --- 前回の医師条件を引き継ぐ（管理用パスワードが必要） ---
+# --- 先月の医師条件を引き継ぐ（管理用パスワードが必要） ---
 if remote_is_configured():
     _co_msg = st.session_state.pop("carry_over_message", None)
-    _co_label = "📋 前回の医師条件を引き継ぐ（NG日・希望日・コメントは空にします）" + "\u200b" * st.session_state.get("carry_over_gen", 0)
-    with (st.popover(_co_label) if hasattr(st, "popover") else st.expander(_co_label, expanded=False)):
+    # ボタンの名前：ログイン中は、途中保存してある月を出す（ふつうは先月）
+    _co_name = "先月"
+    if st.session_state.get("remote_admin_ok"):
+        _co_at, _co_data = work_state_info()
+        if _co_data and _co_data.get("staff_csv"):
+            _co_ym = (int(_co_data.get("year", 0)), int(_co_data.get("month", 0)))
+            _co_prev = (year, month - 1) if month > 1 else (year - 1, 12)
+            _co_name = f"先月（{_co_ym[1]}月）" if _co_ym == _co_prev else f"{_co_ym[0]}年{_co_ym[1]}月"
+    _co_label = f"📋 {_co_name}の医師条件を引き継ぐ" + "\u200b" * st.session_state.get("carry_over_gen", 0)
+    st.markdown("""<style>
+.st-key-carry_over_box{border:2px solid #2f6db5;background:#eef5fd;border-radius:12px;padding:10px 14px 12px}
+.st-key-carry_over_box [data-testid="stPopover"] button, .st-key-carry_over_box [data-testid="stExpander"] summary{
+  background:#2f6db5 !important;color:#fff !important;border:0 !important;min-height:2.8rem;font-weight:800}
+.st-key-carry_over_box [data-testid="stPopover"] button p{font-size:1.05rem;font-weight:800;color:#fff}
+.st-key-carry_over_box [data-testid="stPopover"] button svg{color:#fff;fill:#fff}
+.st-key-carry_over_box .co-lead{font-weight:800;color:#1d4e89;margin:0 0 6px}
+</style>""", unsafe_allow_html=True)
+    with st.container(key="carry_over_box"):
+        st.markdown("<div class='co-lead'>🔁 新しい月は、まずここで先月の医師条件を読み込みます</div>", unsafe_allow_html=True)
+        st.caption("最後に「💾 作業を途中保存する」で保存した医師条件（回数・勤務間隔・翌日PM duty・備考など）を読み込みます。NG日・希望日・先生のコメントは空になります。")
+        _co_box = st.popover(_co_label) if hasattr(st, "popover") else st.expander(_co_label, expanded=False)
+    with _co_box:
         if admin_logged_in("carry_over_pw"):
             _co_at, _co_data = work_state_info()
             if _co_data and _co_data.get("staff_csv"):
