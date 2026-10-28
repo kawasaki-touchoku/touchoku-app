@@ -613,7 +613,7 @@ MATRIX_COUNT_GROUP_STARTS = ('ward', 'night', 'weekday', 'total')  # セット�
 MATRIX_SATURDAY_HEAD = '#1f6fbf'
 
 
-def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday=False, comments=None):
+def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday=False, comments=None, gap_blocked=None):
     """
     医師ごと・日ごとのマスの内容を作る。
     優先順：決まった当直 ＞ ×（当直NG）＞ PM（翌日PM duty）。
@@ -647,8 +647,10 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
             d = info['day']
             r = df_result.iloc[d - 1]
             # 日ごとのNG人数：その日にNG（平日は宿NG・全NG、休日は日NGも）か、翌日PM dutyで宿直を外す先生を数える
+            # 前後の月の確定当直との勤務間隔で入れない日（薄紫のマス）も、実質NGとして数える
             if effective_ng(ng.get(d, 'OK'), info['holiday']) != 'OK' or pm_duty_restricted(
-                    datetime.date(year, month, d), pm_days, year, month, custom_holidays, next_month_special_holiday):
+                    datetime.date(year, month, d), pm_days, year, month, custom_holidays, next_month_special_holiday) \
+                    or d in (gap_blocked or {}).get(name, ()):
                 info['ng_count'] += 1
             assigned = [s for s in RESULT_COLUMNS[2:] if name in [x.strip() for x in re.split(r'[、,]', str(r[s]))]]
             if assigned:
@@ -667,6 +669,18 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
                 continue
             kind = ng.get(d)
             pm = pm_duty_restricted(datetime.date(year, month, d), pm_days, year, month, custom_holidays, next_month_special_holiday)
+            # 先月末・来月初めの確定当直との勤務間隔のため入れない日：マスを薄紫にする（×の表示はそのまま）
+            # （今月の確定当直の前後は、色を付けない）
+            if d in (gap_blocked or {}).get(name, ()):
+                if info['holiday'] and kind in ('全NG', '宿NG', '日NG'):
+                    top = '×' if kind in ('全NG', '日NG') else ''
+                    bottom = '×' if kind in ('全NG', '宿NG') else ''
+                    cells.append({'type': 'half', 'top': top, 'bottom': bottom, 'text': '×', 'gap': True})
+                elif kind in ('全NG', '宿NG'):
+                    cells.append({'type': 'ng', 'text': '×', 'pm': False, 'gap': True})
+                else:
+                    cells.append({'type': 'empty', 'text': '', 'gap': True})
+                continue
             # 翌日PM dutyの日にNGも付いている場合は、斜線の上に×を出す（斜線だけ＝NGは付いていない）
             if info['holiday'] and (pm or kind in ('全NG', '宿NG', '日NG')):
                 # 休日は、上半分＝日直、下半分＝宿直に分けて、NGの側に×を出す（全NGは上下とも×）。
@@ -790,6 +804,8 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
 .dm .pmcol{padding:0 3px;color:#566174;font-size:11px;min-width:34px}
 .dm thead .pmcol{line-height:1.2}
 .dm td.hol{background:#fdf1f1}
+/* 先月末・来月初めの確定当直との勤務間隔のため入れない日 */
+.dm td.gap{background-color:#e2daf2}
 .dm .cell{display:flex;align-items:center;justify-content:center;height:100%;min-height:26px;font-weight:700;font-size:10px;padding:1px 2px;width:38px;margin:0 auto;white-space:normal;line-height:1.15;text-align:center;word-break:keep-all}
 .dm .ng{color:#c0392b;font-size:14px}
 .dm .pm{background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)}
@@ -833,6 +849,7 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
         legend.append(f'<span><i style="background:{bg};color:{fg}">{s}</i></span>')
     legend.append(f'<span><i style="box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME}">&nbsp;&nbsp;&nbsp;</i>茶色の枠：希望日が通った当直</span>')
     legend.append('<span><i style="background:#fdf1f1">&nbsp;</i>薄い赤の列：土日祝・休日にした日</span>')
+    legend.append('<span><i style="background:#e2daf2">&nbsp;</i>薄紫：前後の月（先月末・来月初めなど）の確定当直との勤務間隔のため、入れない日</span>')
     legend.append('<span><i style="color:#c0392b">×</i>当直NG（平日は宿直NG）</span>')
     legend.append('<span><i style="color:#c0392b;background:#fdf1f1;line-height:1;padding:0 4px">×<br>&nbsp;</i>'
                   '休日のマス：上半分＝日直、下半分＝宿直。上の×＝日直NG、下の×＝宿直NG（上下とも×＝全NG）</span>')
@@ -841,7 +858,7 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
                   '下半分だけ斜線：休日の翌日PM dutyの日。宿直は外し、日直には入れる（×の意味は休日のマスと同じ）</span>')
     legend.append('<span><i>💬📝</i>メモ欄：先生からのコメント・備考（カーソルを合わせると全文）</span>')
     legend.append('<span><i style="color:#c0392b;border-color:#c0392b">⚠️ 未決定</i>赤線の下：当直が決まっていない枠</span>')
-    legend.append('<span><i style="background:#ffd2a1;color:#7a3a00">3</i>NG人数の行：その日にNGの先生の数（翌日PM dutyで宿直を外す先生を含む）</span>')
+    legend.append('<span><i style="background:#ffd2a1;color:#7a3a00">3</i>NG人数の行：その日にNGの先生の数（翌日PM dutyで宿直を外す先生・薄紫のマスの先生を含む）</span>')
     if count_alert_text(alerts):
         legend.append('<span><i style="color:#c0392b;background:#ffd8d8;border-color:#e03131">⚠</i>右端の赤いマス：' + count_alert_text(alerts) + '</span>')
     legend.append('</div>')
@@ -868,7 +885,8 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
         tr = [f'<tr><td class="nm">{html_escape(row["name"])}</td><td class="pmcol">{html_escape(row["pm_duty"])}</td>{memo_cell_html(row, tip_up)}']
         for info, cell in zip(days, row['cells']):
             col = f'c{info["day"]}'   # 列（日付）ごとの印。カーソルを合わせた列を色付けするのに使う
-            td_class = f' class="{col} hol"' if info['holiday'] else f' class="{col}"'
+            gap_class = ' gap' if cell.get('gap') else ''
+            td_class = f' class="{col} hol{gap_class}"' if info['holiday'] else f' class="{col}{gap_class}"'
             if cell['type'] == 'shift':
                 bg, fg = MATRIX_SHIFT_COLORS.get(cell['shift'], ('#eee', '#000'))
                 wish_css = f'box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME},inset 0 0 0 4px #ffffff;' if cell.get('wish') else ''
@@ -879,7 +897,7 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
             elif cell['type'] == 'pm':
                 tr.append(f'<td class="{col}"><div class="cell pm"></div></td>')
             elif cell['type'] in ('pmhalf', 'half'):
-                hol_class = ' hol' if cell['type'] == 'half' else ''
+                hol_class = (' hol' if cell['type'] == 'half' else '') + (' gap' if cell.get('gap') else '')
                 tr.append(f'<td class="{col}{hol_class} {cell["type"]}"><span class="t">{cell["top"]}</span><span class="b">{cell["bottom"]}</span></td>')
             else:
                 tr.append(f'<td{td_class}></td>')
@@ -1087,6 +1105,8 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
                 c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
             elif info['holiday']:
                 c.fill = fill('#FDF1F1')
+            if cell.get('gap'):
+                c.fill = fill('#E2DAF2')   # 先月末・来月初めの確定当直との勤務間隔のため入れない日
         if row.get('comment') or row.get('note'):
             # 右どなりの日付のマスが空だと、メモの長い文字が当直表の上にはみ出して見えるので、空白を1つ入れて止める
             nxt = ws.cell(row=r_idx, column=first_day_col)
@@ -1209,8 +1229,9 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
     s5.value = '未決定'; s5.font = Font(bold=True, size=8, color='C0392B')
     s6 = legend_line(7, 'メモ：💬＝先生からのコメント、📝＝備考（セルにカーソルを乗せると全文。「メモ全文」シートにも一覧）')
     s6.value = '💬📝'; s6.border = Border()
-    s8 = legend_line(8, 'NG人数の行（見出しのすぐ下）：その日にNGの先生の数（翌日PM dutyで宿直を外す先生を含む）')
+    s8 = legend_line(8, 'NG人数の行（見出しのすぐ下）：その日にNGの先生の数（翌日PM dutyで宿直を外す先生・薄紫のマスの先生を含む）')
     s8.value = 3; s8.fill = fill('#FFD2A1'); s8.font = Font(bold=True, color='7A3A00')
+    legend_line(10, '薄紫：前後の月（先月末・来月初めなど）の確定当直との勤務間隔のため、入れない日').fill = fill('#E2DAF2')
     legend_line(3, '下半分だけ黄色：休日の翌日PM dutyの日。宿直は外し、日直には入れる（×の意味は休日のマスと同じ）').fill = PM_HALF_FILL
     if count_alert_text(alerts):
         s7 = legend_line(9, '右端の赤い枠の回数：' + count_alert_text(alerts))
@@ -4021,7 +4042,7 @@ def period_generate_shift(P, staff_df, custom_holidays, multi_slots_dict, fixed_
     return result, success, list(dict.fromkeys(warnings)), past, future
 
 
-def period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month_special_holiday=False, comments=None):
+def period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month_special_holiday=False, comments=None, gap_blocked=None):
     year, month = P.year, P.month
     """
     医師ごと・日ごとのマスの内容を作る。
@@ -4056,7 +4077,9 @@ def period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month
             d = info['day']
             r = df_result.iloc[d - 1]
             # 日ごとのNG人数：その日にNG（平日は宿NG・全NG、休日は日NGも）か、翌日PM dutyで宿直を外す先生を数える
-            if effective_ng(ng.get(d, 'OK'), info['holiday']) != 'OK' or period_pm_restricted(P, d, pm_days, custom_holidays, next_month_special_holiday):
+            # 前後の月の確定当直との勤務間隔で入れない日（薄紫のマス）も、実質NGとして数える
+            if effective_ng(ng.get(d, 'OK'), info['holiday']) != 'OK' or period_pm_restricted(P, d, pm_days, custom_holidays, next_month_special_holiday) \
+                    or d in (gap_blocked or {}).get(name, ()):
                 info['ng_count'] += 1
             assigned = [s for s in RESULT_COLUMNS[2:] if name in [x.strip() for x in re.split(r'[、,]', str(r[s]))]]
             if assigned:
@@ -4075,6 +4098,18 @@ def period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month
                 continue
             kind = ng.get(d)
             pm = period_pm_restricted(P, d, pm_days, custom_holidays, next_month_special_holiday)
+            # 先月末・来月初めの確定当直との勤務間隔のため入れない日：マスを薄紫にする（×の表示はそのまま）
+            # （今月の確定当直の前後は、色を付けない）
+            if d in (gap_blocked or {}).get(name, ()):
+                if info['holiday'] and kind in ('全NG', '宿NG', '日NG'):
+                    top = '×' if kind in ('全NG', '日NG') else ''
+                    bottom = '×' if kind in ('全NG', '宿NG') else ''
+                    cells.append({'type': 'half', 'top': top, 'bottom': bottom, 'text': '×', 'gap': True})
+                elif kind in ('全NG', '宿NG'):
+                    cells.append({'type': 'ng', 'text': '×', 'pm': False, 'gap': True})
+                else:
+                    cells.append({'type': 'empty', 'text': '', 'gap': True})
+                continue
             # 翌日PM dutyの日にNGも付いている場合は、斜線の上に×を出す（斜線だけ＝NGは付いていない）
             if info['holiday'] and (pm or kind in ('全NG', '宿NG', '日NG')):
                 # 休日は、上半分＝日直、下半分＝宿直に分けて、NGの側に×を出す（全NGは上下とも×）。
@@ -4228,11 +4263,12 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 - 枠名のマス：決まった当直（色は枠の種類）
 - **茶色の太い枠**：希望日が、希望どおりに通った当直
 - **薄い赤の列**：土日祝と「休日にする」にした日
+- **薄紫のマス**：先月末・来月初めの確定当直から「最低空ける日数」以内のため、入れない日（今月の確定当直の前後には色を付けません）
 - **×**：当直NGの日（平日は宿直NG）
 - **休日のマス**：上半分＝日直、下半分＝宿直です。上に×＝日直NG、下に×＝宿直NG、上下とも×＝全NG
 - **黄色の斜線**：翌日PM dutyのため宿直を外す日。×があれば、NGも付いている日です
 - **下半分だけ黄色の斜線**：休日の翌日PM dutyの日。宿直は外しますが、日直には入れます（×の意味は休日のマスと同じ）
-- **NG人数の行**（見出しのすぐ下）：その日にNGの先生の数。翌日PM dutyで宿直を外す先生も数えます。多い日ほど濃いオレンジです
+- **NG人数の行**（見出しのすぐ下）：その日にNGの先生の数。翌日PM dutyで宿直を外す先生と、薄紫のマス（勤務間隔のため入れない日）の先生も数えます。多い日ほど濃いオレンジです
 - **赤線の下の「⚠️ 未決定」**：人数が足りず、担当が決まっていない枠
 - **右端の回数**：病棟・外来／宿直・日直／平日・休日／合計。回数が多い先生は**赤い枠**で表示されます。該当する先生は、作成ボタンの下の「計算状況・条件の注意事項と対処方法」にも一覧で出ます。基準は表のすぐ上の「⚠ アラートの基準」で変えられます（初期設定は宿直4回以上・休日3回以上。0にした項目はアラートなし）。
 - **メモ欄**：💬は先生からのコメント（取り込んだ先生だけ）、📝は医師条件の備考です。カーソルを合わせると全文が出ます。全員分は「💬 先生方のコメント・備考の一覧」でまとめて見られます。
@@ -5431,8 +5467,18 @@ if len(staff_df) > 0:
         st.subheader("🗓️ 医師別の当直一覧")
         st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。休日のマスは上半分が日直、下半分が宿直です。"
                    "希望日が通った当直は茶色の太い枠で囲み、回数が多い先生は右端の回数を赤い枠で示します。マスにカーソルを合わせると、その先生の行とその日の列が黄色く色付きます。")
+        # 先月末・来月初めの確定当直から「最低空ける日数」以内で、入れない日（今月の確定当直の前後は含めない）
+        gap_blocked = {}
+        for _, _r in staff_df.iterrows():
+            _nm = str(_r['先生の名前'])
+            _gv = pd.to_numeric(pd.Series([_r.get('最低空ける日数')]), errors='coerce').iloc[0]
+            _gap = 0 if pd.isna(_gv) else int(_gv)
+            _ext = list(past_worked_dates.get(_nm, [])) + list(future_worked_dates.get(_nm, []))
+            if _ext and _gap > 0:
+                gap_blocked[_nm] = {d for d in range(1, num_days + 1)
+                                    if any(abs((datetime.date(year, month, d) - e).days) <= _gap for e in _ext)}
         matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday,
-                                                     comments=imported_comments(year, month))
+                                                     comments=imported_comments(year, month), gap_blocked=gap_blocked)
         missing_total = sum(len(info['shortage']) for info in matrix_days)
         # 下の帯の「当直案を作成」ボタンの横に、結果のまとめを出す
         _t = remote_now()[-8:-3]
