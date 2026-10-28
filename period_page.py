@@ -156,8 +156,8 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     return period_generate_shift(P, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority, locked_days)
 
 
-def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday=False, comments=None):
-    return period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month_special_holiday, comments)
+def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday=False, comments=None, gap_blocked=None):
+    return period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month_special_holiday, comments, gap_blocked)
 
 
 _normal_duty_matrix_xlsx = duty_matrix_xlsx
@@ -659,11 +659,12 @@ with st.expander("📖 使い方（期間指定版・作業の流れ・結果の
 - 枠名のマス：決まった当直（色は枠の種類）
 - **茶色の太い枠**：希望日が、希望どおりに通った当直
 - **薄い赤の列**：土日祝と「休日にする」にした日
+- **薄紫のマス**：期間の前後の確定当直から「最低空ける日数」以内のため、入れない日（期間中の確定当直の前後には色を付けません）
 - **×**：当直NGの日（平日は宿直NG）
 - **休日のマス**：上半分＝日直、下半分＝宿直です。上に×＝日直NG、下に×＝宿直NG、上下とも×＝全NG
 - **黄色の斜線**：翌日PM dutyのため宿直を外す日。×があれば、NGも付いている日です
 - **下半分だけ黄色の斜線**：休日の翌日PM dutyの日。宿直は外しますが、日直には入れます（×の意味は休日のマスと同じ）
-- **NG人数の行**（見出しのすぐ下）：その日にNGの先生の数。翌日PM dutyで宿直を外す先生も数えます。多い日ほど濃いオレンジです
+- **NG人数の行**（見出しのすぐ下）：その日にNGの先生の数。翌日PM dutyで宿直を外す先生と、薄紫のマス（勤務間隔のため入れない日）の先生も数えます。多い日ほど濃いオレンジです
 - **赤線の下の「⚠️ 未決定」**：人数が足りず、担当が決まっていない枠
 - **右端の回数**：病棟・外来／宿直・日直／平日・休日／合計。回数が多い先生は**赤い枠**で表示されます。該当する先生は、作成ボタンの下の「計算状況・条件の注意事項と対処方法」にも一覧で出ます。基準は表のすぐ上の「⚠ アラートの基準」で変えられます（初期設定は宿直4回以上・休日3回以上。0にした項目はアラートなし）。
 - **メモ欄**：💬は先生からのコメント（取り込んだ先生だけ）、📝は医師条件の備考です。カーソルを合わせると全文が出ます。全員分は「💬 先生方のコメント・備考の一覧」でまとめて見られます。
@@ -1864,8 +1865,18 @@ if len(staff_df) > 0:
         st.subheader("🗓️ 医師別の当直一覧")
         st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。休日のマスは上半分が日直、下半分が宿直です。"
                    "希望日が通った当直は茶色の太い枠で囲み、回数が多い先生は右端の回数を赤い枠で示します。マスにカーソルを合わせると、その先生の行とその日の列が黄色く色付きます。")
+        # 先月末・来月初めの確定当直から「最低空ける日数」以内で、入れない日（今月の確定当直の前後は含めない）
+        gap_blocked = {}
+        for _, _r in staff_df.iterrows():
+            _nm = str(_r['先生の名前'])
+            _gv = pd.to_numeric(pd.Series([_r.get('最低空ける日数')]), errors='coerce').iloc[0]
+            _gap = 0 if pd.isna(_gv) else int(_gv)
+            _ext = list(past_worked_dates.get(_nm, [])) + list(future_worked_dates.get(_nm, []))
+            if _ext and _gap > 0:
+                gap_blocked[_nm] = {d for d in range(1, num_days + 1)
+                                    if any(abs((datetime.date(year, month, d) - e).days) <= _gap for e in _ext)}
         matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday,
-                                                     comments=imported_comments(year, month))
+                                                     comments=imported_comments(year, month), gap_blocked=gap_blocked)
         missing_total = sum(len(info['shortage']) for info in matrix_days)
         # 下の帯の「当直案を作成」ボタンの横に、結果のまとめを出す
         _t = remote_now()[-8:-3]
