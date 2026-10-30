@@ -2777,17 +2777,19 @@ CSV_UPLOAD_CSS = """<style>
 .csv-card-head .lab{display:inline-block;color:#fff;border-radius:6px;padding:1px 9px;font-size:.8rem}
 .csv-card-head.green{color:#1f6b45}.csv-card-head.green .lab{background:#2e8a5b}
 .csv-card-head.blue{color:#1d4e89}.csv-card-head.blue .lab{background:#2f6db5}
-[class*="st-key-csvcard_"]{border:2px solid #c9d6e6;border-radius:12px;padding:12px 14px 10px;background:#fbfcfe}
+[class*="st-key-csvcard_"]{border:2.5px solid #2e8a5b;border-radius:12px;padding:12px 14px 10px;background:#eef8f1}
 /* ドラッグ＆ドロップの枠：緑の点線で大きくし、「ここにドラッグ＆ドロップ」と書く */
-[data-testid="stFileUploaderDropzone"]{border:2.5px dashed #2e8a5b !important;background:#f1faf4 !important;border-radius:12px !important;
+[data-testid="stFileUploaderDropzone"]{border:2.5px dashed #2e8a5b !important;background:#fff !important;border-radius:12px !important;
   min-height:7.5rem;padding:1rem !important;display:flex !important;flex-direction:column !important;align-items:center !important;
   justify-content:center !important;gap:.45rem;text-align:center}
 [data-testid="stFileUploaderDropzone"]::before{content:"📄⬇　ここにCSVファイルをドラッグ＆ドロップ";order:-1;display:block;
   font-weight:800;color:#1f6b45;font-size:1rem}
-[data-testid="stFileUploaderDropzone"] button{border-color:#9bd3a8 !important;color:#1f6b45 !important;background:#fff !important}
+[data-testid="stFileUploaderDropzone"] button{border:0 !important;color:#fff !important;background:#2e8a5b !important;font-weight:700}
+[data-testid="stFileUploaderDropzone"] button p{color:#fff}
+[class*="st-key-csvcard_"] [data-testid="stDownloadButton"] button{border:1.5px solid #2e8a5b !important;color:#1f6b45 !important;background:#fff !important;font-weight:700}
 [data-testid="stFileUploaderDropzoneInstructions"]{font-size:.8rem;color:#8a94a6}
 .imp-choose{font-weight:800;color:#24405f;margin:4px 0 8px;font-size:1rem}
-.imp-or{display:flex;justify-content:center;margin-top:3.2rem}.imp-or span{background:#eef1f5;border-radius:999px;padding:8px 10px;font-weight:800;color:#6a7686}
+.imp-or{display:flex;justify-content:center}.imp-or span{background:#eef1f5;border-radius:999px;padding:8px 10px;font-weight:800;color:#6a7686}
 .imp-note{background:#fff7e0;border:1px solid #f0c36d;border-radius:8px;padding:6px 10px;font-size:.85rem;color:#7a5a00;margin:10px 0 2px}
 @media (max-width:640px){.imp-or{margin:0}}
 /* 方法1（引き継ぎ）の枠は青 */
@@ -2804,6 +2806,21 @@ CSV_UPLOAD_CSS = """<style>
   flex:1 1 auto;display:flex;flex-direction:column}
 [data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) [class*="st-key-csvcard_"]{flex:1 1 auto;box-sizing:border-box}
 @media (max-width:640px){[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) [class*="st-key-csvcard_"]{flex:0 0 auto}}
+/* 「または」は2つの枠の上下の真ん中に置く */
+[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) > [data-testid="stColumn"]:has(.imp-or) > [data-testid="stVerticalBlock"],
+[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) > [data-testid="column"]:has(.imp-or) > div > [data-testid="stVerticalBlock"]{justify-content:center}
+/* 見出しと説明は上でそろえ、操作する場所（方法1の白い枠・方法2のドロップ枠）は枠の下でそろえる */
+.st-key-carry_act{background:#fff;border:2.5px solid #b9cfee;border-radius:12px;min-height:7.5rem;padding:1rem;box-sizing:border-box;
+  justify-content:center;align-items:center;text-align:center;gap:.45rem}
+[class*="st-key-csvcard_"] [data-testid="stLayoutWrapper"]:has(> .st-key-carry_act), [class*="st-key-csvcard_"] > .st-key-carry_act{margin-top:auto}
+.st-key-csvcard_staff [data-testid="stElementContainer"]:has([data-testid="stFileUploader"]),
+.st-key-csvcard_staff .element-container:has([data-testid="stFileUploader"]){margin-top:auto}
+/* 「初めての場合：ひな形をダウンロード」は2つの枠の下に1行で出す */
+.st-key-imp_tmpl{background:#f7f9fc;border:1px solid #e1e6ee;border-radius:10px;padding:6px 12px;margin-top:6px;
+  flex-direction:row !important;flex-wrap:wrap;align-items:center;gap:.3rem .6rem}
+.st-key-imp_tmpl > div{width:auto !important;flex:0 1 auto}
+.st-key-imp_tmpl p{margin:0;font-size:.9rem}
+.st-key-imp_tmpl [data-testid="stDownloadButton"] button{border:1.5px solid #2e8a5b !important;color:#1f6b45 !important;background:#fff !important;font-weight:700}
 </style>"""
 
 
@@ -2817,7 +2834,8 @@ def csv_upload_card(card_key, tag, title, desc, uploader_key, template_bytes, te
         up = st.file_uploader(title, type="csv", key=uploader_key, label_visibility="collapsed")
         if template_note:
             st.caption(template_note)
-        st.download_button(label=template_label, data=template_bytes, file_name=template_name, mime="text/csv")
+        if template_bytes is not None:   # 方法2（医師条件）は、ひな形のダウンロードを枠の下に出すので、ここには出さない
+            st.download_button(label=template_label, data=template_bytes, file_name=template_name, mime="text/csv")
     return up
 
 
@@ -4636,7 +4654,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 3. **人数を増やす枠（任意）**：1つの枠を2名以上にする日があれば、行を足して設定します。
 4. **確定当直（任意）**：「📅 先月今月来月の確定当直」の欄に、すでに決まっている当直や、先月末・来月初めの当直を入れます。勤務間隔の計算に使われます。
 5. **先生の名簿と医師条件**（「先生ごとの条件」の①）：以前の医師条件を、方法1か方法2のどちらかで取り込みます。新しい月なら、方法1の「📋 先月の医師条件を引き継ぐ」を押すと、先月の医師条件から始められます。先月分の途中保存にある医師条件（回数・間隔・翌日PM duty・備考など）が入り、NG日・希望日・先生のコメントは空になります。
-   手元のCSVを使う場合や初めての場合は、方法2の緑の点線の枠にCSVファイルをドラッグ＆ドロップします（ひな形はその下からダウンロードできます）。
+   手元のCSVを使う場合や初めての場合は、方法2の緑の点線の枠にCSVファイルをドラッグ＆ドロップします（ひな形は、2つの枠の下の「📥 ひな形（CSV）をダウンロード」から入手できます）。
    読み込むと、①に「今の名簿」と「読み込んだ医師条件」（見るだけの表）が出るので、正しく読み込めたかをここで確認します。
    新しく来た先生は「➕ 先生を追加する」で、名前・入れる位置（○○先生の下）・条件のもと（ほかの先生と同じ条件、または型）を選んで追加します。いなくなった先生は「➖ 先生を外す」で外します。
 6. **NG日**（②）：先生を選んでカレンダーでNG日を入れ、「NG日を反映する」を押します（紙やメールで集めたNG日を入力します）。先生方に専用URLから入力してもらう場合は、ここで受付・取り込みを行います（「NG日の集め方」のタブを参照）。
@@ -5200,6 +5218,7 @@ with staff_box_roster:
     st.markdown("<div class='imp-choose'>📥 以前の医師条件を取り込む（どちらか1つの方法を使います）</div>", unsafe_allow_html=True)
     imp_a, imp_or, imp_b = st.columns([10, 1.4, 10])   # 方法1（引き継ぎ）・または・方法2（CSV）
     imp_or.markdown("<div class='imp-or'><span>または</span></div>", unsafe_allow_html=True)
+    imp_tmpl = st.container(key="imp_tmpl")   # 「初めての場合：ひな形をダウンロード」（中身はひな形を作ったあとで入れる）
     st.markdown("<div class='imp-note'>どちらで取り込んでも、下の「今の名簿」と「読み込んだ医師条件」の表がその内容に置き換わります。</div>",
                 unsafe_allow_html=True)
     # --- 方法1：途中保存から先月の医師条件を引き継ぐ（管理用パスワードが必要） ---
@@ -5219,7 +5238,11 @@ with staff_box_roster:
                     _co_name = f"先月（{_co_ym[1]}月）" if _co_ym == _co_prev else f"{_co_ym[0]}年{_co_ym[1]}月"
             _co_label = f"📋 {_co_name}の医師条件を引き継ぐ" + "\u200b" * st.session_state.get("carry_over_gen", 0)
             st.caption("「💾 作業を途中保存する」で保存した医師条件（回数・勤務間隔・翌日PM duty・備考など）を読み込みます。先月分の保存があればその最新、なければいちばん新しい保存を使います。NG日・希望日・先生のコメントは空になります。")
-            _co_box = st.popover(_co_label) if hasattr(st, "popover") else st.expander(_co_label, expanded=False)
+            _co_act = st.container(key="carry_act")   # ボタンを入れる白い枠（方法2のドロップ枠と下でそろえる）
+            with _co_act:
+                _co_box = st.popover(_co_label) if hasattr(st, "popover") else st.expander(_co_label, expanded=False)
+                if not st.session_state.get("remote_admin_ok"):
+                    st.caption("押すと管理用パスワードの入力欄が開きます")
             with _co_box:
                 if admin_logged_in("carry_over_pw"):
                     _co_at, _co_data = work_state_for_carry(year, month)
@@ -5323,8 +5346,11 @@ with staff_box_roster:
             "staff", "方法2", "CSVファイルをアップロード",
             "手元のCSV（以前ダウンロードした医師条件、またはひな形に入力したもの）を読み込みます。",
             f"staff_csv_{st.session_state.get('uploader_gen', 0)}_{st.session_state.get('staff_uploader_gen', 0)}",
-            csv_template, "医師条件_ひな形.csv", "📥 ひな形（CSV）をダウンロード",
-            "初めての場合は、ひな形をダウンロードしてExcelで入力してから読み込みます。")
+            None, "", "")
+    with imp_tmpl:
+        st.markdown("📝 初めての場合：")
+        st.download_button(label="📥 ひな形（CSV）をダウンロード", data=csv_template, file_name="医師条件_ひな形.csv", mime="text/csv")
+        st.markdown("して、Excelで入力してから方法2で読み込みます。")
     staff_box_ro = st.container()   # ①のいちばん下：読み込んだ医師条件（見るだけ。中身は医師条件の表を読んだあとで入れる）
 
 with staff_box_cond:
