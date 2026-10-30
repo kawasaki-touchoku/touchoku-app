@@ -6111,8 +6111,14 @@ if len(staff_df) > 0:
             for _k2, _v2 in MATRIX_COUNT_ALERTS.items():
                 st.session_state[f"alert_{_k2}"] = _v2
 
-        with st.expander("⚠ アラートの基準（回数が多い先生を赤く表示）", expanded=False):
-            st.caption("それぞれの回数がこの数以上の先生を、表の右端で赤く表示します。0にすると、その項目はアラートを出しません。")
+        # アラートの基準は、折りたたまずに常に表示する（表の見え方がすぐ変えられるように）
+        st.markdown("<style>.st-key-alert_box{border:1.5px solid #e8a0a0;background:#fff7f7;border-radius:10px;padding:8px 14px 10px;gap:.4rem}"
+                    ".alert-h{font-weight:800;color:#a32020;font-size:1rem}"
+                    ".alert-h span{font-weight:400;font-size:.82rem;color:#6a7686;margin-left:.6rem}</style>", unsafe_allow_html=True)
+        with st.container(key="alert_box"):
+            st.markdown("<div class='alert-h'>⚠ アラートの基準（回数が多い先生を赤く表示）"
+                        "<span>それぞれの回数がこの数以上の先生を、表の右端で赤く表示します。0にすると、その項目はアラートを出しません。</span></div>",
+                        unsafe_allow_html=True)
             _acols = st.columns(len(MATRIX_COUNT_ALERTS))
             for _col, _k in zip(_acols, MATRIX_COUNT_ALERTS):
                 _col.number_input(f"{MATRIX_ALERT_LABELS[_k]}（回以上）", min_value=0, max_value=31, step=1, key=f"alert_{_k}")
