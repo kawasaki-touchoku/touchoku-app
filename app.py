@@ -2935,7 +2935,11 @@ YM_PICK_CSS = """<style>
 .st-key-ym_pick > div:has(.st-key-ym_quick), .st-key-ym_pick > .st-key-ym_quick{margin-left:auto}
 .st-key-ym_quick{flex-direction:row !important;flex-wrap:wrap;gap:.4rem !important}
 .st-key-ym_quick > div{width:auto !important}
-.ym-big{font-size:2rem;font-weight:800;color:#1d4e89;min-width:12rem;text-align:center;line-height:1.2;white-space:nowrap}
+/* Streamlitの文字欄は下に負の余白が付くため、そのままだと上下の真ん中より下にずれる。余白を消してボタンと高さをそろえる */
+.st-key-ym_pick > div{align-self:center}
+.st-key-ym_pick [data-testid="stMarkdown"], .st-key-ym_pick [data-testid="stMarkdownContainer"],
+.st-key-ym_pick [data-testid="stMarkdownContainer"] > *{margin:0 !important;padding:0 !important}
+.ym-big{font-size:2rem;font-weight:800;color:#1d4e89;min-width:12rem;text-align:center;line-height:1;white-space:nowrap;margin:0 !important}
 .ym-big small{font-size:1rem;margin:0 .25rem 0 .1rem}
 .st-key-ym_prev button,.st-key-ym_next button{border:1.5px solid #2f6db5 !important;color:#1d4e89 !important;background:#fff !important;font-weight:700}
 .st-key-ym_quick button{border-radius:999px !important;min-height:2.1rem;padding:0 .9rem}
