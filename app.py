@@ -2797,7 +2797,12 @@ CSV_UPLOAD_CSS = """<style>
 /* 「または」の欄は、文字欄の下に付く負の余白を消して、上下の真ん中に置く（縦書きのように折り返さない） */
 [data-testid="stColumn"]:has(.imp-or) [data-testid="stMarkdown"], [data-testid="stColumn"]:has(.imp-or) [data-testid="stMarkdownContainer"],
 [data-testid="stColumn"]:has(.imp-or) [data-testid="stMarkdownContainer"] > *{margin:0 !important;padding:0 !important}
-[data-testid="stColumn"]:has(.imp-or){min-width:4.2rem;overflow:visible}
+/* 中くらいの画面幅でも、方法1・または・方法2 を折り返さずに横1列に並べる（Streamlitは幅が足りないと列を次の行に送るため） */
+@media (min-width:641px){
+  [data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry){flex-wrap:nowrap !important}
+  [data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) > [data-testid="stColumn"]{min-width:0 !important;flex:1 1 0 !important}
+  [data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) > [data-testid="stColumn"]:has(.imp-or){flex:0 0 4.6rem !important;width:4.6rem !important}
+}
 .imp-note{background:#fff7e0;border:1px solid #f0c36d;border-radius:8px;padding:6px 10px;font-size:.85rem;color:#7a5a00;margin:10px 0 2px}
 @media (max-width:640px){.imp-or{margin:0}}
 /* 方法1（引き継ぎ）の枠は青 */
