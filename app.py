@@ -4962,7 +4962,10 @@ st.markdown("""
 .sec-banner[id]{scroll-margin-top:5.5rem}
 /* 折りたたみ式の項目（確定当直）も、同じ帯の見た目にする */
 /* 「先生ごとの条件」の中の小見出し（①〜④） */
-.step-h{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;margin:1.8rem 0 .6rem;padding-bottom:6px;border-bottom:2px solid #d6e0ec}
+/* 番号の丸とタイトルは必ず横に並べる（幅がせまいときは、タイトルの中で折り返す）。説明はタイトルの下に出す */
+.step-h{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:4px 10px;margin:1.8rem 0 .6rem;padding-bottom:6px;border-bottom:2px solid #d6e0ec}
+.step-h .tt{min-width:0;line-height:1.4}
+.step-h .ss{grid-column:2}
 .step-h .no{display:inline-flex;align-items:center;justify-content:center;width:1.9rem;height:1.9rem;border-radius:50%;background:#24405f;color:#fff;font-weight:800;font-size:1rem;flex:0 0 auto}
 .step-h .tt{font-size:1.2rem;font-weight:800;color:#24405f}
 .step-h .ss{font-size:.85rem;color:#5a6a80}
