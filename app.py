@@ -2792,7 +2792,12 @@ CSV_UPLOAD_CSS = """<style>
 [class*="st-key-csvcard_"] [data-testid="stDownloadButton"] button{border:1.5px solid #2e8a5b !important;color:#1f6b45 !important;background:#fff !important;font-weight:700}
 [data-testid="stFileUploaderDropzoneInstructions"]{font-size:.8rem;color:#8a94a6}
 .imp-choose{font-weight:800;color:#24405f;margin:4px 0 8px;font-size:1rem}
-.imp-or{display:flex;justify-content:center}.imp-or span{background:#eef1f5;border-radius:999px;padding:8px 10px;font-weight:800;color:#6a7686}
+.imp-or{display:flex;justify-content:center}
+.imp-or span{background:#eef1f5;border-radius:999px;padding:6px 9px;font-weight:800;color:#6a7686;font-size:.85rem;white-space:nowrap;line-height:1.3}
+/* 「または」の欄は、文字欄の下に付く負の余白を消して、上下の真ん中に置く（縦書きのように折り返さない） */
+[data-testid="stColumn"]:has(.imp-or) [data-testid="stMarkdown"], [data-testid="stColumn"]:has(.imp-or) [data-testid="stMarkdownContainer"],
+[data-testid="stColumn"]:has(.imp-or) [data-testid="stMarkdownContainer"] > *{margin:0 !important;padding:0 !important}
+[data-testid="stColumn"]:has(.imp-or){min-width:4.2rem;overflow:visible}
 .imp-note{background:#fff7e0;border:1px solid #f0c36d;border-radius:8px;padding:6px 10px;font-size:.85rem;color:#7a5a00;margin:10px 0 2px}
 @media (max-width:640px){.imp-or{margin:0}}
 /* 方法1（引き継ぎ）の枠は青 */
