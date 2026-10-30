@@ -20,7 +20,7 @@ NIGHT_SHIFTS = ['A宿直', 'B宿直', '外来宿直']
 DAY_SHIFTS = ['A日直', 'B日直', '外来日直']
 ALL_SHIFT_TYPES = ['A宿直', 'B宿直', '外来宿直', 'A日直', 'B日直', '外来日直']
 RESULT_COLUMNS = ["日付", "平日/休日", "A日直", "A宿直", "B日直", "B宿直", "外来日直", "外来宿直"]
-NUMERIC_DEFAULTS = {'希望優先度(数字が大きいほど優先)': 1, '最低空ける日数': 5, '月間最小回数': 0, '月間最大回数': 5, '休日最大回数': 4, **{s + '上限': 2 for s in ALL_SHIFT_TYPES}}
+NUMERIC_DEFAULTS = {'希望優先度(数字が大きいほど優先)': 1, '間隔下限': 5, '月下限': 0, '月上限': 5, '休日上限': 4, **{s + '上限': 2 for s in ALL_SHIFT_TYPES}}
 NG_COLUMN = 'NG日(半角カンマ区切り)'
 # 宿直・日直それぞれの月間上限（A・B・外来を合わせた回数）。空欄なら制限なし
 GROUP_CAP_COLUMNS = {'宿直上限': ['A宿直', 'B宿直', '外来宿直'], '日直上限': ['A日直', 'B日直', '外来日直']}
@@ -74,10 +74,17 @@ def normalize_shift_names(df):
     return df
 
 
+# 以前の列名 → 今の列名（以前のCSV・途中保存も読み込めるように）
+STAFF_OLD_COLUMN_NAMES = {"月間" + "最小回数": "月下限", "月間" + "最大回数": "月上限",
+                          "休日" + "最大回数": "休日上限", "最低" + "空ける日数": "間隔下限"}
+
+
 @st.cache_data
 def parse_staff_csv(file_bytes):
     df = normalize_shift_names(_read_csv_any_encoding(file_bytes))
     # 旧CSVの列名も受け付け、画面・出力CSVでは新名称に統一する。
+    # 以前の列名のCSV・途中保存も、今の列名に読み替える
+    df = df.rename(columns={k: v for k, v in STAFF_OLD_COLUMN_NAMES.items() if k in df.columns and v not in df.columns})
     weekday_column = "翌日PM duty"
     for old_column in ("原則、宿直を外す曜日", "入れない曜日(半角カンマ区切り)", "入れない曜日"):
         if old_column not in df.columns:
@@ -1318,8 +1325,8 @@ def validate_staff_inputs(df, year, month):
             except (TypeError, ValueError, OverflowError):
                 errors.append(f'{name}：{col}は0〜1000000の整数にしてください。')
         try:
-            if float(df.at[i, '月間最小回数']) > float(df.at[i, '月間最大回数']):
-                errors.append(f'{name}：月間最小回数は月間最大回数以下にしてください。')
+            if float(df.at[i, '月下限']) > float(df.at[i, '月上限']):
+                errors.append(f'{name}：月下限は月上限以下にしてください。')
         except (ValueError, TypeError):
             pass
         # 宿直上限・日直上限は空欄なら制限なし
@@ -1450,19 +1457,19 @@ def audit_schedule(result, staff, year, month, holidays, multi, past, future, ne
                 if night and pm_duty_restricted(dt, pm_weekdays, year, month, holidays, next_month_special_holiday):
                     warnings.append(f'{name}：{dt.month}/{dt.day} {slot}は確定当直のため、翌日PM dutyより優先して入れました。')
         total = sum(counts.values())
-        if total < int(row['月間最小回数']):
-            warnings.append(f'{name}：月間最小回数の目標{int(row["月間最小回数"])}回に対し、{total}回です。')
+        if total < int(row['月下限']):
+            warnings.append(f'{name}：月下限の目標{int(row["月下限"])}回に対し、{total}回です。')
         group_items = [(col, sum(counts[s] for s in slots), int(row[col])) for col, slots in GROUP_CAP_COLUMNS.items()
                        if clean_text(row.get(col, '')) not in ('', 'nan')]
-        for label, value, cap in [('月間最大回数', total, int(row['月間最大回数'])), ('休日最大回数', hol_count, int(row['休日最大回数']))] + group_items + [(s + '上限', counts[s], int(row[s + '上限'])) for s in ALL_SHIFT_TYPES]:
+        for label, value, cap in [('月上限', total, int(row['月上限'])), ('休日上限', hol_count, int(row['休日上限']))] + group_items + [(s + '上限', counts[s], int(row[s + '上限'])) for s in ALL_SHIFT_TYPES]:
             if value > cap:
-                warnings.append(f'{name}：確定当直のため{label}を超えています（設定{cap}回／結果{value}回）。')
+                warnings.append(f'{name}：確定当直のため{staff_column_specs().get(label, (label,))[0]}を超えています（設定{cap}回／結果{value}回）。')
         dates = sorted(set(worked) | set((past or {}).get(name, [])) | set((future or {}).get(name, [])))
         for a, b in zip(dates, dates[1:]):
             if (a.year, a.month) != (year, month) and (b.year, b.month) != (year, month): continue
             gap = (b - a).days - 1
-            if gap < int(row['最低空ける日数']):
-                warnings.append(f'{name}：確定当直同士の間隔が「最低空ける日数」より短くなっています（{a.month}/{a.day}→{b.month}/{b.day}、空き{gap}日／設定{int(row["最低空ける日数"])}日）。確定当直のまま残しました。')
+            if gap < int(row['間隔下限']):
+                warnings.append(f'{name}：確定当直同士の間隔が「間隔下限」より短くなっています（{a.month}/{a.day}→{b.month}/{b.day}、空き{gap}日／設定{int(row["間隔下限"])}日）。確定当直のまま残しました。')
     for _, r in result.iterrows():
         d = parse_shift_date(r['日付'], year, month).day
         for s in ALL_SHIFT_TYPES:
@@ -1546,10 +1553,10 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
         req_days[doc] = [d for d in req_days[doc] if d not in locked_days]
         req_specific[doc] = [(d, s) for d, s in req_specific[doc] if d not in locked_days]
         req_priority[doc] = safe_int(row.get('希望優先度(数字が大きいほど優先)'), 1)
-        min_intervals[doc] = safe_int(row.get('最低空ける日数'), 5)
-        min_shifts_total[doc] = safe_int(row.get('月間最小回数'), 0)
-        max_shifts_total[doc] = safe_int(row.get('月間最大回数'), 5)
-        max_hol_shifts_per_doc[doc] = safe_int(row.get('休日最大回数'), 4)
+        min_intervals[doc] = safe_int(row.get('間隔下限'), 5)
+        min_shifts_total[doc] = safe_int(row.get('月下限'), 0)
+        max_shifts_total[doc] = safe_int(row.get('月上限'), 5)
+        max_hol_shifts_per_doc[doc] = safe_int(row.get('休日上限'), 4)
         max_shifts_per_type[doc] = {s: safe_int(row.get(s + '上限'), 2) for s in ALL_SHIFT_TYPES}
         group_caps[doc] = {col: safe_int(row.get(col), None) for col in GROUP_CAP_COLUMNS}
 
@@ -1712,7 +1719,7 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
 
     worked_all, holiday_worked = add_common_constraints(model, shifts)
 
-    # 月間最小回数（目標。届かない分は減点）
+    # 月下限（目標。届かない分は減点）
     for doc in doctors:
         shortfall = model.NewIntVar(0, min_shifts_total[doc], f'min_shortfall_{doc}')
         model.Add(sum(worked_all[doc]) + shortfall >= min(min_shifts_total[doc], total_cap(doc)))
@@ -2579,7 +2586,7 @@ def _staff_summary(row):
         v = pd.to_numeric(pd.Series([row.get(c)]), errors="coerce").iloc[0]
         return None if pd.isna(v) else int(v)
     slots = [s for s in RESULT_COLUMNS[2:] if (num(s + "上限") or 0) > 0]
-    lo, hi = num("月間最小回数"), num("月間最大回数")
+    lo, hi = num("月下限"), num("月上限")
     return ("・".join(slots) or "担当枠なし") + (f"／{lo}〜{hi}回" if lo is not None and hi is not None else "")
 
 
@@ -2600,27 +2607,101 @@ def staff_roster_html(names, source, added=()):
             f"<small>{html_escape(source)}</small></div>{chips}</div>")
 
 
-STAFF_COLUMN_LABELS = {   # ③の表と同じ列名で見せる
-    "備考（メモ・説明など自由記入）": "備考", REQUEST_COLUMN: "希望日",
-    "希望優先度(数字が大きいほど優先)": "希望優先度", "月間最小回数": "月間最小回数（目標）",
-}
+# 医師条件の表の列名（短い名前）・幅・説明。①（見るだけ）と③（編集用）で同じものを使う
+STAFF_SLOT_SHORT = {"A宿直": "A宿", "B宿直": "B宿", "外来宿直": "外宿", "A日直": "A日", "B日直": "B日", "外来日直": "外日"}
+STAFF_ROW_HEIGHT = 26
+
+
+def staff_column_specs():
+    """{列名: (表に出す名前, 幅px, 種類, 説明)}"""
+    cap = "を担当する月間の上限です。確定当直がある場合は、超えることがあります。"
+    specs = {
+        "先生の名前": ("名前", 72, "text", "先生の名前です。ほかの先生と重ならない表記にしてください。"),
+        "備考（メモ・説明など自由記入）": ("備考", 110, "text",
+            "管理用メモです。ここに書いた内容は計算に反映されません。セルをダブルクリックすると全文が表示され、編集できます。表の下の「備考の全文を見る」でも確認できます。"),
+        "翌日PM duty": ("翌日PM duty", 92, "text",
+            "例：木曜PMにdutyがある場合は水。複数は水,木のように入力。翌日が休日なら宿直に入る場合があります。日直は対象外です。確実に外す日はカレンダーでNGを指定してください。"),
+        REQUEST_COLUMN: ("希望日", 100, "text",
+            "例：10,15 または 10:A宿直。複数は半角カンマ区切り。日直は休日（または「休日にする」にした日）だけ指定できます。通常の希望は各種条件の範囲内で割り当てます。"),
+        "希望優先度(数字が大きいほど優先)": ("優先度", 56, "num",
+            "希望優先度。通常は1。1〜99は数字が大きいほど優先。100以上はこの先生の希望日すべてが確定当直と同じ扱いになり、NG日・上限より優先されます。ほかの勤務との間隔は空けます。"),
+        "間隔下限": ("間隔下限", 66, "num",
+            "勤務と勤務の間に空ける日数の下限。5日なら10日の次は16日以降。確定当直とほかの勤務の間も空けます。確定当直同士が近すぎる場合は注意を表示します。"),
+        "月下限": ("月下限", 56, "num", "月下限（目標）：できるだけ確保したい回数です。条件によっては届きません。月上限以下にしてください。"),
+        "月上限": ("月上限", 56, "num", "月上限：日直・宿直を合わせた月間の上限です。確定当直がある場合は、超えることがあります。"),
+        "休日上限": ("休日上限", 66, "num", "休日上限：土日祝と「休日にする」にした日の、日直と宿直の合計の上限です。1枠を1回と数えます。"),
+        "宿直上限": ("宿直上限", 66, "num0", "A宿直・B宿直・外来宿直を合わせた月間の上限です。空欄なら制限なし。確定当直がある場合は、超えることがあります。"),
+        "日直上限": ("日直上限", 66, "num0", "A日直・B日直・外来日直を合わせた月間の上限です。空欄なら制限なし。確定当直がある場合は、超えることがあります。"),
+    }
+    for slot, short in STAFF_SLOT_SHORT.items():
+        specs[slot + "上限"] = (short + "上限", 62 if len(short) == 2 and short[0] in "AB" else 66, "num", f"{short}上限＝{slot}" + cap)
+    return specs
+
+
+def staff_column_config(columns, as_index=False):
+    """st.data_editor / st.dataframe に渡す column_config。as_index=True なら「先生の名前」は表の見出し列（index）。"""
+    specs = staff_column_specs()
+    config = {}
+    for c in columns:
+        if c == NG_COLUMN:
+            config[c] = None
+            continue
+        label, width, kind, help_text = specs.get(c, (str(c), 80, "text", None))
+        if kind == "text":
+            config[c] = st.column_config.TextColumn(label, width=width, help=help_text)
+        elif kind == "num0":
+            config[c] = st.column_config.NumberColumn(label, width=width, help=help_text, min_value=0, step=1)
+        else:
+            config[c] = st.column_config.NumberColumn(label, width=width, help=help_text)
+    if as_index:
+        label, width, _, help_text = specs["先生の名前"]
+        config["_index"] = st.column_config.TextColumn(label, width=width, help=help_text)
+    return config
+
+
+def staff_legend_text():
+    return ("列名の意味：優先度＝希望優先度　間隔下限＝勤務と勤務の間に空ける日数　月下限＝月の回数の目標（できるだけ確保）　"
+            "月上限＝月の回数の上限　休日上限＝休日の回数の上限　宿直上限・日直上限＝A・B・外来を合わせた上限　"
+            "A宿上限〜外日上限＝各枠（A宿直・B宿直・外来宿直・A日直・B日直・外来日直）の月の上限"
+            "（列名にカーソルを合わせると説明が出ます）")
+
+
+def staff_table(df, editable):
+    """医師条件の表。③（編集用）と①（見るだけ）で、列名・幅・行の高さ・並びを同じにする。"""
+    if editable:
+        cols = [c for c in df.columns if str(c).startswith("備考")] + [c for c in df.columns if not str(c).startswith("備考")]
+        kwargs = dict(num_rows="dynamic", use_container_width=True, height=300, column_order=cols,
+                      column_config=staff_column_config(df.columns, as_index=True))
+        try:
+            out = st.data_editor(df, row_height=STAFF_ROW_HEIGHT, **kwargs)
+        except TypeError:   # 古いStreamlitで row_height が使えない場合
+            out = st.data_editor(df, **kwargs)
+    else:
+        cols = ["先生の名前"] + [c for c in df.columns if str(c).startswith("備考")] \
+            + [c for c in df.columns if c != "先生の名前" and not str(c).startswith("備考") and c != NG_COLUMN]
+        view = df[[c for c in cols if c in df.columns]].copy()
+        # 「5.0」ではなく「5」と見せる（整数だけの列は整数にする。空欄は空欄のまま）
+        for c in view.columns:
+            num = pd.to_numeric(view[c], errors="coerce")
+            if c != "先生の名前" and num.notna().any() and num.notna().sum() == view[c].replace("", None).notna().sum() \
+                    and (num.dropna() % 1 == 0).all():
+                view[c] = num.astype("Int64")
+        kwargs = dict(hide_index=True, use_container_width=True, column_config=staff_column_config(view.columns),
+                      height=min(300, 38 + (STAFF_ROW_HEIGHT + 1) * max(len(view), 1)))
+        try:
+            out = st.dataframe(view, row_height=STAFF_ROW_HEIGHT, **kwargs)
+        except TypeError:
+            out = st.dataframe(view, **kwargs)
+    st.caption(staff_legend_text())
+    return out
 
 
 def staff_readonly_table(staff_df):
-    """①に出す「読み込んだ医師条件」：③の表と同じ列・同じ並び・同じ内容を、見るだけの薄い表で出す。"""
-    cols = ["先生の名前"] + [c for c in staff_df.columns if str(c).startswith("備考")] \
-        + [c for c in staff_df.columns if c != "先生の名前" and not str(c).startswith("備考") and c != NG_COLUMN]
-    view = staff_df[[c for c in cols if c in staff_df.columns]].rename(columns=STAFF_COLUMN_LABELS)
-    # 「5.0」ではなく「5」と見せる（整数だけの列は整数にする。空欄は空欄のまま）
-    for c in view.columns:
-        num = pd.to_numeric(view[c], errors="coerce")
-        if c != "先生の名前" and num.notna().any() and num.notna().sum() == view[c].replace("", None).notna().sum() \
-                and (num.dropna() % 1 == 0).all():
-            view[c] = num.astype("Int64")
+    """①に出す「読み込んだ医師条件」：③の表と同じ列名・幅・行の高さで、見るだけの薄い表にする。"""
     st.markdown("""<style>
 .st-key-staff_readonly{position:relative;border:1px solid #e3e7ee;border-radius:10px;background:#f6f7f9;padding:8px 8px 6px}
 .st-key-staff_readonly [data-testid="stDataFrame"]{opacity:.55}
-.st-key-staff_readonly::after{content:"🔒 見るだけ ｜ 直すときは ③の表で";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+.st-key-staff_readonly::after{content:"🔒 見るだけ ｜ 直すときは ③の表で";position:absolute;top:45%;left:50%;transform:translate(-50%,-50%);
   background:#fff;border:2px solid #8a94a6;color:#4a5568;border-radius:999px;padding:6px 16px;font-weight:800;font-size:.95rem;
   box-shadow:0 2px 8px rgba(0,0,0,.08);pointer-events:none;white-space:nowrap;z-index:5}
 .ro-head{font-weight:800;color:#24405f;margin:10px 0 4px}.ro-head small{font-weight:500;color:#6a7686;margin-left:6px}
@@ -2629,7 +2710,7 @@ def staff_readonly_table(staff_df):
 </style>""", unsafe_allow_html=True)
     st.markdown("<div class='ro-head'>📋 読み込んだ医師条件<small>③の表と同じ内容・ここでは直せません</small></div>", unsafe_allow_html=True)
     with st.container(key="staff_readonly"):
-        st.dataframe(view, hide_index=True, use_container_width=True, height=min(300, 38 + 35 * max(len(view), 1)))
+        staff_table(staff_df, editable=False)
     st.markdown("<a class='ro-link' href='#sec-cond' target='_self'>⬇ ③で医師条件を直す</a>", unsafe_allow_html=True)
 
 
@@ -2670,8 +2751,8 @@ def staff_add_remove_ui(staff_df, year, month, is_template=False):
                     x = pd.to_numeric(pd.Series([src_row.get(c)]), errors="coerce").iloc[0]
                     return "なし" if pd.isna(x) else str(int(x))
                 caps = "・".join(f"{s}{v(s + '上限')}" for s in RESULT_COLUMNS[2:] if v(s + "上限") not in ("0", "なし"))
-                st.caption(f"写す内容：最低空ける日数 {v('最低空ける日数')}日、月間 {v('月間最小回数')}〜{v('月間最大回数')}回、"
-                           f"休日 {v('休日最大回数')}回まで、宿直上限 {v('宿直上限')}・日直上限 {v('日直上限')}、枠 {caps or 'なし'}。"
+                st.caption(f"写す内容：間隔下限 {v('間隔下限')}日、月間 {v('月下限')}〜{v('月上限')}回、"
+                           f"休日 {v('休日上限')}回まで、宿直上限 {v('宿直上限')}・日直上限 {v('日直上限')}、枠 {caps or 'なし'}。"
                            "備考・希望日・NG日は写しません。")
             st.text_input("翌日PM dutyの曜日（任意）", key="add_doc_pm", placeholder="例：水　（複数は 水,木）")
             st.button("この先生を追加する", key="add_doc_do", type="primary", on_click=staff_add_doctor, args=(year, month))
@@ -3517,10 +3598,10 @@ def _cap_num(value, default=None):
 def doctor_capacity(row):
     """
     1人の先生が入れる回数の上限を、条件から求める（目安）。
-    月間最大回数・休日最大回数・宿直上限・日直上限・各枠の上限のうち、いちばん厳しいものが効く。
+    月上限・休日上限・宿直上限・日直上限・各枠の上限のうち、いちばん厳しいものが効く。
     """
-    total = _cap_num(row.get("月間最大回数"), 0)
-    hol = _cap_num(row.get("休日最大回数"), 0)
+    total = _cap_num(row.get("月上限"), 0)
+    hol = _cap_num(row.get("休日上限"), 0)
     per = {s: _cap_num(row.get(s + "上限"), 0) for s in ALL_SHIFT_TYPES}
     g_night = _cap_num(row.get("宿直上限"))
     g_day = _cap_num(row.get("日直上限"))
@@ -3552,10 +3633,10 @@ def slot_needs(year, month, num_days, custom_holidays, locked_days, multi):
 def capacity_rows(staff_df, needs):
     """横棒に出す行：(名前, 必要な枠数, 入れる回数の合計, 上限の列名)。必要数0の行は出さない。"""
     caps = [doctor_capacity(r) for _, r in staff_df.iterrows()]
-    rows = [("全体（日直＋宿直）", needs["total"], sum(c["total"] for c in caps), "月間最大回数"),
+    rows = [("全体（日直＋宿直）", needs["total"], sum(c["total"] for c in caps), "月上限"),
             ("宿直（A・B・外来の合計）", needs["night"], sum(c["night"] for c in caps), "宿直上限"),
             ("日直（A・B・外来の合計）", needs["day"], sum(c["day"] for c in caps), "日直上限"),
-            ("休日の枠（日直＋宿直）", needs["holiday"], sum(c["holiday"] for c in caps), "休日最大回数")]
+            ("休日の枠（日直＋宿直）", needs["holiday"], sum(c["holiday"] for c in caps), "休日上限")]
     rows += [(s, needs["per"][s], sum(c["per"][s] for c in caps), s + "上限") for s in ALL_SHIFT_TYPES]
     return [r for r in rows if r[1] > 0], sum(c["total"] for c in caps)
 
@@ -3880,10 +3961,10 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
         req_days[doc] = [d for d in req_days[doc] if d not in locked_days]
         req_specific[doc] = [(d, s) for d, s in req_specific[doc] if d not in locked_days]
         req_priority[doc] = safe_int(row.get('希望優先度(数字が大きいほど優先)'), 1)
-        min_intervals[doc] = safe_int(row.get('最低空ける日数'), 5)
-        min_shifts_total[doc] = safe_int(row.get('月間最小回数'), 0)
-        max_shifts_total[doc] = safe_int(row.get('月間最大回数'), 5)
-        max_hol_shifts_per_doc[doc] = safe_int(row.get('休日最大回数'), 4)
+        min_intervals[doc] = safe_int(row.get('間隔下限'), 5)
+        min_shifts_total[doc] = safe_int(row.get('月下限'), 0)
+        max_shifts_total[doc] = safe_int(row.get('月上限'), 5)
+        max_hol_shifts_per_doc[doc] = safe_int(row.get('休日上限'), 4)
         max_shifts_per_type[doc] = {s: safe_int(row.get(s + '上限'), 2) for s in ALL_SHIFT_TYPES}
         group_caps[doc] = {col: safe_int(row.get(col), None) for col in GROUP_CAP_COLUMNS}
 
@@ -4046,7 +4127,7 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
 
     worked_all, holiday_worked = add_common_constraints(model, shifts)
 
-    # 月間最小回数（目標。届かない分は減点）
+    # 月下限（目標。届かない分は減点）
     for doc in doctors:
         shortfall = model.NewIntVar(0, min_shifts_total[doc], f'min_shortfall_{doc}')
         model.Add(sum(worked_all[doc]) + shortfall >= min(min_shifts_total[doc], total_cap(doc)))
@@ -4201,8 +4282,8 @@ def period_validate_staff_inputs(df, P):
             except (TypeError, ValueError, OverflowError):
                 errors.append(f'{name}：{col}は0〜1000000の整数にしてください。')
         try:
-            if float(df.at[i, '月間最小回数']) > float(df.at[i, '月間最大回数']):
-                errors.append(f'{name}：月間最小回数は月間最大回数以下にしてください。')
+            if float(df.at[i, '月下限']) > float(df.at[i, '月上限']):
+                errors.append(f'{name}：月下限は月上限以下にしてください。')
         except (ValueError, TypeError):
             pass
         # 宿直上限・日直上限は空欄なら制限なし
@@ -4290,19 +4371,19 @@ def period_audit_schedule(result, staff, P, holidays, multi, past, future, next_
                 if night and period_pm_restricted(P, P.index(dt), pm_weekdays, holidays, next_month_special_holiday):
                     warnings.append(f'{name}：{dt.month}/{dt.day} {slot}は確定当直のため、翌日PM dutyより優先して入れました。')
         total = sum(counts.values())
-        if total < int(row['月間最小回数']):
-            warnings.append(f'{name}：月間最小回数の目標{int(row["月間最小回数"])}回に対し、{total}回です。')
+        if total < int(row['月下限']):
+            warnings.append(f'{name}：月下限の目標{int(row["月下限"])}回に対し、{total}回です。')
         group_items = [(col, sum(counts[s] for s in slots), int(row[col])) for col, slots in GROUP_CAP_COLUMNS.items()
                        if clean_text(row.get(col, '')) not in ('', 'nan')]
-        for label, value, cap in [('月間最大回数', total, int(row['月間最大回数'])), ('休日最大回数', hol_count, int(row['休日最大回数']))] + group_items + [(s + '上限', counts[s], int(row[s + '上限'])) for s in ALL_SHIFT_TYPES]:
+        for label, value, cap in [('月上限', total, int(row['月上限'])), ('休日上限', hol_count, int(row['休日上限']))] + group_items + [(s + '上限', counts[s], int(row[s + '上限'])) for s in ALL_SHIFT_TYPES]:
             if value > cap:
-                warnings.append(f'{name}：確定当直のため{label}を超えています（設定{cap}回／結果{value}回）。')
+                warnings.append(f'{name}：確定当直のため{staff_column_specs().get(label, (label,))[0]}を超えています（設定{cap}回／結果{value}回）。')
         dates = sorted(set(worked) | set((past or {}).get(name, [])) | set((future or {}).get(name, [])))
         for a, b in zip(dates, dates[1:]):
             if P.index(a) is None and P.index(b) is None: continue
             gap = (b - a).days - 1
-            if gap < int(row['最低空ける日数']):
-                warnings.append(f'{name}：確定当直同士の間隔が「最低空ける日数」より短くなっています（{a.month}/{a.day}→{b.month}/{b.day}、空き{gap}日／設定{int(row["最低空ける日数"])}日）。確定当直のまま残しました。')
+            if gap < int(row['間隔下限']):
+                warnings.append(f'{name}：確定当直同士の間隔が「間隔下限」より短くなっています（{a.month}/{a.day}→{b.month}/{b.day}、空き{gap}日／設定{int(row["間隔下限"])}日）。確定当直のまま残しました。')
     for _, r in result.iterrows():
         d = int(r['_idx'])
         for s in ALL_SHIFT_TYPES:
@@ -4560,7 +4641,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 - 枠名のマス：決まった当直（色は枠の種類）
 - **茶色の太い枠**：希望日が、希望どおりに通った当直
 - **薄い赤の列**：土日祝と「休日にする」にした日
-- **薄紫のマス**：先月末・来月初めの確定当直から「最低空ける日数」以内のため、入れない日（今月の確定当直の前後には色を付けません）
+- **薄紫のマス**：先月末・来月初めの確定当直から「間隔下限」以内のため、入れない日（今月の確定当直の前後には色を付けません）
 - **×**：当直NGの日（平日は宿直NG）
 - **休日のマス**：上半分＝日直、下半分＝宿直です。上に×＝日直NG、下に×＝宿直NG、上下とも×＝全NG
 - **黄色の斜線**：翌日PM dutyのため宿直を外す日。×があれば、NGも付いている日です
@@ -4588,7 +4669,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
         """)
     with tab_trouble:
         st.markdown("""
-- **「未決定」の枠が出る**：作成ボタンの下の「計算状況・条件の注意事項と対処方法」を見てください。「先生ごとの条件」の④「⚖️ 当直の枠は足りそう？」で、赤い棒（足りない枠）がないかも確認します。NG日・回数の上限・勤務間隔の条件が厳しすぎる可能性があります。月間最大回数を増やす、勤務間隔を短くするなどして、下の帯の「🚀 当直案を作成」で作り直してください。少しだけなら、Excelで手で埋めることもできます。
+- **「未決定」の枠が出る**：作成ボタンの下の「計算状況・条件の注意事項と対処方法」を見てください。「先生ごとの条件」の④「⚖️ 当直の枠は足りそう？」で、赤い棒（足りない枠）がないかも確認します。NG日・回数の上限・勤務間隔の条件が厳しすぎる可能性があります。月上限を増やす、勤務間隔を短くするなどして、下の帯の「🚀 当直案を作成」で作り直してください。少しだけなら、Excelで手で埋めることもできます。
 - **アプリを開くと入力した内容が消えている**：しばらく使わないと画面がリセットされます。上の帯の「📂 前回の作業の続きから始める」で読み込んでください。先生方の提出内容と専用URLはスプレッドシートに残っているので消えません。
 - **英語の画面（Zzzz…）が出る**：アプリが休止しています。青いボタン「Yes, get this app back up!」を押して1分ほど待つと開きます。
 - **先生のNG日が当直案に入っていない**：カレンダーで入力した場合は、「NG日を反映する」を押したか確認してください。専用URLで集めた場合は、管理画面で「⬇️ 選んだ先生のNG日を取り込む」を押したか確認してください。
@@ -4985,8 +5066,8 @@ with st.container(key="fixed_section"):
 - 未確定の枠は空欄で構いません。
 - 今月の平日に日直を入力する場合は、先に上のカレンダーでその日を「休日にする」にしてください。
 - 「別途決定」にした日（年末年始など）の当番が決まったら、ここに入れておくと、当直案と一覧に表示され、前後の勤務間隔の計算にも使われます。
-- 今月の確定当直は、NG日や翌日PM duty（宿直を外す曜日）よりも優先されます。回数の上限（月間最大回数・休日最大回数・各枠の上限など）を超える場合も、確定した分はそのまま入ります。
-- ほかの勤務は、確定当直から「最低空ける日数」以上あけて自動で入れます。確定当直同士の間隔が近すぎる場合は、確定内容をそのまま残し、注意を表示します。
+- 今月の確定当直は、NG日や翌日PM duty（宿直を外す曜日）よりも優先されます。回数の上限（月上限・休日上限・各枠の上限など）を超える場合も、確定した分はそのまま入ります。
+- ほかの勤務は、確定当直から「間隔下限」以上あけて自動で入れます。確定当直同士の間隔が近すぎる場合は、確定内容をそのまま残し、注意を表示します。
 
 **今月の同じ日・同じ枠を指定した場合、確定当直への入力と「希望優先度100以上」での指定は、どちらも固定され、計算上の扱いは基本的に同じです。両方に入力する必要はありません。**
         """)
@@ -5131,22 +5212,22 @@ with staff_box_cond:
         st.markdown("""
 | 項目 | 意味・入力例 |
 | --- | --- |
-| 最低空ける日数 | 勤務と次の勤務の間に空ける日数です。5日なら、10日の次は16日以降です。 |
-| 月間最小回数 | できるだけ確保したい回数です。条件によっては、この回数に届かないことがあります。 |
-| 月間最大回数 | 日直と宿直を合わせた月間の上限です。 |
-| 休日最大回数 | 土日祝日と「休日にする」にした日に担当する、日直と宿直の合計上限です。 |
+| 間隔下限 | 勤務と次の勤務の間に空ける日数です。5日なら、10日の次は16日以降です。 |
+| 月下限 | できるだけ確保したい回数です。条件によっては、この回数に届かないことがあります。 |
+| 月上限 | 日直と宿直を合わせた月間の上限です。 |
+| 休日上限 | 土日祝日と「休日にする」にした日に担当する、日直と宿直の合計上限です。 |
 | 宿直上限・日直上限 | A・B・外来を合わせた宿直（日直）の月間の上限です。空欄なら制限しません。 |
-| 各枠の上限 | A宿直など、それぞれの枠を担当する月間の上限です。 |
+| 各枠の上限（A宿上限〜外日上限） | A宿直など、それぞれの枠を担当する月間の上限です。表では「A宿上限」「外日上限」のように短く表示します。 |
 
 1つの枠を1回と数えます。確定当直で同じ日に日直と宿直を担当する場合は2回です。
-月間最小回数は、月間最大回数以下に設定してください。
-確定当直や希望優先度100以上の希望がある場合は、上限を超えることがあります。ほかの勤務は確定当直から「最低空ける日数」以上あけて入れ、確定当直同士が近すぎる場合は注意を表示します。
+月下限は、月上限以下に設定してください。
+確定当直や希望優先度100以上の希望がある場合は、上限を超えることがあります。ほかの勤務は確定当直から「間隔下限」以上あけて入れ、確定当直同士が近すぎる場合は注意を表示します。
     """)
     with st.expander("希望優先度：通常の希望と、100以上の特別な設定", expanded=False):
         st.markdown("""
 - **通常は「1」**を使用します。1〜99は、数字が大きいほど希望を優先しますが、NG日・回数上限・勤務間隔などの範囲内で割り当てます。
 - **100以上は、その先生の希望日すべてを確定当直と同じ扱いにする設定**です。「できれば入りたい」という用途には使わないでください。
-- 確定にした日は、NG日や翌日PM duty（宿直を外す曜日）よりも優先されます。回数の上限を超える場合も、確定した分はそのまま入ります。ほかの勤務は、確定の日から「最低空ける日数」以上あけて入れます。確定当直同士の間隔が近すぎる場合は、注意を表示します。
+- 確定にした日は、NG日や翌日PM duty（宿直を外す曜日）よりも優先されます。回数の上限を超える場合も、確定した分はそのまま入ります。ほかの勤務は、確定の日から「間隔下限」以上あけて入れます。確定当直同士の間隔が近すぎる場合は、注意を表示します。
 - 一部の勤務だけを確定させたい場合は、上の「📅 先月今月来月の確定当直」へ入力し、希望優先度は通常の値にしてください。
 - 指定の誤りや条件の組み合わせによっては作成できない場合があります。作成後に、確定にした日が当直案に入っているか確認してください。
 
@@ -5162,7 +5243,7 @@ with staff_box_roster:
                   if datetime.date(year, month, d).weekday() >= 5 or jpholiday.is_holiday(datetime.date(year, month, d))][:2]
     _tmpl_wish2 = ",".join(f"{d}:A日直" for d in _tmpl_hols)
     _tmpl_rows = [
-        # 名前, 備考, 希望日, 希望優先度, 最低空ける日数, 月間最小, 月間最大, 休日最大, 宿直上限, 日直上限, A宿直, B宿直, 外来宿直, A日直, B日直, 外来日直
+        # 名前, 備考, 希望日, 希望優先度, 間隔下限, 月下限, 月上限, 休日上限, 宿直上限, 日直上限, A宿直, B宿直, 外来宿直, A日直, B日直, 外来日直
         ("型1_A宿直・A日直", "Aの宿直・日直だけ。月1回", "", 1, 5, 1, 1, 1, 3, 3, 1, 0, 0, 1, 0, 0),
         ("型2_A日直のみ・希望日確定", "決めた日のA日直だけ（希望優先度100で確定）", _tmpl_wish2, 100, 0, 0, 2, 2, 3, 3, 0, 0, 0, 2, 0, 0),
         ("型3_外来日直のみ", "外来日直だけ。月1回まで", "", 1, 5, 0, 1, 4, 3, 3, 0, 0, 0, 0, 0, 1),
@@ -5174,15 +5255,15 @@ with staff_box_roster:
         ("型9_A以外", "B・外来の宿直と日直。月3〜4回", "", 1, 4, 3, 4, 2, 3, 3, 0, 3, 3, 0, 3, 3),
     ]
     _tmpl_cols = ["先生の名前", "備考（メモ・説明など自由記入）", REQUEST_COLUMN, "希望優先度(数字が大きいほど優先)",
-                  "最低空ける日数", "月間最小回数", "月間最大回数", "休日最大回数", "宿直上限", "日直上限",
+                  "間隔下限", "月下限", "月上限", "休日上限", "宿直上限", "日直上限",
                   "A宿直上限", "B宿直上限", "外来宿直上限", "A日直上限", "B日直上限", "外来日直上限"]
     template_data = {c: [r[k] for r in _tmpl_rows] for k, c in enumerate(_tmpl_cols)}
     template_data["翌日PM duty"] = [""] * len(_tmpl_rows)
     template_data[NG_COLUMN] = [""] * len(_tmpl_rows)
     # 列の並びは、これまでのひな形と同じにする
     template_data = {c: template_data[c] for c in ["先生の名前", "備考（メモ・説明など自由記入）", "翌日PM duty", NG_COLUMN, REQUEST_COLUMN,
-                                                   "希望優先度(数字が大きいほど優先)", "最低空ける日数", "月間最小回数", "月間最大回数",
-                                                   "休日最大回数", "宿直上限", "日直上限", "A宿直上限", "B宿直上限", "外来宿直上限",
+                                                   "希望優先度(数字が大きいほど優先)", "間隔下限", "月下限", "月上限",
+                                                   "休日上限", "宿直上限", "日直上限", "A宿直上限", "B宿直上限", "外来宿直上限",
                                                    "A日直上限", "B日直上限", "外来日直上限"]}
     df_template = pd.DataFrame(template_data)
     # 「➕ 先生を追加する」で型から選べるように、型の中身を覚えておく
@@ -5226,10 +5307,10 @@ with staff_box_cond:
     if "先生の名前" not in base_df.columns:
         st.error("医師条件CSVに「先生の名前」の列がありません。ひな形の列名を確認してください。")
         st.stop()
-    # 宿直上限・日直上限の列がない（以前の）CSVでも、「休日最大回数」の右に空欄の列を足す（空欄＝制限なし）
+    # 宿直上限・日直上限の列がない（以前の）CSVでも、「休日上限」の右に空欄の列を足す（空欄＝制限なし）
     for _gc in reversed(list(GROUP_CAP_COLUMNS)):
         if _gc not in base_df.columns:
-            _pos = list(base_df.columns).index("休日最大回数") + 1 if "休日最大回数" in base_df.columns else len(base_df.columns)
+            _pos = list(base_df.columns).index("休日上限") + 1 if "休日上限" in base_df.columns else len(base_df.columns)
             base_df.insert(_pos, _gc, None)
         base_df[_gc] = pd.to_numeric(base_df[_gc], errors="coerce")
     base_df = base_df.set_index("先生の名前")
@@ -5244,42 +5325,7 @@ with staff_box_cond:
 
     st.caption("先生の名前は、ほかの先生と重ならない表記にしてください。")
 
-    cap_help = "を担当する月間の上限です。確定当直がある場合は、超えることがあります。"
-    edited_df = st.data_editor(
-        base_df,
-        num_rows="dynamic",
-        use_container_width=True,
-        height=300,
-        column_config={
-            "翌日PM duty": st.column_config.TextColumn(
-                "翌日PM duty",
-                help="例：木曜PMにdutyがある場合は水。複数は水,木のように入力。翌日が休日なら宿直に入る場合があります。日直は対象外です。確実に外す日はカレンダーでNGを指定してください。"
-            ),
-            "最低空ける日数": st.column_config.NumberColumn("最低空ける日数", help="勤務と勤務の間に空ける日数。5日なら10日の次は16日以降。確定当直とほかの勤務の間も空けます。確定当直同士が近すぎる場合は注意を表示します。"),
-            "月間最小回数": st.column_config.NumberColumn("月間最小回数（目標）", help="できるだけ確保したい回数です。条件によっては未達になります。月間最大回数以下にしてください。"),
-            "月間最大回数": st.column_config.NumberColumn("月間最大回数", help="日直・宿直を合わせた月間の上限です。確定当直がある場合は、超えることがあります。"),
-            "休日最大回数": st.column_config.NumberColumn("休日最大回数", help="土日祝と「休日にする」にした日の、日直と宿直の合計上限です。1枠を1回と数えます。"),
-            "宿直上限": st.column_config.NumberColumn("宿直上限", help="A宿直・B宿直・外来宿直を合わせた月間の上限です。空欄なら制限なし。確定当直がある場合は、超えることがあります。", min_value=0, step=1),
-            "日直上限": st.column_config.NumberColumn("日直上限", help="A日直・B日直・外来日直を合わせた月間の上限です。空欄なら制限なし。確定当直がある場合は、超えることがあります。", min_value=0, step=1),
-            **{s + "上限": st.column_config.NumberColumn(s + "上限", help=s + cap_help) for s in ALL_SHIFT_TYPES},
-            NG_COLUMN: None,
-            REQUEST_COLUMN: st.column_config.TextColumn(
-                "希望日",
-                help="例：10,15 または 10:A宿直。複数は半角カンマ区切り。日直は休日（または「休日にする」にした日）だけ指定できます。通常の希望は各種条件の範囲内で割り当てます。"
-            ),
-            "希望優先度(数字が大きいほど優先)": st.column_config.NumberColumn(
-                "希望優先度",
-                help="通常は1。1〜99は数字が大きいほど優先。100以上はこの先生の希望日すべてが確定当直と同じ扱いになり、NG日・上限より優先されます。ほかの勤務との間隔は空けます。"
-            ),
-            "備考（メモ・説明など自由記入）": st.column_config.TextColumn(
-                "備考",
-                help="管理用メモです。ここに書いた内容は計算に反映されません。セルをダブルクリックすると全文が表示され、編集できます。表の下の「備考の全文を見る」でも確認できます。",
-            )
-        },
-        # 備考を名前のすぐ右に置き、幅を広くして読みやすくする
-        column_order=[c for c in base_df.columns if str(c).startswith("備考")] + [c for c in base_df.columns if not str(c).startswith("備考")],
-
-    )
+    edited_df = staff_table(base_df, editable=True)
 
     staff_df = edited_df.reset_index()
     # 先生の追加・外すは、この表（今の画面の内容）をもとに行う
@@ -5317,7 +5363,7 @@ with staff_box_cond:
 
 with staff_box_cap:
     step_header(4, "当直の枠は足りそう？（目安）", "条件を直すと、すぐに変わります")
-    st.caption("埋める必要がある枠の数と、先生方が入れる回数の合計を比べています。先生ごとの回数は、「月間最大回数」と各枠の上限・休日最大回数のうち、"
+    st.caption("埋める必要がある枠の数と、先生方が入れる回数の合計を比べています。先生ごとの回数は、「月上限」と各枠の上限・休日上限のうち、"
                "いちばん少ないものを使います。足りていても、NG日・勤務間隔などによっては埋まらないことがあります。"
                "確定当直で追加される枠や上限の例外は、この目安に含まれません。")
 
@@ -5335,7 +5381,7 @@ with staff_box_cap:
     cap_short = [r for r in cap_rows[1:] if capacity_status(r[1], r[2]) == "short"]   # 1行目は全体
     cap_tight = [r for r in cap_rows if capacity_status(r[1], r[2]) == "tight"]
     if margin < 0:
-        st.error(f"🚨 **全体で{-margin}枠足りません。** 先生方の「月間最大回数」や各枠の上限を増やすか、担当できる先生を追加してください。")
+        st.error(f"🚨 **全体で{-margin}枠足りません。** 先生方の「月上限」や各枠の上限を増やすか、担当できる先生を追加してください。")
     elif cap_short:
         st.warning(f"⚠️ **全体では足りています（あと{margin}回分の余裕）が、枠の種類別では"
                    + "・".join(f"「{r[0]}」" for r in cap_short) + "が足りません。** 下の横棒で確認してください。")
@@ -5355,8 +5401,8 @@ with staff_box_cap:
     st.markdown(capacity_bars_html(cap_rows), unsafe_allow_html=True)
     if cap_short:
         st.error("🚨 " + "、".join(f"{r[0]}が{r[1] - r[2]}枠" for r in cap_short) + "足りません。"
-                 + "該当する先生の" + "・".join(dict.fromkeys(f"「{r[3]}」" for r in cap_short))
-                 + "を増やすか、担当できる先生を追加してください（「月間最大回数」が小さいと、上限を増やしても回数は増えません）。")
+                 + "該当する先生の" + "・".join(dict.fromkeys(f"「{staff_column_specs().get(r[3], (r[3],))[0]}」" for r in cap_short))
+                 + "を増やすか、担当できる先生を追加してください（「月上限」が小さいと、上限を増やしても回数は増えません）。")
 with staff_box_ng:
     step_header(2, "NG日を入れる", "先生を選んで、カレンダーでNG日を指定します。専用URLで集めたNG日の取り込みもここで行います", anchor="sec-ng")
     st.info("先生を選んでカレンダーの「日直」「宿直」のボタンを押してNGにし、最後に「NG日を反映する」を押してください。"
@@ -5809,11 +5855,11 @@ if len(staff_df) > 0:
         st.subheader("🗓️ 医師別の当直一覧")
         st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。休日のマスは上半分が日直、下半分が宿直です。"
                    "希望日が通った当直は茶色の太い枠で囲み、回数が多い先生は右端の回数を赤い枠で示します。マスにカーソルを合わせると、その先生の行とその日の列が黄色く色付きます。")
-        # 先月末・来月初めの確定当直から「最低空ける日数」以内で、入れない日（今月の確定当直の前後は含めない）
+        # 先月末・来月初めの確定当直から「間隔下限」以内で、入れない日（今月の確定当直の前後は含めない）
         gap_blocked = {}
         for _, _r in staff_df.iterrows():
             _nm = str(_r['先生の名前'])
-            _gv = pd.to_numeric(pd.Series([_r.get('最低空ける日数')]), errors='coerce').iloc[0]
+            _gv = pd.to_numeric(pd.Series([_r.get('間隔下限')]), errors='coerce').iloc[0]
             _gap = 0 if pd.isna(_gv) else int(_gv)
             _ext = list(past_worked_dates.get(_nm, [])) + list(future_worked_dates.get(_nm, []))
             if _ext and _gap > 0:
