@@ -2790,12 +2790,26 @@ CSV_UPLOAD_CSS = """<style>
 .imp-or{display:flex;justify-content:center;margin-top:3.2rem}.imp-or span{background:#eef1f5;border-radius:999px;padding:8px 10px;font-weight:800;color:#6a7686}
 .imp-note{background:#fff7e0;border:1px solid #f0c36d;border-radius:8px;padding:6px 10px;font-size:.85rem;color:#7a5a00;margin:10px 0 2px}
 @media (max-width:640px){.imp-or{margin:0}}
+/* 方法1（引き継ぎ）の枠は青 */
+.st-key-csvcard_carry{border-color:#2f6db5 !important;background:#eef5fd !important}
+.st-key-csvcard_carry [data-testid="stPopover"] button, .st-key-csvcard_carry [data-testid="stExpander"] summary{
+  background:#2f6db5 !important;color:#fff !important;border:0 !important;min-height:2.8rem;font-weight:800}
+.st-key-csvcard_carry [data-testid="stPopover"] button p{font-size:1.05rem;font-weight:800;color:#fff}
+.st-key-csvcard_carry [data-testid="stPopover"] button svg{color:#fff;fill:#fff}
+/* 方法1と方法2の枠の上端と高さをそろえる（横に並んだ列を同じ高さにして、枠を列いっぱいに伸ばす） */
+[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry){align-items:stretch !important}
+[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) > [data-testid="stColumn"] > [data-testid="stVerticalBlock"],
+[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) > [data-testid="column"] > div > [data-testid="stVerticalBlock"]{height:100%}
+[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) [data-testid="stLayoutWrapper"]:has(> [class*="st-key-csvcard_"]){
+  flex:1 1 auto;display:flex;flex-direction:column}
+[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) [class*="st-key-csvcard_"]{flex:1 1 auto;box-sizing:border-box}
+@media (max-width:640px){[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) [class*="st-key-csvcard_"]{flex:0 0 auto}}
 </style>"""
 
 
 def csv_upload_card(card_key, tag, title, desc, uploader_key, template_bytes, template_name, template_label, template_note=""):
-    """CSVのアップロード欄（見出し・説明・ドラッグ＆ドロップの枠・ひな形のダウンロード）。読み込んだファイルを返す。"""
-    st.markdown(CSV_UPLOAD_CSS, unsafe_allow_html=True)
+    """CSVのアップロード欄（見出し・説明・ドラッグ＆ドロップの枠・ひな形のダウンロード）。読み込んだファイルを返す。
+    見た目の指定（CSV_UPLOAD_CSS）は、画面の最初に1回だけ入れる（ここで入れると、枠の上に余白ができて高さがずれるため）。"""
     with st.container(key=f"csvcard_{card_key}"):
         st.markdown(f"<div class='csv-card-head green'><span class='lab'>{tag}</span>{title}</div>", unsafe_allow_html=True)
         if desc:
@@ -4802,6 +4816,7 @@ def section_banner(icon, title, sub="", tag="", first=False, anchor=""):
 # ==========================================
 # 1. 上部ダッシュボード：年月と休日の設定
 # ==========================================
+st.markdown(CSV_UPLOAD_CSS, unsafe_allow_html=True)   # CSVのアップロード欄・①の取り込み欄の見た目（画面全体で1回だけ）
 section_banner("📅", "年月・休日・必要人数の設定", "作る月・休日と別途決定の日・1枠の人数を決めます", "必須", first=True)
 st.info("作成する年月を選んでください。土日祝日は自動で休日扱いになります。下のカレンダーで、平日でも休日扱いにする日は「休日にする」、別の方法で当番を決める日は「別途決定」にチェックします。")
 # 年末年始など、翌月にまたがって通しで作りたいときの入口（同じアプリの中で ?mode=period を開く）
@@ -5182,7 +5197,6 @@ staff_box_dl = st.container()
 
 with staff_box_roster:
     step_header(1, "以前の医師条件の取り込み（引き継ぎ or CSVアップロード）、医師を追加（or外す）")
-    st.markdown(CSV_UPLOAD_CSS, unsafe_allow_html=True)
     st.markdown("<div class='imp-choose'>📥 以前の医師条件を取り込む（どちらか1つの方法を使います）</div>", unsafe_allow_html=True)
     imp_a, imp_or, imp_b = st.columns([10, 1.4, 10])   # 方法1（引き継ぎ）・または・方法2（CSV）
     imp_or.markdown("<div class='imp-or'><span>または</span></div>", unsafe_allow_html=True)
@@ -5190,13 +5204,6 @@ with staff_box_roster:
                 unsafe_allow_html=True)
     # --- 方法1：途中保存から先月の医師条件を引き継ぐ（管理用パスワードが必要） ---
     with imp_a, st.container(key="csvcard_carry"):
-        st.markdown("""<style>
-.st-key-csvcard_carry{border-color:#2f6db5 !important;background:#eef5fd !important}
-.st-key-csvcard_carry [data-testid="stPopover"] button, .st-key-csvcard_carry [data-testid="stExpander"] summary{
-  background:#2f6db5 !important;color:#fff !important;border:0 !important;min-height:2.8rem;font-weight:800}
-.st-key-csvcard_carry [data-testid="stPopover"] button p{font-size:1.05rem;font-weight:800;color:#fff}
-.st-key-csvcard_carry [data-testid="stPopover"] button svg{color:#fff;fill:#fff}
-</style>""", unsafe_allow_html=True)
         st.markdown("<div class='csv-card-head blue'><span class='lab'>方法1</span>途中保存から先月の医師条件を引き継ぐ</div>", unsafe_allow_html=True)
         if not remote_is_configured():
             st.caption("保存用のGoogleスプレッドシートの設定をすると使えます。今はCSVのアップロード（方法2）で読み込んでください。")
