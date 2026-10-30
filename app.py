@@ -2600,6 +2600,39 @@ def staff_roster_html(names, source, added=()):
             f"<small>{html_escape(source)}</small></div>{chips}</div>")
 
 
+STAFF_COLUMN_LABELS = {   # ③の表と同じ列名で見せる
+    "備考（メモ・説明など自由記入）": "備考", REQUEST_COLUMN: "希望日",
+    "希望優先度(数字が大きいほど優先)": "希望優先度", "月間最小回数": "月間最小回数（目標）",
+}
+
+
+def staff_readonly_table(staff_df):
+    """①に出す「読み込んだ医師条件」：③の表と同じ列・同じ並び・同じ内容を、見るだけの薄い表で出す。"""
+    cols = ["先生の名前"] + [c for c in staff_df.columns if str(c).startswith("備考")] \
+        + [c for c in staff_df.columns if c != "先生の名前" and not str(c).startswith("備考") and c != NG_COLUMN]
+    view = staff_df[[c for c in cols if c in staff_df.columns]].rename(columns=STAFF_COLUMN_LABELS)
+    # 「5.0」ではなく「5」と見せる（整数だけの列は整数にする。空欄は空欄のまま）
+    for c in view.columns:
+        num = pd.to_numeric(view[c], errors="coerce")
+        if c != "先生の名前" and num.notna().any() and num.notna().sum() == view[c].replace("", None).notna().sum() \
+                and (num.dropna() % 1 == 0).all():
+            view[c] = num.astype("Int64")
+    st.markdown("""<style>
+.st-key-staff_readonly{position:relative;border:1px solid #e3e7ee;border-radius:10px;background:#f6f7f9;padding:8px 8px 6px}
+.st-key-staff_readonly [data-testid="stDataFrame"]{opacity:.55}
+.st-key-staff_readonly::after{content:"🔒 見るだけ ｜ 直すときは ③の表で";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  background:#fff;border:2px solid #8a94a6;color:#4a5568;border-radius:999px;padding:6px 16px;font-weight:800;font-size:.95rem;
+  box-shadow:0 2px 8px rgba(0,0,0,.08);pointer-events:none;white-space:nowrap;z-index:5}
+.ro-head{font-weight:800;color:#24405f;margin:10px 0 4px}.ro-head small{font-weight:500;color:#6a7686;margin-left:6px}
+.ro-link{display:inline-block;margin:6px 0 2px;border:1px solid #2e8a5b;color:#1f6b45 !important;background:#fff;border-radius:8px;
+  padding:4px 12px;font-weight:700;font-size:.85rem;text-decoration:none !important}
+</style>""", unsafe_allow_html=True)
+    st.markdown("<div class='ro-head'>📋 読み込んだ医師条件<small>③の表と同じ内容・ここでは直せません</small></div>", unsafe_allow_html=True)
+    with st.container(key="staff_readonly"):
+        st.dataframe(view, hide_index=True, use_container_width=True, height=min(300, 38 + 35 * max(len(view), 1)))
+    st.markdown("<a class='ro-link' href='#sec-cond' target='_self'>⬇ ③で医師条件を直す</a>", unsafe_allow_html=True)
+
+
 def staff_add_remove_ui(staff_df, year, month, is_template=False):
     """①先生の名簿：「今の名簿」の一覧と、「➕ 先生を追加する」「➖ 先生を外す」。"""
     names = [n for n in (clean_text(v) for v in staff_df["先生の名前"].tolist()) if n and n.lower() not in ("nan", "none")]
@@ -2611,6 +2644,7 @@ def staff_add_remove_ui(staff_df, year, month, is_template=False):
     else:
         st.markdown(staff_roster_html(names, st.session_state.get("staff_source_label", ""),
                                       set(st.session_state.get("staff_added_names") or [])), unsafe_allow_html=True)
+    staff_readonly_table(staff_df)
     rows = {clean_text(r["先生の名前"]): r for _, r in staff_df.iterrows()}
     msg = st.session_state.pop("staff_edit_message", None)
     gen = "\u200b" * st.session_state.get("staff_edit_gen", 0)
@@ -4441,7 +4475,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 - **真ん中**：上から順に、紺色の見出しの帯で4つの項目に分かれています。上から順に進めれば、1か月分の作業が終わります。
     1. 📅 年月・休日・必要人数の設定
     2. 📅 先月今月来月の確定当直（任意）
-    3. 👩‍⚕️ 先生ごとの条件（① 先生の名簿 → ② NG日 → ③ 回数などの条件 → ④ 当直の枠は足りそう？）
+    3. 👩‍⚕️ 先生ごとの条件（① 先生の名簿と医師条件 → ② NG日 → ③ 医師条件の調整 → ④ 当直の枠は足りそう？）
     4. 🎯 当直案の作成・確認
 
 **年末年始など、月をまたいで作るとき**
@@ -4473,7 +4507,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
    初めての場合は、ひな形（CSV）をダウンロードして先生の名前や回数の上限などを入れ、アップロードします。
    新しく来た先生は「➕ 先生を追加する」で、名前・入れる位置（○○先生の下）・条件のもと（ほかの先生と同じ条件、または型）を選んで追加します。いなくなった先生は「➖ 先生を外す」で外します。
 6. **NG日**（②）：先生を選んでカレンダーでNG日を入れ、「NG日を反映する」を押します。先生方に専用URLから入力してもらった場合は、ここで取り込みます（「NG日の集め方」のタブを参照）。
-7. **回数などの条件**（③・④）：NG日を見ながら、③の表で回数・上限・勤務間隔・希望日を調整します。④の「⚖️ 当直の枠は足りそう？」で、全体と枠の種類ごとに足りているか（赤い棒がないか）を確認します。
+7. **医師条件の調整**（③・④）：NG日を見ながら、③の表で回数・上限・勤務間隔・希望日を調整します。④の「⚖️ 当直の枠は足りそう？」で、全体と枠の種類ごとに足りているか（赤い棒がないか）を確認します。
 8. **不足時の優先順位（任意）**：人数が足りない月に、どの枠から埋めるかを決めます。
 9. **当直案を作る**：下の帯の「🚀 当直案を作成」を押します（計算に最大1分少々かかります）。押すたびに違うパターンの案ができるので、気に入るまで押し直して構いません。
    未決定の枠が出たら、条件を直して作り直します。下の帯の移動ボタンで、条件と結果を行き来できます。
@@ -5019,11 +5053,11 @@ with st.container(key="fixed_section"):
     edited_fixed_df = st.session_state["fixed_rows"].copy()
 
 # ==========================================
-# 先生ごとの条件：① 名簿 → ② NG日 → ③ 回数などの条件 → ④ 足りそう？ の順に、1つの欄にまとめて表示する。
+# 先生ごとの条件：① 名簿と医師条件（見るだけ） → ② NG日 → ③ 医師条件の調整 → ④ 足りそう？ の順に、1つの欄にまとめて表示する。
 # 計算の都合（NG日の欄は医師条件の表の名前を使う）で、プログラムの順番は表示の順番と違う。
 # 先に入れ物（container）を表示の順に作っておき、あとから中身を入れる。
 # ==========================================
-section_banner("👩‍⚕️", "先生ごとの条件（NG日・回数など）", "① 先生の名簿 → ② NG日 → ③ 回数などの条件、の順に上から進めます", "必須", anchor="sec-staff")
+section_banner("👩‍⚕️", "先生ごとの条件（NG日・回数など）", "① 先生の名簿と医師条件 → ② NG日 → ③ 医師条件の調整、の順に上から進めます", "必須", anchor="sec-staff")
 staff_box_roster = st.container()
 staff_box_ng = st.container()
 staff_box_cond = st.container()
@@ -5031,7 +5065,7 @@ staff_box_cap = st.container()
 staff_box_dl = st.container()
 
 with staff_box_roster:
-    step_header(1, "先生の名簿を読み込む", "先月の医師条件の引き継ぎ・CSVの読み込みと、先生の追加・外すをここで行います")
+    step_header(1, "先生の名簿と医師条件（確認・引き継ぎ・追加・外す・CSV読み込み）")
     # --- 先月の医師条件を引き継ぐ（管理用パスワードが必要） ---
     if remote_is_configured():
         _co_msg = st.session_state.pop("carry_over_message", None)
@@ -5075,7 +5109,7 @@ with staff_box_roster:
         if _co_msg:
             (st.success if _co_msg[0] == "success" else st.error)(_co_msg[1])
 with staff_box_cond:
-    step_header(3, "回数などの条件を調整する", "NG日を見ながら、回数・上限・勤務間隔などを決めます", anchor="sec-cond")
+    step_header(3, "医師条件を調整する", "NG日を見ながら、ここで直します（直すと①の表示も同じ内容になります）", anchor="sec-cond")
     st.info("下の表に先生ごとの条件を入力してください。セルをクリックして編集できます。列名にカーソルを合わせると、入力例や説明が表示されます。")
     st.caption("最初に表示される「型1」〜「型9」は、よくある条件の入力例です。名前の欄が型の中身です（例：型4＝A宿直・A日直・外来日直に入る先生）。実際の先生の名前に置き換え、回数などを調整して使ってください。行は「＋」で増やせます。")
     with st.expander("入力例：曜日・希望日・備考", expanded=False):
