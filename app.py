@@ -2820,12 +2820,20 @@ CSV_UPLOAD_CSS = """<style>
   flex-direction:row !important;flex-wrap:wrap;align-items:center;gap:.3rem .6rem}
 .st-key-imp_tmpl > div{width:auto !important;flex:0 1 auto}
 .st-key-imp_tmpl p{margin:0;font-size:.9rem}
-.st-key-csv_ng_ask{margin-top:12px;border:2.5px solid #e0a020;background:#fff8e6;border-radius:12px;padding:10px 14px}
-.csvng-h{font-size:1rem;color:#6b4a00}.csvng-sub{font-size:.82rem;color:#8a7440;margin-top:2px}
-.csvng-wait{font-size:.85rem;color:#7a5a00}
-.st-key-csv_ng_ask [role="radiogroup"]{gap:.4rem;width:100%}
-.st-key-csv_ng_ask [role="radiogroup"] label{background:#fff;border:1px solid #ecd9a8;border-radius:9px;padding:6px 10px;width:100%;margin:0}
-.st-key-csv_ng_ask [role="radiogroup"] label p{font-weight:700}
+.st-key-csv_ng_ask{margin-top:14px;border:3px solid #d98a00;background:#fff4dc;border-radius:14px;padding:14px 18px 18px;
+  box-shadow:0 3px 10px rgba(217,138,0,.18);gap:.6rem}
+.csvng-h{display:flex;align-items:center;gap:10px;font-size:1.12rem;font-weight:800;color:#5a3d00;line-height:1.5}
+.csvng-h .badge{flex:0 0 auto;background:#d98a00;color:#fff;border-radius:6px;padding:2px 10px;font-size:.85rem;font-weight:800}
+.csvng-h b{color:#b34700}
+.csvng-sub{font-size:.88rem;color:#7a5a00;margin-top:4px}
+.csvng-wait{font-size:.9rem;color:#7a5a00;font-weight:700;padding:2px 0 4px}
+.st-key-csv_ng_ask [role="radiogroup"]{gap:.5rem;width:100%;display:flex;flex-direction:column}
+.st-key-csv_ng_ask [role="radiogroup"] label{background:#fff;border:1.5px solid #e9c97a;border-radius:10px;padding:10px 14px;
+  width:100%;max-width:none;margin:0;box-sizing:border-box}
+.st-key-csv_ng_ask [role="radiogroup"] label:hover{border-color:#d98a00;background:#fffaf0}
+.st-key-csv_ng_ask [role="radiogroup"] label:has(input:checked){border:2px solid #d98a00;background:#fff1cc}
+.st-key-csv_ng_ask [role="radiogroup"] label p{font-size:.95rem;font-weight:400;color:#5f6b7a}
+.st-key-csv_ng_ask [role="radiogroup"] label p strong{font-size:1rem;color:#31333f}
 .csvng-ok{margin-top:10px;background:#e8f5ec;border:1px solid #9fd0ad;border-radius:10px;padding:9px 14px;line-height:1.8;color:#1f4d33}
 .csvng-ok a{color:#1d4e89 !important;text-decoration:underline;margin-left:6px;font-weight:700}
 .st-key-imp_tmpl [data-testid="stDownloadButton"] button{border:1.5px solid #2e8a5b !important;color:#1f6b45 !important;background:#fff !important;font-weight:700}
@@ -2879,12 +2887,12 @@ def csv_ng_wish_choice(df, uploaded_file, box, year, month):
         if wish_vals:
             parts.append(f"<b>希望日（{len(wish_vals)}名分）</b>")
         with st.container(key="csv_ng_ask"):
-            st.markdown(f"<div class='csvng-h'>❓ このCSVには {'と'.join(parts)}が入っています。どうしますか？</div>"
+            st.markdown(f"<div class='csvng-h'><span class='badge'>確認</span><span>このCSVには {'と'.join(parts)}が入っています。どうしますか？</span></div>"
                         "<div class='csvng-sub'>CSVには日にちしか入っていないため、先月のCSVだと先月のNG日・希望日が今月の同じ日に入ってしまいます。</div>",
                         unsafe_allow_html=True)
             opts = ["use", "clear"]
-            labels = {"use": f"今月（{year}年{month}月）のNG日・希望日として使う　―　このCSVを今月用に作った・今月ダウンロードしたとき",
-                      "clear": "空にする（NG日・希望日は読み込まない）　―　先月などのCSVを使うとき。NG日は②で入れ直します"}
+            labels = {"use": f"**今月（{year}年{month}月）のNG日・希望日として使う**　―　このCSVを今月用に作った・今月ダウンロードしたとき",
+                      "clear": "**空にする（NG日・希望日は読み込まない）**　―　先月などのCSVを使うとき。NG日は②で入れ直します"}
             choice = st.radio("CSVのNG日・希望日", opts, index=None, format_func=lambda o: labels[o],
                               key=f"csvng_choice_{uploaded_file.file_id}", label_visibility="collapsed",
                               on_change=_csv_ng_choice_changed)
@@ -5293,8 +5301,6 @@ with staff_box_roster:
     imp_or.markdown("<div class='imp-or'><span>または</span></div>", unsafe_allow_html=True)
     imp_tmpl = st.container(key="imp_tmpl")   # 「初めての場合：ひな形をダウンロード」（中身はひな形を作ったあとで入れる）
     imp_ask = st.container()   # CSVにNG日・希望日が入っているときの「使う／空にする」と、読み込んだ結果（中身はCSVを読んだあとで入れる）
-    st.markdown("<div class='imp-note'>どちらで取り込んでも、下の「今の名簿」と「読み込んだ医師条件」の表がその内容に置き換わります。</div>",
-                unsafe_allow_html=True)
     # --- 方法1：途中保存から先月の医師条件を引き継ぐ（管理用パスワードが必要） ---
     with imp_a, st.container(key="csvcard_carry"):
         st.markdown("<div class='csv-card-head blue'><span class='lab'>方法1</span>途中保存から先月の医師条件を引き継ぐ</div>", unsafe_allow_html=True)
