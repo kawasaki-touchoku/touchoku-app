@@ -607,7 +607,7 @@ with st.expander("📖 使い方（期間指定版・作業の流れ・結果の
 
 **通常版と違うところ**
 
-- 年・月の右の「翌月の何日まで含めるか」で、期間の終わりを決めます。
+- 年月の下の「翌月の何日まで含めるか」で、期間の終わりを決めます。
 - カレンダーや表では、翌月の日は「1/1」「1/2」のように月も付けて表示します。
 - 医師条件の回数（月上限・月下限・休日上限・各枠の上限など）は、**期間全体での回数**として扱います（列名は通常版と同じ「月上限」「月下限」のままです）。期間が長い分、必要に応じて多めにしてください。
 - 希望日は、翌月の日を「1/3」「1/3:A宿直」のように月も付けて書きます（今月の日は「30」「30:A宿直」のままで構いません）。
@@ -623,7 +623,7 @@ with st.expander("📖 使い方（期間指定版・作業の流れ・結果の
         st.markdown("""
 **作業は、画面の上から順に進めれば完了します。**
 
-1. **期間を選ぶ**：年・月（この月の1日から）と、翌月の何日まで含めるかを選びます。作業の続きなら、上の帯の「📂 前回の作業の続きから始める」で戻せます。
+1. **期間を選ぶ**：年月（この月の1日から。「来月」などのボタンや「◀ 前の月」「次の月 ▶」で選びます）と、翌月の何日まで含めるかを選びます。作業の続きなら、上の帯の「📂 前回の作業の続きから始める」で戻せます。
 2. **休日を設定**：期間全体のカレンダーで、「休日にする」「別途決定」を必要な日だけチェックします。
 3. **人数を増やす枠（任意）**：1つの枠を2名以上にする日があれば設定します。
 4. **確定当直（任意）**：すでに決まっている当直や、期間の前（先月末など）・後の当直を入れます。勤務間隔の計算に使われます。
@@ -805,7 +805,6 @@ def section_banner(icon, title, sub="", tag="", first=False, anchor=""):
 # ==========================================
 st.markdown(CSV_UPLOAD_CSS, unsafe_allow_html=True)   # CSVのアップロード欄・①の取り込み欄の見た目（画面全体で1回だけ）
 section_banner("📅", "期間・休日・必要人数の設定", "作る期間・休日と別途決定の日・1枠の人数を決めます", "必須", first=True)
-st.info("作る期間（年・月・翌月の何日まで）を選んでください。土日祝日は自動で休日扱いになります。下のカレンダーで、平日でも休日扱いにする日は「休日にする」、別の方法で当番を決める日は「別途決定」にチェックします。")
 today = datetime.date.today()
 if today.month == 12:
     default_year = today.year + 1
@@ -885,10 +884,10 @@ if "sel_month" not in st.session_state:
     st.session_state["sel_month"] = default_month
 if "sel_extra" not in st.session_state:
     st.session_state["sel_extra"] = 5
-col_y, col_m, col_e = st.columns(3)
-year = int(col_y.number_input("年", min_value=2000, step=1, key="sel_year"))
-month = int(col_m.number_input("月（この月の1日から）", min_value=1, max_value=12, step=1, key="sel_month"))
+step_header(1, "作る期間を選ぶ", "選んだ月の1日から、翌月の指定した日までを1つの当直案として作ります")
+year, month = month_picker(today)
 _nf = _REAL_DATE(year, month, _REAL_MONTHRANGE(year, month)[1]) + datetime.timedelta(days=1)
+col_e, _col_e2 = st.columns([1, 2])
 extra = int(col_e.number_input(f"翌月（{_nf.month}月）の何日まで含めるか", min_value=0, max_value=_REAL_MONTHRANGE(_nf.year, _nf.month)[1], step=1, key="sel_extra"))
 P = TouchokuPeriod(year, month, extra)
 _install_period(P)
@@ -898,7 +897,7 @@ restored_state = st.session_state.get("restored_state")
 
 st.divider()
 
-st.subheader(f"📅 休日と別途決定の日の設定 - {P.title()}")
+step_header(2, f"休日と別途決定の日の設定（{P.title()}）", "土日祝は自動で休日です。下のカレンダーで、平日でも休日にする日・別途決定の日にチェックします")
 st.caption("**休日にする**：病院独自の休みなど、平日でも土日祝と同じ扱いにする日です。日直の枠ができ、日直・宿直とも休日回数に数えます。")
 st.caption("**別途決定**：年末年始など、別の方法で当番を決める日です。このアプリでは当直を決めず、先生の専用URLの画面でも灰色になってNGを入力できません。確定当直に入れた分だけは当直案に表示されます。")
 
