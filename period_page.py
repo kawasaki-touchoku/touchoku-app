@@ -751,7 +751,7 @@ st.markdown("""
 [data-testid="stHeader"] svg{fill:currentColor}
 [data-testid="stDecoration"]{display:none}
 /* 下の帯のリンクで移動したとき、画面上部の帯（ボタンの並ぶ所）に見出しが隠れないよう、少し上に余白を取って止める */
-#sec-staff,#sec-ng,#sec-create,#sec-result{scroll-margin-top:5.5rem}
+#sec-staff,#sec-ng,#sec-cond,#sec-create,#sec-result{scroll-margin-top:5.5rem}
 .sec-banner[id]{scroll-margin-top:5.5rem}
 /* 折りたたみ式の項目（確定当直）も、同じ帯の見た目にする */
 /* 「先生ごとの条件」の中の小見出し（①〜④） */
@@ -838,7 +838,7 @@ def create_bar_show(result_html=""):
     """下の帯の、移動リンクと結果の1行をまとめて表示する（1つの部品にして、表示のずれを防ぐ）。"""
     res_anchor = "#sec-result" if "generated_df" in st.session_state else "#sec-create"
     CREATE_BAR_SLOT.markdown(
-        f"<div class='cb-box'><div class='cb-nav'><a href='#sec-staff' target='_self'>医師条件</a>"
+        f"<div class='cb-box'><div class='cb-nav'><a href='#sec-cond' target='_self'>医師条件</a>"
         f"<a href='#sec-ng' target='_self'>NG日</a><a href='{res_anchor}' target='_self'>結果</a></div>{result_html}</div>",
         unsafe_allow_html=True)
 
