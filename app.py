@@ -2644,7 +2644,6 @@ def staff_add_remove_ui(staff_df, year, month, is_template=False):
     else:
         st.markdown(staff_roster_html(names, st.session_state.get("staff_source_label", ""),
                                       set(st.session_state.get("staff_added_names") or [])), unsafe_allow_html=True)
-    staff_readonly_table(staff_df)
     rows = {clean_text(r["先生の名前"]): r for _, r in staff_df.iterrows()}
     msg = st.session_state.pop("staff_edit_message", None)
     gen = "\u200b" * st.session_state.get("staff_edit_gen", 0)
@@ -4508,7 +4507,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
    読み込むと、①に「今の名簿」と「読み込んだ医師条件」（見るだけの表）が出るので、正しく読み込めたかをここで確認します。
    新しく来た先生は「➕ 先生を追加する」で、名前・入れる位置（○○先生の下）・条件のもと（ほかの先生と同じ条件、または型）を選んで追加します。いなくなった先生は「➖ 先生を外す」で外します。
 6. **NG日**（②）：先生を選んでカレンダーでNG日を入れ、「NG日を反映する」を押します（紙やメールで集めたNG日を入力します）。先生方に専用URLから入力してもらう場合は、ここで受付・取り込みを行います（「NG日の集め方」のタブを参照）。
-7. **医師条件の調整**（③・④）：NG日を見ながら、③の表で回数・上限・勤務間隔・希望日を調整します（①の表は見るだけなので、直すのは③です）。④の「⚖️ 当直の枠は足りそう？」で、全体と枠の種類ごとに足りているか（赤い棒がないか）を確認します。
+7. **医師条件の調整**（③・④）：当直案の枠ができるだけ埋まるように、③の表で回数・上限・勤務間隔・希望日を調整します（①の表は見るだけなので、直すのは③です）。④の「⚖️ 当直の枠は足りそう？」で、全体と枠の種類ごとに足りているか（赤い棒がないか）を確認します。
 8. **不足時の優先順位（任意）**：人数が足りない月に、どの枠から埋めるかを決めます。
 9. **当直案を作る**：下の帯の「🚀 当直案を作成」を押します（計算に最大1分少々かかります）。押すたびに違うパターンの案ができるので、気に入るまで押し直して構いません。
    未決定の枠が出たら、条件を直して作り直します。下の帯の移動ボタンで、条件と結果を行き来できます。
@@ -5113,7 +5112,7 @@ with staff_box_roster:
         if _co_msg:
             (st.success if _co_msg[0] == "success" else st.error)(_co_msg[1])
 with staff_box_cond:
-    step_header(3, "医師条件を調整する", "NG日を見ながら、ここで直します（直すと①の表示も同じ内容になります）", anchor="sec-cond")
+    step_header(3, "医師条件を調整する", "当直案の枠ができるだけ埋まるように、ここで医師条件を直します（直すと①の表示も同じ内容になります）", anchor="sec-cond")
     st.info("下の表に先生ごとの条件を入力してください。セルをクリックして編集できます。列名にカーソルを合わせると、入力例や説明が表示されます。")
     st.caption("最初に表示される「型1」〜「型9」は、よくある条件の入力例です。名前の欄が型の中身です（例：型4＝A宿直・A日直・外来日直に入る先生）。実際の先生の名前に置き換え、回数などを調整して使ってください。行は「＋」で増やせます。")
     with st.expander("入力例：曜日・希望日・備考", expanded=False):
@@ -5202,6 +5201,7 @@ with staff_box_roster:
         )
     with col_ul:
         uploaded_file = st.file_uploader("医師条件（以前ダウンロードしたCSVも可）をアップロード", type="csv", key=f"staff_csv_{st.session_state.get('uploader_gen', 0)}_{st.session_state.get('staff_uploader_gen', 0)}")
+    staff_box_ro = st.container()   # ①のいちばん下：読み込んだ医師条件（見るだけ。中身は医師条件の表を読んだあとで入れる）
 
 with staff_box_cond:
     if uploaded_file is not None:
@@ -5296,6 +5296,8 @@ with staff_box_cond:
     # 「➕ 先生を追加する」「➖ 先生を外す」（名前が変わったときの再表示のあとに出す。知らせが消えないように）
     with staff_box_addrm:
         staff_add_remove_ui(staff_df, year, month, is_template=staff_is_template)
+    with staff_box_ro:
+        staff_readonly_table(staff_df)
 
     # 備考が長くて表の中で読み切れない場合のために、全文の一覧を出す
     _note_cols = [c for c in staff_df.columns if str(c).strip().startswith("備考")]
