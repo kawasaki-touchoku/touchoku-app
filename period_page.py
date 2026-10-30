@@ -1188,6 +1188,7 @@ with staff_box_roster:
     st.markdown("<div class='imp-choose'>📥 以前の医師条件を取り込む（どちらか1つの方法を使います）</div>", unsafe_allow_html=True)
     imp_a, imp_or, imp_b = st.columns([10, 1.4, 10])   # 方法1（引き継ぎ）・または・方法2（CSV）
     imp_or.markdown("<div class='imp-or'><span>または</span></div>", unsafe_allow_html=True)
+    imp_tmpl = st.container(key="imp_tmpl")   # 「初めての場合：ひな形をダウンロード」（中身はひな形を作ったあとで入れる）
     st.markdown("<div class='imp-note'>どちらで取り込んでも、下の「今の名簿」と「読み込んだ医師条件」の表がその内容に置き換わります。</div>",
                 unsafe_allow_html=True)
     # --- 方法1：途中保存から先月の医師条件を引き継ぐ（管理用パスワードが必要） ---
@@ -1207,7 +1208,11 @@ with staff_box_roster:
                     _co_name = f"先月（{_co_ym[1]}月）" if _co_ym == _co_prev else f"{_co_ym[0]}年{_co_ym[1]}月"
             _co_label = f"📋 {_co_name}の医師条件を引き継ぐ" + "\u200b" * st.session_state.get("carry_over_gen", 0)
             st.caption("通常版で「💾 作業を途中保存する」で保存した医師条件（回数・勤務間隔・翌日PM duty・備考など）を読み込みます。期間の前の月の保存があればその最新、なければいちばん新しい保存を使います。NG日・希望日・先生のコメントは空になります。")
-            _co_box = st.popover(_co_label) if hasattr(st, "popover") else st.expander(_co_label, expanded=False)
+            _co_act = st.container(key="carry_act")   # ボタンを入れる白い枠（方法2のドロップ枠と下でそろえる）
+            with _co_act:
+                _co_box = st.popover(_co_label) if hasattr(st, "popover") else st.expander(_co_label, expanded=False)
+                if not st.session_state.get("remote_admin_ok"):
+                    st.caption("押すと管理用パスワードの入力欄が開きます")
             with _co_box:
                 if admin_logged_in("carry_over_pw"):
                     _co_at, _co_data = _normal_work_state_for_carry(year, month)
@@ -1311,8 +1316,11 @@ with staff_box_roster:
             "staff", "方法2", "CSVファイルをアップロード",
             "手元のCSV（以前ダウンロードした医師条件、またはひな形に入力したもの）を読み込みます。",
             f"staff_csv_{st.session_state.get('uploader_gen', 0)}_{st.session_state.get('staff_uploader_gen', 0)}",
-            csv_template, "医師条件_ひな形.csv", "📥 ひな形（CSV）をダウンロード",
-            "初めての場合は、ひな形をダウンロードしてExcelで入力してから読み込みます。")
+            None, "", "")
+    with imp_tmpl:
+        st.markdown("📝 初めての場合：")
+        st.download_button(label="📥 ひな形（CSV）をダウンロード", data=csv_template, file_name="医師条件_ひな形.csv", mime="text/csv")
+        st.markdown("して、Excelで入力してから方法2で読み込みます。")
     staff_box_ro = st.container()   # ①のいちばん下：読み込んだ医師条件（見るだけ。中身は医師条件の表を読んだあとで入れる）
 
 with staff_box_cond:
