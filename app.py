@@ -2769,6 +2769,44 @@ def staff_add_remove_ui(staff_df, year, month, is_template=False):
 
 
 
+# ==========================================
+# CSVのアップロード欄（ドラッグ＆ドロップできることが分かる見た目）。アプリ内のCSV欄はすべてこれを使う
+# ==========================================
+CSV_UPLOAD_CSS = """<style>
+.csv-card-head{display:flex;align-items:center;gap:8px;font-weight:800;font-size:1.02rem;margin:0 0 4px}
+.csv-card-head .lab{display:inline-block;color:#fff;border-radius:6px;padding:1px 9px;font-size:.8rem}
+.csv-card-head.green{color:#1f6b45}.csv-card-head.green .lab{background:#2e8a5b}
+.csv-card-head.blue{color:#1d4e89}.csv-card-head.blue .lab{background:#2f6db5}
+[class*="st-key-csvcard_"]{border:2px solid #c9d6e6;border-radius:12px;padding:12px 14px 10px;background:#fbfcfe}
+/* ドラッグ＆ドロップの枠：緑の点線で大きくし、「ここにドラッグ＆ドロップ」と書く */
+[data-testid="stFileUploaderDropzone"]{border:2.5px dashed #2e8a5b !important;background:#f1faf4 !important;border-radius:12px !important;
+  min-height:7.5rem;padding:1rem !important;display:flex !important;flex-direction:column !important;align-items:center !important;
+  justify-content:center !important;gap:.45rem;text-align:center}
+[data-testid="stFileUploaderDropzone"]::before{content:"📄⬇　ここにCSVファイルをドラッグ＆ドロップ";order:-1;display:block;
+  font-weight:800;color:#1f6b45;font-size:1rem}
+[data-testid="stFileUploaderDropzone"] button{border-color:#9bd3a8 !important;color:#1f6b45 !important;background:#fff !important}
+[data-testid="stFileUploaderDropzoneInstructions"]{font-size:.8rem;color:#8a94a6}
+.imp-choose{font-weight:800;color:#24405f;margin:4px 0 8px;font-size:1rem}
+.imp-or{display:flex;justify-content:center;margin-top:3.2rem}.imp-or span{background:#eef1f5;border-radius:999px;padding:8px 10px;font-weight:800;color:#6a7686}
+.imp-note{background:#fff7e0;border:1px solid #f0c36d;border-radius:8px;padding:6px 10px;font-size:.85rem;color:#7a5a00;margin:10px 0 2px}
+@media (max-width:640px){.imp-or{margin:0}}
+</style>"""
+
+
+def csv_upload_card(card_key, tag, title, desc, uploader_key, template_bytes, template_name, template_label, template_note=""):
+    """CSVのアップロード欄（見出し・説明・ドラッグ＆ドロップの枠・ひな形のダウンロード）。読み込んだファイルを返す。"""
+    st.markdown(CSV_UPLOAD_CSS, unsafe_allow_html=True)
+    with st.container(key=f"csvcard_{card_key}"):
+        st.markdown(f"<div class='csv-card-head green'><span class='lab'>{tag}</span>{title}</div>", unsafe_allow_html=True)
+        if desc:
+            st.caption(desc)
+        up = st.file_uploader(title, type="csv", key=uploader_key, label_visibility="collapsed")
+        if template_note:
+            st.caption(template_note)
+        st.download_button(label=template_label, data=template_bytes, file_name=template_name, mime="text/csv")
+    return up
+
+
 def admin_logged_in(widget_key):
     """管理用パスワードの確認。成功すると、同じ画面のほかの管理機能でも入力不要になる。"""
     if st.session_state.get("remote_admin_ok"):
@@ -4583,8 +4621,8 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
     - **別途決定**：年末年始など、別の方法で当番を決める日。このアプリではその日の当直を決めず、先生もNGを入力できなくなります。
 3. **人数を増やす枠（任意）**：1つの枠を2名以上にする日があれば、行を足して設定します。
 4. **確定当直（任意）**：「📅 先月今月来月の確定当直」の欄に、すでに決まっている当直や、先月末・来月初めの当直を入れます。勤務間隔の計算に使われます。
-5. **先生の名簿と医師条件**（「先生ごとの条件」の①）：新しい月なら「📋 先月の医師条件を引き継ぐ」を押すと、先月の医師条件から始められます。先月分の途中保存にある医師条件（回数・間隔・翌日PM duty・備考など）が入り、NG日・希望日・先生のコメントは空になります。
-   初めての場合は、ひな形（CSV）をダウンロードして先生の名前や回数の上限などを入れ、アップロードします。
+5. **先生の名簿と医師条件**（「先生ごとの条件」の①）：以前の医師条件を、方法1か方法2のどちらかで取り込みます。新しい月なら、方法1の「📋 先月の医師条件を引き継ぐ」を押すと、先月の医師条件から始められます。先月分の途中保存にある医師条件（回数・間隔・翌日PM duty・備考など）が入り、NG日・希望日・先生のコメントは空になります。
+   手元のCSVを使う場合や初めての場合は、方法2の緑の点線の枠にCSVファイルをドラッグ＆ドロップします（ひな形はその下からダウンロードできます）。
    読み込むと、①に「今の名簿」と「読み込んだ医師条件」（見るだけの表）が出るので、正しく読み込めたかをここで確認します。
    新しく来た先生は「➕ 先生を追加する」で、名前・入れる位置（○○先生の下）・条件のもと（ほかの先生と同じ条件、または型）を選んで追加します。いなくなった先生は「➖ 先生を外す」で外します。
 6. **NG日**（②）：先生を選んでカレンダーでNG日を入れ、「NG日を反映する」を押します（紙やメールで集めたNG日を入力します）。先生方に専用URLから入力してもらう場合は、ここで受付・取り込みを行います（「NG日の集め方」のタブを参照）。
@@ -5076,17 +5114,11 @@ with st.container(key="fixed_section"):
     fixed_template_df = pd.DataFrame(columns=fixed_columns)
     fixed_csv_template = fixed_template_df.to_csv(index=False).encode('utf-8-sig')
 
-    col_dl_fixed, col_ul_fixed = st.columns(2)
-    with col_dl_fixed:
-        st.write("▼ Excelで一括入力したい場合")
-        st.download_button(
-            label="📥 ひな形（CSV）をダウンロード",
-            data=fixed_csv_template,
-            file_name="確定当直_ひな形.csv",
-            mime="text/csv",
-        )
-    with col_ul_fixed:
-        fixed_file = st.file_uploader("確定当直（CSV）をアップロード", type="csv", key=f"fixed_csv_{st.session_state.get('uploader_gen', 0)}")
+    fixed_file = csv_upload_card(
+        "fixed", "CSV", "確定当直のCSVファイルをアップロード（任意）",
+        "下の表に直接入力することもできます。たくさんある場合は、ひな形に入力して読み込むと便利です。",
+        f"fixed_csv_{st.session_state.get('uploader_gen', 0)}",
+        fixed_csv_template, "確定当直_ひな形.csv", "📥 確定当直のひな形（CSV）をダウンロード")
 
     # 表の中身は画面の裏（session_state）に持っておき、CSVを読み込んだときや途中保存から読み込んだときだけ置き換える
     if fixed_file is not None:
@@ -5149,49 +5181,56 @@ staff_box_cap = st.container()
 staff_box_dl = st.container()
 
 with staff_box_roster:
-    step_header(1, "先生の名簿と医師条件（確認・引き継ぎ・追加・外す・CSV読み込み）")
-    # --- 先月の医師条件を引き継ぐ（管理用パスワードが必要） ---
-    if remote_is_configured():
-        _co_msg = st.session_state.pop("carry_over_message", None)
-        # ボタンの名前：ログイン中は、途中保存してある月を出す（ふつうは先月）
-        _co_name = "先月"
-        if st.session_state.get("remote_admin_ok"):
-            _co_at, _co_data = work_state_for_carry(year, month)
-            if _co_data and _co_data.get("staff_csv"):
-                _co_ym = (int(_co_data.get("year", 0)), int(_co_data.get("month", 0)))
-                _co_prev = (year, month - 1) if month > 1 else (year - 1, 12)
-                _co_name = f"先月（{_co_ym[1]}月）" if _co_ym == _co_prev else f"{_co_ym[0]}年{_co_ym[1]}月"
-        _co_label = f"📋 {_co_name}の医師条件を引き継ぐ" + "\u200b" * st.session_state.get("carry_over_gen", 0)
+    step_header(1, "以前の医師条件の取り込み（引き継ぎ or CSVアップロード）、医師を追加（or外す）")
+    st.markdown(CSV_UPLOAD_CSS, unsafe_allow_html=True)
+    st.markdown("<div class='imp-choose'>📥 以前の医師条件を取り込む（どちらか1つの方法を使います）</div>", unsafe_allow_html=True)
+    imp_a, imp_or, imp_b = st.columns([10, 1.4, 10])   # 方法1（引き継ぎ）・または・方法2（CSV）
+    imp_or.markdown("<div class='imp-or'><span>または</span></div>", unsafe_allow_html=True)
+    st.markdown("<div class='imp-note'>どちらで取り込んでも、下の「今の名簿」と「読み込んだ医師条件」の表がその内容に置き換わります。</div>",
+                unsafe_allow_html=True)
+    # --- 方法1：途中保存から先月の医師条件を引き継ぐ（管理用パスワードが必要） ---
+    with imp_a, st.container(key="csvcard_carry"):
         st.markdown("""<style>
-.st-key-carry_over_box{border:2px solid #2f6db5;background:#eef5fd;border-radius:12px;padding:10px 14px 12px}
-.st-key-carry_over_box [data-testid="stPopover"] button, .st-key-carry_over_box [data-testid="stExpander"] summary{
+.st-key-csvcard_carry{border-color:#2f6db5 !important;background:#eef5fd !important}
+.st-key-csvcard_carry [data-testid="stPopover"] button, .st-key-csvcard_carry [data-testid="stExpander"] summary{
   background:#2f6db5 !important;color:#fff !important;border:0 !important;min-height:2.8rem;font-weight:800}
-.st-key-carry_over_box [data-testid="stPopover"] button p{font-size:1.05rem;font-weight:800;color:#fff}
-.st-key-carry_over_box [data-testid="stPopover"] button svg{color:#fff;fill:#fff}
-.st-key-carry_over_box .co-lead{font-weight:800;color:#1d4e89;margin:0 0 6px}
+.st-key-csvcard_carry [data-testid="stPopover"] button p{font-size:1.05rem;font-weight:800;color:#fff}
+.st-key-csvcard_carry [data-testid="stPopover"] button svg{color:#fff;fill:#fff}
 </style>""", unsafe_allow_html=True)
-        with st.container(key="carry_over_box"):
-            st.markdown("<div class='co-lead'>🔁 新しい月は、ここで先月の医師条件を読み込むこともできます</div>", unsafe_allow_html=True)
-            st.caption("「💾 作業を途中保存する」で保存した医師条件（回数・勤務間隔・翌日PM duty・備考など）を読み込みます。先月分の保存があればその最新、なければいちばん新しい保存を使います。NG日・希望日・先生のコメントは空になります。")
-            _co_box = st.popover(_co_label) if hasattr(st, "popover") else st.expander(_co_label, expanded=False)
-        with _co_box:
-            if admin_logged_in("carry_over_pw"):
+        st.markdown("<div class='csv-card-head blue'><span class='lab'>方法1</span>途中保存から先月の医師条件を引き継ぐ</div>", unsafe_allow_html=True)
+        if not remote_is_configured():
+            st.caption("保存用のGoogleスプレッドシートの設定をすると使えます。今はCSVのアップロード（方法2）で読み込んでください。")
+        else:
+            _co_msg = st.session_state.pop("carry_over_message", None)
+            # ボタンの名前：ログイン中は、途中保存してある月を出す（ふつうは先月）
+            _co_name = "先月"
+            if st.session_state.get("remote_admin_ok"):
                 _co_at, _co_data = work_state_for_carry(year, month)
                 if _co_data and _co_data.get("staff_csv"):
-                    st.write(f"途中保存：**{_co_at}**（{_co_data.get('year')}年{_co_data.get('month')}月の作業）")
-                    st.caption(f"この医師条件（先生の名前・回数・勤務間隔・翌日PM duty・希望優先度・備考など）を、{year}年{month}月用に引き継ぎます。"
-                               "月ごとに変わる NG日・希望日・先生からのコメントは空になります。今の画面の医師条件は置き換わります。")
-                    if (int(_co_data.get("year", 0)), int(_co_data.get("month", 0))) == (year, month):
-                        st.warning(f"途中保存は{year}年{month}月（今選んでいる月と同じ）の作業です。NG日なども含めて続きから作業する場合は、"
-                                   "上の帯の「📂 前回の作業の続きから始める」を使ってください。")
-                    st.button(f"{year}年{month}月用に医師条件を引き継ぐ", key="carry_over_do", type="primary",
-                              on_click=carry_over_staff, args=(year, month))
+                    _co_ym = (int(_co_data.get("year", 0)), int(_co_data.get("month", 0)))
+                    _co_prev = (year, month - 1) if month > 1 else (year - 1, 12)
+                    _co_name = f"先月（{_co_ym[1]}月）" if _co_ym == _co_prev else f"{_co_ym[0]}年{_co_ym[1]}月"
+            _co_label = f"📋 {_co_name}の医師条件を引き継ぐ" + "\u200b" * st.session_state.get("carry_over_gen", 0)
+            st.caption("「💾 作業を途中保存する」で保存した医師条件（回数・勤務間隔・翌日PM duty・備考など）を読み込みます。先月分の保存があればその最新、なければいちばん新しい保存を使います。NG日・希望日・先生のコメントは空になります。")
+            _co_box = st.popover(_co_label) if hasattr(st, "popover") else st.expander(_co_label, expanded=False)
+            with _co_box:
+                if admin_logged_in("carry_over_pw"):
+                    _co_at, _co_data = work_state_for_carry(year, month)
+                    if _co_data and _co_data.get("staff_csv"):
+                        st.write(f"途中保存：**{_co_at}**（{_co_data.get('year')}年{_co_data.get('month')}月の作業）")
+                        st.caption(f"この医師条件（先生の名前・回数・勤務間隔・翌日PM duty・希望優先度・備考など）を、{year}年{month}月用に引き継ぎます。"
+                                   "月ごとに変わる NG日・希望日・先生からのコメントは空になります。今の画面の医師条件は置き換わります。")
+                        if (int(_co_data.get("year", 0)), int(_co_data.get("month", 0))) == (year, month):
+                            st.warning(f"途中保存は{year}年{month}月（今選んでいる月と同じ）の作業です。NG日なども含めて続きから作業する場合は、"
+                                       "上の帯の「📂 前回の作業の続きから始める」を使ってください。")
+                        st.button(f"{year}年{month}月用に医師条件を引き継ぐ", key="carry_over_do", type="primary",
+                                  on_click=carry_over_staff, args=(year, month))
+                    else:
+                        st.caption("まだ途中保存された医師条件がありません。上の帯の「💾 作業を途中保存する」で保存すると、翌月に引き継げます。")
                 else:
-                    st.caption("まだ途中保存された医師条件がありません。上の帯の「💾 作業を途中保存する」で保存すると、翌月に引き継げます。")
-            else:
-                st.caption("引き継ぎには管理用パスワードが必要です。")
-        if _co_msg:
-            (st.success if _co_msg[0] == "success" else st.error)(_co_msg[1])
+                    st.caption("引き継ぎには管理用パスワードが必要です。")
+            if _co_msg:
+                (st.success if _co_msg[0] == "success" else st.error)(_co_msg[1])
 with staff_box_cond:
     step_header(3, "医師条件を調整する", "当直案の枠ができるだけ埋まるように、ここで医師条件を直します（直すと①の表示も同じ内容になります）", anchor="sec-cond")
     st.info("下の表に先生ごとの条件を入力してください。セルをクリックして編集できます。列名にカーソルを合わせると、入力例や説明が表示されます。")
@@ -5271,17 +5310,14 @@ with staff_box_roster:
     # 保存用CSVと同じUTF-8（BOM付き）に統一。Excelでもそのまま開ける。
     csv_template = df_template.to_csv(index=False).encode('utf-8-sig')
 
-    col_dl, col_ul = st.columns(2)
-    with col_dl:
-        st.write("▼ Excelで一括入力したい場合")
-        st.download_button(
-            label="📥 ひな形（CSV）をダウンロード",
-            data=csv_template,
-            file_name="医師条件_ひな形.csv",
-            mime="text/csv",
-        )
-    with col_ul:
-        uploaded_file = st.file_uploader("医師条件（以前ダウンロードしたCSVも可）をアップロード", type="csv", key=f"staff_csv_{st.session_state.get('uploader_gen', 0)}_{st.session_state.get('staff_uploader_gen', 0)}")
+    # --- 方法2：CSVファイルをアップロード ---
+    with imp_b:
+        uploaded_file = csv_upload_card(
+            "staff", "方法2", "CSVファイルをアップロード",
+            "手元のCSV（以前ダウンロードした医師条件、またはひな形に入力したもの）を読み込みます。",
+            f"staff_csv_{st.session_state.get('uploader_gen', 0)}_{st.session_state.get('staff_uploader_gen', 0)}",
+            csv_template, "医師条件_ひな形.csv", "📥 ひな形（CSV）をダウンロード",
+            "初めての場合は、ひな形をダウンロードしてExcelで入力してから読み込みます。")
     staff_box_ro = st.container()   # ①のいちばん下：読み込んだ医師条件（見るだけ。中身は医師条件の表を読んだあとで入れる）
 
 with staff_box_cond:
