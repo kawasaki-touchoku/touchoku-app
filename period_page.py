@@ -1190,8 +1190,6 @@ with staff_box_roster:
     imp_or.markdown("<div class='imp-or'><span>または</span></div>", unsafe_allow_html=True)
     imp_tmpl = st.container(key="imp_tmpl")   # 「初めての場合：ひな形をダウンロード」（中身はひな形を作ったあとで入れる）
     imp_ask = st.container()   # CSVにNG日・希望日が入っているときの「使う／空にする」と、読み込んだ結果（中身はCSVを読んだあとで入れる）
-    st.markdown("<div class='imp-note'>どちらで取り込んでも、下の「今の名簿」と「読み込んだ医師条件」の表がその内容に置き換わります。</div>",
-                unsafe_allow_html=True)
     # --- 方法1：途中保存から先月の医師条件を引き継ぐ（管理用パスワードが必要） ---
     with imp_a, st.container(key="csvcard_carry"):
         st.markdown("<div class='csv-card-head blue'><span class='lab'>方法1</span>通常版の途中保存から医師条件を引き継ぐ</div>", unsafe_allow_html=True)
