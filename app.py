@@ -2825,7 +2825,9 @@ CSV_UPLOAD_CSS = """<style>
 .csvng-h{display:flex;align-items:center;gap:10px;font-size:1.12rem;font-weight:800;color:#5a3d00;line-height:1.5}
 .csvng-h .badge{flex:0 0 auto;background:#d98a00;color:#fff;border-radius:6px;padding:2px 10px;font-size:.85rem;font-weight:800}
 .csvng-h b{color:#b34700}
-.csvng-sub{font-size:.88rem;color:#7a5a00;margin-top:4px}
+.csvng-sub{font-size:.88rem;color:#7a5a00;margin-top:4px;padding-bottom:14px}
+.st-key-csv_ng_ask [data-testid="stRadio"], .st-key-csv_ng_ask [data-testid="stRadio"] > div,
+.st-key-csv_ng_ask [data-testid="stElementContainer"]:has([data-testid="stRadio"]){width:100% !important}
 .csvng-wait{font-size:.9rem;color:#7a5a00;font-weight:700;padding:2px 0 4px}
 .st-key-csv_ng_ask [role="radiogroup"]{gap:.5rem;width:100%;display:flex;flex-direction:column}
 .st-key-csv_ng_ask [role="radiogroup"] label{background:#fff;border:1.5px solid #e9c97a;border-radius:10px;padding:10px 14px;
