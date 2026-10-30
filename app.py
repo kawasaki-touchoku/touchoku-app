@@ -2820,6 +2820,14 @@ CSV_UPLOAD_CSS = """<style>
   flex-direction:row !important;flex-wrap:wrap;align-items:center;gap:.3rem .6rem}
 .st-key-imp_tmpl > div{width:auto !important;flex:0 1 auto}
 .st-key-imp_tmpl p{margin:0;font-size:.9rem}
+.st-key-csv_ng_ask{margin-top:12px;border:2.5px solid #e0a020;background:#fff8e6;border-radius:12px;padding:10px 14px}
+.csvng-h{font-size:1rem;color:#6b4a00}.csvng-sub{font-size:.82rem;color:#8a7440;margin-top:2px}
+.csvng-wait{font-size:.85rem;color:#7a5a00}
+.st-key-csv_ng_ask [role="radiogroup"]{gap:.4rem;width:100%}
+.st-key-csv_ng_ask [role="radiogroup"] label{background:#fff;border:1px solid #ecd9a8;border-radius:9px;padding:6px 10px;width:100%;margin:0}
+.st-key-csv_ng_ask [role="radiogroup"] label p{font-weight:700}
+.csvng-ok{margin-top:10px;background:#e8f5ec;border:1px solid #9fd0ad;border-radius:10px;padding:9px 14px;line-height:1.8;color:#1f4d33}
+.csvng-ok a{color:#1d4e89 !important;text-decoration:underline;margin-left:6px;font-weight:700}
 .st-key-imp_tmpl [data-testid="stDownloadButton"] button{border:1.5px solid #2e8a5b !important;color:#1f6b45 !important;background:#fff !important;font-weight:700}
 </style>"""
 
@@ -2837,6 +2845,71 @@ def csv_upload_card(card_key, tag, title, desc, uploader_key, template_bytes, te
         if template_bytes is not None:   # 方法2（医師条件）は、ひな形のダウンロードを枠の下に出すので、ここには出さない
             st.download_button(label=template_label, data=template_bytes, file_name=template_name, mime="text/csv")
     return up
+
+
+def _csv_cells(df, col):
+    """CSVの列の、空でない値の一覧（先生ごと）。"""
+    if col not in df.columns:
+        return []
+    vals = [clean_text(v) for v in df[col].tolist()]
+    return [v for v in vals if v and v.lower() not in ("nan", "none", "<na>")]
+
+
+def _csv_ng_choice_changed():
+    """「使う／空にする」を選び直したら、②のカレンダーをCSVの内容から作り直す。"""
+    for key in list(st.session_state.keys()):
+        if key.startswith("ng_"):
+            del st.session_state[key]
+
+
+def csv_ng_wish_choice(df, uploaded_file, box, year, month):
+    """①方法2：CSVにNG日・希望日が入っているときは、今月の分として使うか空にするかを選んでもらう。
+    CSVには日にちしか入っていないため、先月のCSVだと先月のNG日が今月の同じ日に入ってしまうため。読み込んだ結果も表示する。"""
+    ng_vals, wish_vals = _csv_cells(df, NG_COLUMN), _csv_cells(df, REQUEST_COLUMN)
+    ng_days = sum(len([t for t in str(v).replace("、", ",").split(",") if t.strip()]) for v in ng_vals)
+    n_doc = len(df)
+    fname = html_escape(uploaded_file.name)
+    with box:
+        if not ng_vals and not wish_vals:
+            st.success(f"CSV「{uploaded_file.name}」を読み込みました：**{n_doc}名**（NG日・希望日は入っていません）")
+            return df
+        parts = []
+        if ng_vals:
+            parts.append(f"<b>NG日（{len(ng_vals)}名分）</b>")
+        if wish_vals:
+            parts.append(f"<b>希望日（{len(wish_vals)}名分）</b>")
+        with st.container(key="csv_ng_ask"):
+            st.markdown(f"<div class='csvng-h'>❓ このCSVには {'と'.join(parts)}が入っています。どうしますか？</div>"
+                        "<div class='csvng-sub'>CSVには日にちしか入っていないため、先月のCSVだと先月のNG日・希望日が今月の同じ日に入ってしまいます。</div>",
+                        unsafe_allow_html=True)
+            opts = ["use", "clear"]
+            labels = {"use": f"今月（{year}年{month}月）のNG日・希望日として使う　―　このCSVを今月用に作った・今月ダウンロードしたとき",
+                      "clear": "空にする（NG日・希望日は読み込まない）　―　先月などのCSVを使うとき。NG日は②で入れ直します"}
+            choice = st.radio("CSVのNG日・希望日", opts, index=None, format_func=lambda o: labels[o],
+                              key=f"csvng_choice_{uploaded_file.file_id}", label_visibility="collapsed",
+                              on_change=_csv_ng_choice_changed)
+            if choice is None:
+                st.markdown("<div class='csvng-wait'>⏳ どちらかを選ぶまで、NG日・希望日は入れていません（回数などの医師条件は読み込み済みです）。</div>",
+                            unsafe_allow_html=True)
+        if choice == "use":
+            lines = []
+            if ng_vals:
+                lines.append(f"・NG日：<b>{len(ng_vals)}名・のべ{ng_days}日</b>を ② のカレンダーに入れました　<a href='#sec-ng'>→ ② NG日を見る</a>")
+            if wish_vals:
+                lines.append(f"・希望日：<b>{len(wish_vals)}名</b>を ③ の表の「希望日」に入れました")
+            st.markdown(f"<div class='csvng-ok'>✅ CSV「{fname}」を読み込みました：<b>{n_doc}名</b><br>{'<br>'.join(lines)}</div>",
+                        unsafe_allow_html=True)
+            return df
+    df = df.copy()
+    for col in (NG_COLUMN, REQUEST_COLUMN):
+        if col in df.columns:
+            df[col] = ""
+    if choice == "clear":
+        with box:
+            st.markdown(f"<div class='csvng-ok'>✅ CSV「{fname}」を読み込みました：<b>{n_doc}名</b><br>"
+                        "・NG日・希望日は空にしました（② のカレンダーで入れてください）　<a href='#sec-ng'>→ ② NG日を入れる</a></div>",
+                        unsafe_allow_html=True)
+    return df
 
 
 def admin_logged_in(widget_key):
@@ -4654,7 +4727,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 3. **人数を増やす枠（任意）**：1つの枠を2名以上にする日があれば、行を足して設定します。
 4. **確定当直（任意）**：「📅 先月今月来月の確定当直」の欄に、すでに決まっている当直や、先月末・来月初めの当直を入れます。勤務間隔の計算に使われます。
 5. **先生の名簿と医師条件**（「先生ごとの条件」の①）：以前の医師条件を、方法1か方法2のどちらかで取り込みます。新しい月なら、方法1の「📋 先月の医師条件を引き継ぐ」を押すと、先月の医師条件から始められます。先月分の途中保存にある医師条件（回数・間隔・翌日PM duty・備考など）が入り、NG日・希望日・先生のコメントは空になります。
-   手元のCSVを使う場合や初めての場合は、方法2の緑の点線の枠にCSVファイルをドラッグ＆ドロップします（ひな形は、2つの枠の下の「📥 ひな形（CSV）をダウンロード」から入手できます）。
+   手元のCSVを使う場合や初めての場合は、方法2の緑の点線の枠にCSVファイルをドラッグ＆ドロップします（ひな形は、2つの枠の下の「📥 ひな形（CSV）をダウンロード」から入手できます）。CSVにNG日・希望日が入っているときは、「今月の分として使う」か「空にする」かを選びます（先月のCSVなら「空にする」を選びます）。
    読み込むと、①に「今の名簿」と「読み込んだ医師条件」（見るだけの表）が出るので、正しく読み込めたかをここで確認します。
    新しく来た先生は「➕ 先生を追加する」で、名前・入れる位置（○○先生の下）・条件のもと（ほかの先生と同じ条件、または型）を選んで追加します。いなくなった先生は「➖ 先生を外す」で外します。
 6. **NG日**（②）：先生を選んでカレンダーでNG日を入れ、「NG日を反映する」を押します（紙やメールで集めたNG日を入力します）。先生方に専用URLから入力してもらう場合は、ここで受付・取り込みを行います（「NG日の集め方」のタブを参照）。
@@ -5219,6 +5292,7 @@ with staff_box_roster:
     imp_a, imp_or, imp_b = st.columns([10, 1.4, 10])   # 方法1（引き継ぎ）・または・方法2（CSV）
     imp_or.markdown("<div class='imp-or'><span>または</span></div>", unsafe_allow_html=True)
     imp_tmpl = st.container(key="imp_tmpl")   # 「初めての場合：ひな形をダウンロード」（中身はひな形を作ったあとで入れる）
+    imp_ask = st.container()   # CSVにNG日・希望日が入っているときの「使う／空にする」と、読み込んだ結果（中身はCSVを読んだあとで入れる）
     st.markdown("<div class='imp-note'>どちらで取り込んでも、下の「今の名簿」と「読み込んだ医師条件」の表がその内容に置き換わります。</div>",
                 unsafe_allow_html=True)
     # --- 方法1：途中保存から先月の医師条件を引き継ぐ（管理用パスワードが必要） ---
@@ -5344,7 +5418,7 @@ with staff_box_roster:
     with imp_b:
         uploaded_file = csv_upload_card(
             "staff", "方法2", "CSVファイルをアップロード",
-            "手元のCSV（以前ダウンロードした医師条件、またはひな形に入力したもの）を読み込みます。",
+            "手元のCSV（以前ダウンロードした医師条件、またはひな形に入力したもの）を読み込みます。CSVにNG日・希望日が入っているときは、使うかどうかを選べます。",
             f"staff_csv_{st.session_state.get('uploader_gen', 0)}_{st.session_state.get('staff_uploader_gen', 0)}",
             None, "", "")
     with imp_tmpl:
@@ -5367,6 +5441,7 @@ with staff_box_cond:
         except Exception as e:
             st.error(f"医師条件CSVを読み込めませんでした。詳細: {e}")
             st.stop()
+        base_df = csv_ng_wish_choice(base_df, uploaded_file, imp_ask, year, month)
     elif restored_state and restored_state.get("staff_csv"):
         base_df = parse_staff_csv(restored_state["staff_csv"].encode("utf-8"))
     else:
