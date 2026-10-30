@@ -2448,6 +2448,8 @@ def work_state_restore():
     st.session_state["uploader_gen"] = st.session_state.get("uploader_gen", 0) + 1
     st.session_state.pop("last_uploaded_file_id", None)
     st.session_state["work_state_message"] = ("success", f"{saved_at} に保存した作業（{y}年{m}月）を読み込みました。")
+    st.session_state["staff_source_label"] = f"{str(saved_at)[5:16]} の途中保存から"
+    st.session_state.pop("staff_added_names", None)
     # 読み込んだことは、上の帯のボタンの右に1か所だけ出す（次に途中保存するまで表示しておく）
     st.session_state["work_restore_note"] = f"{str(saved_at)[5:16]} 保存分（{y}年{m}月）を読み込みました"
     st.session_state.pop("work_save_note", None)
@@ -2479,9 +2481,178 @@ def carry_over_staff(year, month):
     st.session_state["uploader_gen"] = st.session_state.get("uploader_gen", 0) + 1
     st.session_state.pop("last_uploaded_file_id", None)
     st.session_state["carry_over_gen"] = st.session_state.get("carry_over_gen", 0) + 1   # 小さな枠を閉じる
+    st.session_state["staff_source_label"] = f"{data.get('year')}年{data.get('month')}月の医師条件（引き継ぎ）から"
+    st.session_state.pop("staff_added_names", None)
     st.session_state["carry_over_message"] = (
         "success", f"{saved_at} に途中保存した{data.get('year')}年{data.get('month')}月の医師条件（{len(df)}名）を引き継ぎました。"
                    "NG日・希望日・先生のコメントは空にしてあります。")
+
+
+# ==========================================
+# 先生の追加・外す（①先生の名簿）
+# 今の医師条件の表（前回の画面の内容）に行を足したり消したりして、表を作り直す。
+# ==========================================
+STAFF_KEEP_EMPTY_ON_COPY = ("備考（メモ・説明など自由記入）", NG_COLUMN, REQUEST_COLUMN)
+
+
+def _staff_apply_new_table(df, year, month, message):
+    """作り直した医師条件の表を、次の画面の表として使う（ほかの入力はそのまま）。"""
+    state = dict(st.session_state.get("restored_state") or {"year": year, "month": month})
+    state["staff_csv"] = df.to_csv(index=False)
+    st.session_state["restored_state"] = state
+    # 医師条件のCSVのアップロード欄だけを空にする（確定当直のアップロード欄はそのまま）
+    st.session_state["staff_uploader_gen"] = st.session_state.get("staff_uploader_gen", 0) + 1
+    st.session_state.pop("last_uploaded_file_id", None)
+    st.session_state["staff_edit_gen"] = st.session_state.get("staff_edit_gen", 0) + 1   # 開いている小さな枠を閉じる
+    st.session_state["staff_edit_message"] = message
+
+
+def staff_add_doctor(year, month):
+    """「この先生を追加する」（ボタンのコールバック）。"""
+    csv_text = st.session_state.get("staff_current_csv")
+    name = clean_text(st.session_state.get("add_doc_name", ""))
+    if not csv_text:
+        st.session_state["staff_edit_message"] = ("error", "医師条件の表が読み込めませんでした。画面を開き直してください。")
+        return
+    df = parse_staff_csv(csv_text.encode("utf-8"))
+    names = [clean_text(n) for n in df["先生の名前"].tolist()]
+    if not name:
+        st.session_state["staff_edit_message"] = ("error", "追加する先生の名前を入れてください。")
+        return
+    if name in names:
+        st.session_state["staff_edit_message"] = ("error", f"「{name}」先生は、すでに名簿にいます。")
+        return
+    if any(c in name for c in ",、") or name == "-" or "⚠️不足" in name:
+        st.session_state["staff_edit_message"] = ("error", "先生の名前に、カンマ・読点・単独の「-」は使えません。")
+        return
+    if st.session_state.get("add_doc_source") == "型から選ぶ":
+        src_name = st.session_state.get("add_doc_template")
+        tmpl = (st.session_state.get("staff_templates") or {}).get(src_name)
+        if not tmpl:
+            st.session_state["staff_edit_message"] = ("error", "型を選んでください。")
+            return
+        row = {c: tmpl.get(c, "") for c in df.columns}
+        src_text = f"{src_name.split('_')[0]}の条件"
+    else:
+        src_name = st.session_state.get("add_doc_copy")
+        if src_name not in names:
+            st.session_state["staff_edit_message"] = ("error", "条件を写す先生を選んでください。")
+            return
+        row = df.iloc[names.index(src_name)].to_dict()
+        src_text = f"{src_name}先生と同じ条件"
+    for c in STAFF_KEEP_EMPTY_ON_COPY:
+        if c in row:
+            row[c] = ""
+    if "希望優先度(数字が大きいほど優先)" in row:
+        row["希望優先度(数字が大きいほど優先)"] = 1
+    row["先生の名前"] = name
+    if "翌日PM duty" in df.columns:
+        row["翌日PM duty"] = clean_text(st.session_state.get("add_doc_pm", ""))
+    after = st.session_state.get("add_doc_after")
+    pos = 0 if after == "（いちばん上）" else (names.index(after) + 1 if after in names else len(df))
+    new_df = pd.concat([df.iloc[:pos], pd.DataFrame([row], columns=df.columns), df.iloc[pos:]], ignore_index=True)
+    for k in ("add_doc_name", "add_doc_pm"):
+        st.session_state[k] = ""
+    where = "いちばん上" if pos == 0 else f"{new_df.iloc[pos - 1]['先生の名前']}先生の下"
+    st.session_state["staff_added_names"] = list(st.session_state.get("staff_added_names") or []) + [name]
+    _staff_apply_new_table(new_df, year, month, ("success", f"{name}先生を、{where}に追加しました（{src_text}）。②のNG日と③の表に表示されます。"))
+
+
+def staff_remove_doctors(year, month):
+    """「選んだ先生を外す」（ボタンのコールバック）。"""
+    csv_text = st.session_state.get("staff_current_csv")
+    targets = list(st.session_state.get("remove_doc_names") or [])
+    if not csv_text or not targets:
+        st.session_state["staff_edit_message"] = ("error", "外す先生を選んでください。")
+        return
+    df = parse_staff_csv(csv_text.encode("utf-8"))
+    new_df = df[~df["先生の名前"].astype(str).str.strip().isin(targets)].reset_index(drop=True)
+    st.session_state["remove_doc_names"] = []
+    st.session_state["staff_added_names"] = [n for n in (st.session_state.get("staff_added_names") or []) if n not in targets]
+    _staff_apply_new_table(new_df, year, month, ("success", f"{'、'.join(targets)}先生を名簿から外しました。"
+                                                            "間違えた場合は、途中保存の履歴から読み込み直せます。"))
+
+
+def _staff_summary(row):
+    """「A宿直・A日直・外来日直／2〜3回」のような、条件の短い説明。"""
+    def num(c):
+        v = pd.to_numeric(pd.Series([row.get(c)]), errors="coerce").iloc[0]
+        return None if pd.isna(v) else int(v)
+    slots = [s for s in RESULT_COLUMNS[2:] if (num(s + "上限") or 0) > 0]
+    lo, hi = num("月間最小回数"), num("月間最大回数")
+    return ("・".join(slots) or "担当枠なし") + (f"／{lo}〜{hi}回" if lo is not None and hi is not None else "")
+
+
+def staff_roster_html(names, source, added=()):
+    """①に出す「今の名簿」：番号付きの小さな札を、表と同じ順番で並べる。追加した先生には「追加」の印。"""
+    chips = "".join(
+        f"<span class='rs-chip{' new' if n in added else ''}'><b>{i}</b>{html_escape(n)}{'<em>追加</em>' if n in added else ''}</span>"
+        for i, n in enumerate(names, 1))
+    return ("<style>.rs-box{border:1px solid #d6e0ec;background:#f7f9fc;border-radius:10px;padding:10px 12px;margin:10px 0 4px}"
+            ".rs-hd{font-weight:800;color:#24405f;margin-bottom:6px}.rs-hd small{font-weight:500;color:#6a7686;margin-left:8px}"
+            ".rs-chip{display:inline-flex;align-items:center;gap:4px;border:1px solid #d6dde8;background:#fff;border-radius:999px;"
+            "padding:2px 9px 2px 3px;margin:3px;font-size:.85rem;color:#31333f}"
+            ".rs-chip b{display:inline-flex;align-items:center;justify-content:center;min-width:1.3rem;height:1.3rem;border-radius:999px;"
+            "background:#e6ecf4;color:#425268;font-size:.7rem;padding:0 3px}"
+            ".rs-chip.new{border-color:#2e8a5b;background:#effaf3}"
+            ".rs-chip em{font-style:normal;font-size:.68rem;background:#2e8a5b;color:#fff;border-radius:4px;padding:0 4px}</style>"
+            f"<div class='rs-box'><div class='rs-hd'>👥 今の名簿（{len(names)}名・この順番で表や当直案に並びます）"
+            f"<small>{html_escape(source)}</small></div>{chips}</div>")
+
+
+def staff_add_remove_ui(staff_df, year, month, is_template=False):
+    """①先生の名簿：「今の名簿」の一覧と、「➕ 先生を追加する」「➖ 先生を外す」。"""
+    names = [n for n in (clean_text(v) for v in staff_df["先生の名前"].tolist()) if n and n.lower() not in ("nan", "none")]
+    if is_template:
+        st.markdown(staff_roster_html(names, "入力例の型1〜型9を表示中"), unsafe_allow_html=True)
+        st.warning("まだ先生の名簿が読み込まれていません。"
+                   + ("上の「📋 先月の医師条件を引き継ぐ」か、" if remote_is_configured() else "")
+                   + "下のCSVのアップロードで読み込んでください。「➕ 先生を追加する」で1人ずつ足すこともできます。")
+    else:
+        st.markdown(staff_roster_html(names, st.session_state.get("staff_source_label", ""),
+                                      set(st.session_state.get("staff_added_names") or [])), unsafe_allow_html=True)
+    rows = {clean_text(r["先生の名前"]): r for _, r in staff_df.iterrows()}
+    msg = st.session_state.pop("staff_edit_message", None)
+    gen = "\u200b" * st.session_state.get("staff_edit_gen", 0)
+    has_popover = hasattr(st, "popover")
+    c_add, c_rm = st.columns(2)
+    with c_add:
+        box = st.popover("➕ 先生を追加する" + gen, use_container_width=True) if has_popover else st.expander("➕ 先生を追加する" + gen)
+        with box:
+            st.text_input("先生の名前", key="add_doc_name", placeholder="例：新田")
+            st.selectbox("入れる位置（名簿の並び順）", ["（いちばん上）"] + names, index=len(names),
+                         format_func=lambda n: n if n == "（いちばん上）" else f"{n}先生の下", key="add_doc_after")
+            st.radio("条件のもと", ["ほかの先生と同じ条件", "型から選ぶ"], horizontal=True, key="add_doc_source")
+            if st.session_state.get("add_doc_source") == "型から選ぶ":
+                tmpls = st.session_state.get("staff_templates") or {}
+                pick = st.selectbox("型", list(tmpls), key="add_doc_template",
+                                    format_func=lambda n: f"{n.split('_')[0]}：{tmpls[n].get('備考（メモ・説明など自由記入）', '')}")
+                src_row = tmpls.get(pick, {})
+            else:
+                pick = st.selectbox("条件を写す先生", names, key="add_doc_copy",
+                                    format_func=lambda n: f"{n}（{_staff_summary(rows[n])}）" if n in rows else n)
+                src_row = rows.get(pick, {})
+            if src_row is not None and len(src_row):
+                def v(c):
+                    x = pd.to_numeric(pd.Series([src_row.get(c)]), errors="coerce").iloc[0]
+                    return "なし" if pd.isna(x) else str(int(x))
+                caps = "・".join(f"{s}{v(s + '上限')}" for s in RESULT_COLUMNS[2:] if v(s + "上限") not in ("0", "なし"))
+                st.caption(f"写す内容：最低空ける日数 {v('最低空ける日数')}日、月間 {v('月間最小回数')}〜{v('月間最大回数')}回、"
+                           f"休日 {v('休日最大回数')}回まで、宿直上限 {v('宿直上限')}・日直上限 {v('日直上限')}、枠 {caps or 'なし'}。"
+                           "備考・希望日・NG日は写しません。")
+            st.text_input("翌日PM dutyの曜日（任意）", key="add_doc_pm", placeholder="例：水　（複数は 水,木）")
+            st.button("この先生を追加する", key="add_doc_do", type="primary", on_click=staff_add_doctor, args=(year, month))
+            if remote_is_configured():
+                st.caption("専用URLを使っている場合：新しい先生のURLは、管理画面の「締め切り日・休日設定を更新」（受付中）または「受付を開始する」で作られます。")
+    with c_rm:
+        box = st.popover("➖ 先生を外す" + gen, use_container_width=True) if has_popover else st.expander("➖ 先生を外す" + gen)
+        with box:
+            st.multiselect("外す先生（複数選べます）", names, key="remove_doc_names")
+            st.caption("外した先生は、医師条件の表・NG日の一覧から消えます。途中保存の履歴には残るので、必要なら読み込み直せます。")
+            st.button("選んだ先生を外す", key="remove_doc_do", type="primary", on_click=staff_remove_doctors, args=(year, month))
+    if msg:
+        (st.success if msg[0] == "success" else st.error)(msg[1])
+
 
 
 def admin_logged_in(widget_key):
@@ -4300,6 +4471,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 4. **確定当直（任意）**：「📅 先月今月来月の確定当直」の欄に、すでに決まっている当直や、先月末・来月初めの当直を入れます。勤務間隔の計算に使われます。
 5. **先生の名簿**（「先生ごとの条件」の①）：新しい月なら「📋 先月の医師条件を引き継ぐ」を押すと、先月の医師条件から始められます。途中保存してある医師条件（回数・間隔・翌日PM duty・備考など）が入り、NG日・希望日・先生のコメントは空になります。
    初めての場合は、ひな形（CSV）をダウンロードして先生の名前や回数の上限などを入れ、アップロードします。
+   新しく来た先生は「➕ 先生を追加する」で、名前・入れる位置（○○先生の下）・条件のもと（ほかの先生と同じ条件、または型）を選んで追加します。いなくなった先生は「➖ 先生を外す」で外します。
 6. **NG日**（②）：先生を選んでカレンダーでNG日を入れ、「NG日を反映する」を押します。先生方に専用URLから入力してもらった場合は、ここで取り込みます（「NG日の集め方」のタブを参照）。
 7. **回数などの条件**（③・④）：NG日を見ながら、③の表で回数・上限・勤務間隔・希望日を調整します。④の「⚖️ 当直の枠は足りそう？」で、全体と枠の種類ごとに足りているか（赤い棒がないか）を確認します。
 8. **不足時の優先順位（任意）**：人数が足りない月に、どの枠から埋めるかを決めます。
@@ -4859,7 +5031,7 @@ staff_box_cap = st.container()
 staff_box_dl = st.container()
 
 with staff_box_roster:
-    step_header(1, "先生の名簿を読み込む", "新しい月は、先月の医師条件を引き継ぐか、CSVを読み込みます")
+    step_header(1, "先生の名簿を読み込む", "先月の医師条件の引き継ぎ・CSVの読み込みと、先生の追加・外すをここで行います")
     # --- 先月の医師条件を引き継ぐ（管理用パスワードが必要） ---
     if remote_is_configured():
         _co_msg = st.session_state.pop("carry_over_message", None)
@@ -4945,6 +5117,7 @@ with staff_box_cond:
     """)
 
 with staff_box_roster:
+    staff_box_addrm = st.container()   # 「➕ 先生を追加する」「➖ 先生を外す」（中身は医師条件の表を読んだあとで入れる）
     # 入力例：よくある9つの型（名前の欄に型の中身が分かる名前を入れる）。実際の先生に置き換えて使う
     # 型2（A日直だけ・希望日を確定）の希望日は、選んでいる月の最初の休日2日にする（平日の日直は指定できないため）
     # （「休日にする」のチェックで例の表が作り直されないよう、土日祝だけで決める）
@@ -4975,6 +5148,8 @@ with staff_box_roster:
                                                    "休日最大回数", "宿直上限", "日直上限", "A宿直上限", "B宿直上限", "外来宿直上限",
                                                    "A日直上限", "B日直上限", "外来日直上限"]}
     df_template = pd.DataFrame(template_data)
+    # 「➕ 先生を追加する」で型から選べるように、型の中身を覚えておく
+    st.session_state["staff_templates"] = {r["先生の名前"]: r for r in df_template.to_dict("records")}
     # 保存用CSVと同じUTF-8（BOM付き）に統一。Excelでもそのまま開ける。
     csv_template = df_template.to_csv(index=False).encode('utf-8-sig')
 
@@ -4988,7 +5163,7 @@ with staff_box_roster:
             mime="text/csv",
         )
     with col_ul:
-        uploaded_file = st.file_uploader("医師条件（以前ダウンロードしたCSVも可）をアップロード", type="csv", key=f"staff_csv_{st.session_state.get('uploader_gen', 0)}")
+        uploaded_file = st.file_uploader("医師条件（以前ダウンロードしたCSVも可）をアップロード", type="csv", key=f"staff_csv_{st.session_state.get('uploader_gen', 0)}_{st.session_state.get('staff_uploader_gen', 0)}")
 
 with staff_box_cond:
     if uploaded_file is not None:
@@ -4997,6 +5172,8 @@ with staff_box_cond:
                 if key.startswith("ng_"):
                     del st.session_state[key]
             st.session_state['last_uploaded_file_id'] = uploaded_file.file_id
+            st.session_state["staff_source_label"] = f"CSV「{uploaded_file.name}」から"
+            st.session_state.pop("staff_added_names", None)
         try:
             base_df = parse_staff_csv(uploaded_file.getvalue())
         except Exception as e:
@@ -5006,6 +5183,7 @@ with staff_box_cond:
         base_df = parse_staff_csv(restored_state["staff_csv"].encode("utf-8"))
     else:
         base_df = df_template.copy()
+    staff_is_template = uploaded_file is None and not (restored_state and restored_state.get("staff_csv"))
 
     if "先生の名前" not in base_df.columns:
         st.error("医師条件CSVに「先生の名前」の列がありません。ひな形の列名を確認してください。")
@@ -5066,6 +5244,8 @@ with staff_box_cond:
     )
 
     staff_df = edited_df.reset_index()
+    # 先生の追加・外すは、この表（今の画面の内容）をもとに行う
+    st.session_state["staff_current_csv"] = staff_df.to_csv(index=False)
 
     # 確定当直の表で選べる先生の名前を、医師条件に合わせる（名前が変わったときは、確定当直の表の一覧も作り直す）
     _names_now = list(dict.fromkeys(n for n in (clean_text(v) for v in staff_df.get("先生の名前", pd.Series(dtype=str)).tolist())
@@ -5075,6 +5255,9 @@ with staff_box_cond:
         st.session_state["fixed_editor_gen"] = st.session_state.get("fixed_editor_gen", 0) + 1
         if not (create_bar_request or work_save_request):
             st.rerun()
+    # 「➕ 先生を追加する」「➖ 先生を外す」（名前が変わったときの再表示のあとに出す。知らせが消えないように）
+    with staff_box_addrm:
+        staff_add_remove_ui(staff_df, year, month, is_template=staff_is_template)
 
     # 備考が長くて表の中で読み切れない場合のために、全文の一覧を出す
     _note_cols = [c for c in staff_df.columns if str(c).strip().startswith("備考")]
