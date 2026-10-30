@@ -1926,18 +1926,24 @@ if len(staff_df) > 0:
             for _k2, _v2 in MATRIX_COUNT_ALERTS.items():
                 st.session_state[f"alert_{_k2}"] = _v2
 
-        # アラートの基準は、折りたたまずに常に表示する（表の見え方がすぐ変えられるように）
-        st.markdown("<style>.st-key-alert_box{border:1.5px solid #e8a0a0;background:#fff7f7;border-radius:10px;padding:8px 14px 10px;gap:.4rem}"
-                    ".alert-h{font-weight:800;color:#a32020;font-size:1rem}"
-                    ".alert-h span{font-weight:400;font-size:.82rem;color:#6a7686;margin-left:.6rem}</style>", unsafe_allow_html=True)
+        # アラートの基準は、折りたたまずに常に表示する（控えめに：枠なし・上下の細い線だけ）
+        st.markdown("<style>.st-key-alert_box{border-top:1px solid #e3e7ee;border-bottom:1px solid #e3e7ee;padding:12px 4px 14px;gap:.5rem;margin:6px 0 10px}"
+                    ".alert-h{font-weight:700;color:#31333f;font-size:1rem}"
+                    ".alert-d{font-size:.84rem;color:#6a7686;line-height:1.6;margin:4px 0 6px}"
+                    ".st-key-alert_box [data-testid='stNumberInput'] input{padding-left:.6rem}</style>", unsafe_allow_html=True)
         with st.container(key="alert_box"):
-            st.markdown("<div class='alert-h'>⚠ アラートの基準（回数が多い先生を赤く表示）"
-                        "<span>それぞれの回数がこの数以上の先生を、表の右端で赤く表示します。0にすると、その項目はアラートを出しません。</span></div>",
+            st.markdown("<div class='alert-h'>⚠ アラートの基準（回数が多い枠を赤く表示）</div>"
+                        "<div class='alert-d'>医師別の当直一覧の右端の回数が、この数以上になった枠を赤く囲みます。0にした項目はアラートを出しません。</div>",
                         unsafe_allow_html=True)
-            _acols = st.columns(len(MATRIX_COUNT_ALERTS))
+            _spec = [1] * len(MATRIX_COUNT_ALERTS) + [0.5, 1.2]
+            try:
+                _acols = st.columns(_spec, vertical_alignment="bottom")
+            except TypeError:   # 古いStreamlitで vertical_alignment が使えない場合
+                _acols = st.columns(_spec)
             for _col, _k in zip(_acols, MATRIX_COUNT_ALERTS):
                 _col.number_input(f"{MATRIX_ALERT_LABELS[_k]}（回以上）", min_value=0, max_value=31, step=1, key=f"alert_{_k}")
-            st.button("初期設定に戻す（宿直4回以上・休日3回以上）", key="alert_reset", on_click=_reset_alerts)
+            _acols[-1].button("初期設定に戻す", key="alert_reset", on_click=_reset_alerts,
+                              help="宿直4回以上・休日3回以上に戻します（ほかは0＝アラートなし）")
         alert_limits = {_k: int(st.session_state.get(f"alert_{_k}", _v) or 0) for _k, _v in MATRIX_COUNT_ALERTS.items()}
         _alerts = count_alert_messages(matrix_rows, alert_limits)
         # 計算結果のまとめ（不足・注意事項・当直回数のアラート）は、作成ボタンの下の1か所にまとめて出す
