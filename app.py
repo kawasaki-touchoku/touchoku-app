@@ -1913,7 +1913,8 @@ REMOTE_SHEETS = {
     "tokens": ["先生", "キー", "翌日PM duty", "作成日時"],
     "settings": ["項目", "値"],
     "submissions": ["年月", "先生", "NG日", "保存日時", "コメント", "種別"],   # 種別：管理者がリセットした行は「リセット」
-    "saved_state": ["項目", "値"],   # 作業の途中保存（年月・休日・医師条件・確定当直など）
+    "saved_state": ["項目", "値"],   # 以前の途中保存（1回分だけ）。今は読み込みと、履歴への引き継ぎにだけ使う
+    "saved_history": ["保存ID", "保存日時", "年月", "番号", "内容"],   # 作業の途中保存の履歴（新しいものから一定回数分）
 }
 
 
@@ -2303,20 +2304,15 @@ const a = document.getElementById('dl'); a.href = url; a.download = `NG日_${D.y
 WORK_STATE_CHUNK = 40000   # スプレッドシートの1つのマスに入る文字数（上限5万字）より少なめに区切る
 
 
-def work_state_save(snapshot):
-    text = json.dumps(snapshot, ensure_ascii=False)
-    if len(text) > WORK_STATE_CHUNK * 20:
-        raise ValueError("保存する内容が大きすぎます（医師の人数や確定当直の行数を確認してください）。")
-    # 長いときは「内容」「内容2」「内容3」…と複数のマスに分けて保存する
-    chunks = [text[i:i + WORK_STATE_CHUNK] for i in range(0, len(text), WORK_STATE_CHUNK)] or [""]
-    rows = [["保存日時", remote_now()]] + [["内容" if i == 0 else f"内容{i + 1}", c] for i, c in enumerate(chunks)]
-    remote_rewrite("saved_state", rows)
+WORK_HISTORY_KEEP = 20     # 途中保存を残す回数（これより古いものは、保存のときに消す）
+# 保存先のシート。期間指定版では、通常版とは別のシートに切り替える
+WORK_STATE_SHEETS = {"legacy": "saved_state", "history": "saved_history"}
 
 
-def work_state_info():
-    """保存済みの作業 (保存日時, 内容) を返す。なければ (None, None)。"""
+def _work_state_legacy(sheet):
+    """以前の形（1回分だけ）の途中保存 (保存日時, 内容) を読む。なければ (None, None)。"""
     try:
-        rows = {r.get("項目", ""): r.get("値", "") for r in remote_read("saved_state")}
+        rows = {r.get("項目", ""): r.get("値", "") for r in remote_read(sheet)}
     except Exception:
         return None, None
     if not rows.get("内容"):
@@ -2332,9 +2328,97 @@ def work_state_info():
         return None, None
 
 
+def _work_history_rows(sheets):
+    try:
+        return [r for r in remote_read(sheets["history"]) if r.get("保存ID")]
+    except Exception:
+        return []
+
+
+def work_state_entries(sheets=None):
+    """途中保存の一覧 [(保存ID, 保存日時, 内容)] を新しい順に返す。"""
+    sheets = sheets or WORK_STATE_SHEETS
+    groups = {}
+    for r in _work_history_rows(sheets):
+        g = groups.setdefault(r["保存ID"], {"at": r.get("保存日時", ""), "parts": {}})
+        try:
+            g["parts"][int(r.get("番号") or 1)] = r.get("内容", "")
+        except ValueError:
+            continue
+    entries = []
+    for sid, g in groups.items():
+        try:
+            data = json.loads("".join(g["parts"][k] for k in sorted(g["parts"])))
+        except ValueError:
+            continue
+        entries.append((sid, g["at"], data))
+    if not entries:
+        # 履歴がまだないときは、以前の形の途中保存を1件として見せる
+        at, data = _work_state_legacy(sheets["legacy"])
+        if data:
+            entries.append(("legacy", at, data))
+    entries.sort(key=lambda e: str(e[1]), reverse=True)   # 保存日時は「2026/10/30 15:25:00」の形なので文字の順で並ぶ
+    return entries
+
+
+def work_state_title(data):
+    """途中保存の中身の名前（「2026年11月」、期間指定版なら「2026年12/1〜2027年1/5」）。"""
+    y, m = int(data.get("year", 0)), int(data.get("month", 0))
+    if "extra" in data:
+        return TouchokuPeriod(y, m, int(data.get("extra") or 0)).title()
+    return f"{y}年{m}月"
+
+
+def work_state_save(snapshot, sheets=None):
+    """途中保存を履歴に1件足す（古いものは WORK_HISTORY_KEEP 回分を残して消す）。"""
+    sheets = sheets or WORK_STATE_SHEETS
+    text = json.dumps(snapshot, ensure_ascii=False)
+    if len(text) > WORK_STATE_CHUNK * 20:
+        raise ValueError("保存する内容が大きすぎます（医師の人数や確定当直の行数を確認してください）。")
+    old_rows = _work_history_rows(sheets)
+    rows = [[r.get("保存ID", ""), r.get("保存日時", ""), r.get("年月", ""), r.get("番号", ""), r.get("内容", "")] for r in old_rows]
+    if not rows:
+        # 以前の形の途中保存があれば、履歴の1件目として残す
+        at, data = _work_state_legacy(sheets["legacy"])
+        if data:
+            old = json.dumps(data, ensure_ascii=False)
+            for k, i in enumerate(range(0, len(old), WORK_STATE_CHUNK), 1):
+                rows.append(["legacy", at, work_state_title(data), k, old[i:i + WORK_STATE_CHUNK]])
+    now = remote_now()
+    sid = hashlib.sha256(f"{now}{random.random()}".encode()).hexdigest()[:12]
+    # 長いときは複数の行（番号1, 2, …）に分けて保存する
+    for k, i in enumerate(range(0, max(len(text), 1), WORK_STATE_CHUNK), 1):
+        rows.append([sid, now, work_state_title(snapshot), k, text[i:i + WORK_STATE_CHUNK]])
+    # 新しいものから WORK_HISTORY_KEEP 回分だけ残す
+    order = sorted({(str(r[1]), str(r[0])) for r in rows}, reverse=True)
+    keep = {sid_ for _, sid_ in order[:WORK_HISTORY_KEEP]}
+    remote_rewrite(sheets["history"], [r for r in rows if str(r[0]) in keep])
+
+
+def work_state_info(sheets=None):
+    """いちばん新しい途中保存 (保存日時, 内容) を返す。なければ (None, None)。"""
+    entries = work_state_entries(sheets)
+    return (entries[0][1], entries[0][2]) if entries else (None, None)
+
+
+def work_state_for_carry(year, month, sheets=None):
+    """医師条件の引き継ぎに使う途中保存：先月の分があればその最新、なければいちばん新しいもの。"""
+    entries = [e for e in work_state_entries(sheets) if e[2].get("staff_csv")]
+    if not entries:
+        return None, None
+    prev = (year, month - 1) if month > 1 else (year - 1, 12)
+    for _, at, data in entries:
+        if (int(data.get("year", 0)), int(data.get("month", 0))) == prev:
+            return at, data
+    return entries[0][1], entries[0][2]
+
+
 def work_state_restore():
-    """保存した作業を画面に戻す（ボタンのコールバック。画面を作る前に実行される）。"""
-    saved_at, data = work_state_info()
+    """保存した作業を画面に戻す（ボタンのコールバック。画面を作る前に実行される）。一覧で選んだ回を読み込む。"""
+    entries = work_state_entries()
+    pick = st.session_state.get("work_restore_pick")
+    chosen = next((e for e in entries if e[0] == pick), entries[0] if entries else None)
+    saved_at, data = (chosen[1], chosen[2]) if chosen else (None, None)
     if not data:
         st.session_state["work_state_message"] = ("error", "保存された作業が見つかりませんでした。")
         return
@@ -2377,7 +2461,7 @@ def carry_over_staff(year, month):
     途中保存してある医師条件（回数・間隔・翌日PM duty・備考など）を、今の年月に引き継ぐ（ボタンのコールバック）。
     月ごとに変わる NG日・希望日・先生のコメントは空にする。
     """
-    saved_at, data = work_state_info()
+    saved_at, data = work_state_for_carry(year, month)
     if not data or not data.get("staff_csv"):
         st.session_state["carry_over_message"] = ("error", "引き継げる医師条件が見つかりませんでした。先に「💾 作業を途中保存する」で保存してください。")
         return
@@ -2499,10 +2583,13 @@ def work_save_floating():
             else st.expander(_restore_label, expanded=False)
         with box:
             if admin_logged_in("work_restore_pw"):
-                saved_at, saved = work_state_info()
-                if saved:
-                    st.write(f"保存日時：**{saved_at}**")
-                    st.write(f"{saved['year']}年{saved['month']}月の作業")
+                _entries = work_state_entries()
+                if _entries:
+                    _labels = {sid: f"{str(at)[:16]}　{work_state_title(d)}の作業" for sid, at, d in _entries}
+                    if st.session_state.get("work_restore_pick") not in _labels:
+                        st.session_state["work_restore_pick"] = _entries[0][0]
+                    st.selectbox(f"読み込む途中保存（新しい順・最大{WORK_HISTORY_KEEP}回分）", list(_labels),
+                                 format_func=lambda sid: _labels[sid], key="work_restore_pick")
                     st.button("この作業を読み込む", key="work_restore", type="primary", on_click=work_state_restore)
                     st.caption("年月・休日と別途決定の日・増員設定・確定当直・医師条件（NG日を含む）・取り込んだ先生のコメント・不足時の優先順位・アラートの基準が、"
                                "途中保存したときの状態に戻ります。今の画面の入力内容は置き換わります。")
@@ -4222,6 +4309,7 @@ with st.expander("📖 使い方（初めての方・毎月の流れ・結果の
 11. **途中保存**：最後に上の帯の「💾 作業を途中保存する」を押しておくと、翌月は「📋 先月の医師条件を引き継ぐ」で、この医師条件から始められます。
 
 途中保存には、年月・休日・別途決定の日・増員設定・確定当直・医師条件（NG日を含む）・取り込んだ先生のコメント・不足時の優先順位・アラートの基準が入ります。
+途中保存は、保存した回ごとに新しいものから20回分まで残ります（それより古いものは自動で消えます）。「📂 前回の作業の続きから始める」で、どの回から再開するかを選べます。
         """)
     with tab_ng:
         st.markdown("""
@@ -4778,7 +4866,7 @@ with staff_box_roster:
         # ボタンの名前：ログイン中は、途中保存してある月を出す（ふつうは先月）
         _co_name = "先月"
         if st.session_state.get("remote_admin_ok"):
-            _co_at, _co_data = work_state_info()
+            _co_at, _co_data = work_state_for_carry(year, month)
             if _co_data and _co_data.get("staff_csv"):
                 _co_ym = (int(_co_data.get("year", 0)), int(_co_data.get("month", 0)))
                 _co_prev = (year, month - 1) if month > 1 else (year - 1, 12)
@@ -4798,7 +4886,7 @@ with staff_box_roster:
             _co_box = st.popover(_co_label) if hasattr(st, "popover") else st.expander(_co_label, expanded=False)
         with _co_box:
             if admin_logged_in("carry_over_pw"):
-                _co_at, _co_data = work_state_info()
+                _co_at, _co_data = work_state_for_carry(year, month)
                 if _co_data and _co_data.get("staff_csv"):
                     st.write(f"途中保存：**{_co_at}**（{_co_data.get('year')}年{_co_data.get('month')}月の作業）")
                     st.caption(f"この医師条件（先生の名前・回数・勤務間隔・翌日PM duty・希望優先度・備考など）を、{year}年{month}月用に引き継ぎます。"
