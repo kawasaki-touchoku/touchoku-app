@@ -1189,6 +1189,7 @@ with staff_box_roster:
     imp_a, imp_or, imp_b = st.columns([10, 1.4, 10])   # 方法1（引き継ぎ）・または・方法2（CSV）
     imp_or.markdown("<div class='imp-or'><span>または</span></div>", unsafe_allow_html=True)
     imp_tmpl = st.container(key="imp_tmpl")   # 「初めての場合：ひな形をダウンロード」（中身はひな形を作ったあとで入れる）
+    imp_ask = st.container()   # CSVにNG日・希望日が入っているときの「使う／空にする」と、読み込んだ結果（中身はCSVを読んだあとで入れる）
     st.markdown("<div class='imp-note'>どちらで取り込んでも、下の「今の名簿」と「読み込んだ医師条件」の表がその内容に置き換わります。</div>",
                 unsafe_allow_html=True)
     # --- 方法1：途中保存から先月の医師条件を引き継ぐ（管理用パスワードが必要） ---
@@ -1314,7 +1315,7 @@ with staff_box_roster:
     with imp_b:
         uploaded_file = csv_upload_card(
             "staff", "方法2", "CSVファイルをアップロード",
-            "手元のCSV（以前ダウンロードした医師条件、またはひな形に入力したもの）を読み込みます。",
+            "手元のCSV（以前ダウンロードした医師条件、またはひな形に入力したもの）を読み込みます。CSVにNG日・希望日が入っているときは、使うかどうかを選べます。",
             f"staff_csv_{st.session_state.get('uploader_gen', 0)}_{st.session_state.get('staff_uploader_gen', 0)}",
             None, "", "")
     with imp_tmpl:
@@ -1337,6 +1338,7 @@ with staff_box_cond:
         except Exception as e:
             st.error(f"医師条件CSVを読み込めませんでした。詳細: {e}")
             st.stop()
+        base_df = csv_ng_wish_choice(base_df, uploaded_file, imp_ask, year, month)
     elif restored_state and restored_state.get("staff_csv"):
         base_df = parse_staff_csv(restored_state["staff_csv"].encode("utf-8"))
     else:
