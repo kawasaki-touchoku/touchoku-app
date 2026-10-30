@@ -2819,10 +2819,15 @@ CSV_UPLOAD_CSS = """<style>
 .st-key-csvcard_staff [data-testid="stElementContainer"]:has([data-testid="stFileUploader"]),
 .st-key-csvcard_staff .element-container:has([data-testid="stFileUploader"]){margin-top:auto}
 /* 「初めての場合：ひな形をダウンロード」は2つの枠の下に1行で出す */
-.st-key-imp_tmpl{background:#f7f9fc;border:1px solid #e1e6ee;border-radius:10px;padding:6px 12px;margin-top:6px;
+.st-key-imp_tmpl{background:#f7f9fc;border:1px solid #e1e6ee;border-radius:10px;padding:8px 14px;margin-top:6px;
   flex-direction:row !important;flex-wrap:wrap;align-items:center;gap:.3rem .6rem}
-.st-key-imp_tmpl > div{width:auto !important;flex:0 1 auto}
-.st-key-imp_tmpl p{margin:0;font-size:.9rem}
+.st-key-imp_tmpl > div{width:auto !important;flex:0 1 auto;align-self:center}
+/* 文字欄の下に付く負の余白を消して、文字とボタンの高さ（上下の真ん中）をそろえる */
+.st-key-imp_tmpl [data-testid="stMarkdown"], .st-key-imp_tmpl [data-testid="stMarkdownContainer"],
+.st-key-imp_tmpl [data-testid="stMarkdownContainer"] > *{margin:0 !important;padding:0 !important}
+.st-key-imp_tmpl p{margin:0 !important;font-size:.9rem;line-height:1.4}
+.st-key-imp_tmpl [data-testid="stDownloadButton"] button{min-height:0 !important;padding:.25rem .8rem !important;line-height:1.4}
+.st-key-imp_tmpl [data-testid="stDownloadButton"] button p{font-size:.88rem}
 .st-key-csv_ng_ask{margin-top:14px;border:3px solid #d98a00;background:#fff4dc;border-radius:14px;padding:14px 18px 18px;
   box-shadow:0 3px 10px rgba(217,138,0,.18);gap:.6rem}
 .csvng-h{display:flex;align-items:center;gap:10px;font-size:1.12rem;font-weight:800;color:#5a3d00;line-height:1.5}
