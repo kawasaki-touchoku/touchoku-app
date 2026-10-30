@@ -2773,6 +2773,9 @@ def staff_add_remove_ui(staff_df, year, month, is_template=False):
 # CSVのアップロード欄（ドラッグ＆ドロップできることが分かる見た目）。アプリ内のCSV欄はすべてこれを使う
 # ==========================================
 CSV_UPLOAD_CSS = """<style>
+/* 見た目の指定だけの欄（中身が<style>だけ）は場所を取らないようにする（設定欄の上に大きな空きができないように） */
+[data-testid="stElementContainer"]:has(> [data-testid="stMarkdown"] [data-testid="stMarkdownContainer"] > style:only-child),
+.element-container:has(> [data-testid="stMarkdown"] [data-testid="stMarkdownContainer"] > style:only-child){display:none}
 .csv-card-head{display:flex;align-items:center;gap:8px;font-weight:800;font-size:1.02rem;margin:0 0 4px}
 .csv-card-head .lab{display:inline-block;color:#fff;border-radius:6px;padding:1px 9px;font-size:.8rem}
 .csv-card-head.green{color:#1f6b45}.csv-card-head.green .lab{background:#2e8a5b}
@@ -2920,6 +2923,71 @@ def csv_ng_wish_choice(df, uploaded_file, box, year, month):
                         "・NG日・希望日は空にしました（② のカレンダーで入れてください）　<a href='#sec-ng'>→ ② NG日を入れる</a></div>",
                         unsafe_allow_html=True)
     return df
+
+
+# ==========================================
+# 作る月を選ぶ（大きな「2026年12月」＋前の月／次の月＋今月・来月・再来月のボタン）
+# ==========================================
+YM_PICK_CSS = """<style>
+.st-key-ym_pick{flex-direction:row !important;flex-wrap:wrap;align-items:center;gap:.6rem 1rem !important;
+  border:2px solid #b9cfee;background:#f3f8fe;border-radius:12px;padding:10px 16px}
+.st-key-ym_pick > div{width:auto !important;flex:0 0 auto}
+.st-key-ym_pick > div:has(.st-key-ym_quick), .st-key-ym_pick > .st-key-ym_quick{margin-left:auto}
+.st-key-ym_quick{flex-direction:row !important;flex-wrap:wrap;gap:.4rem !important}
+.st-key-ym_quick > div{width:auto !important}
+.ym-big{font-size:2rem;font-weight:800;color:#1d4e89;min-width:12rem;text-align:center;line-height:1.2;white-space:nowrap}
+.ym-big small{font-size:1rem;margin:0 .25rem 0 .1rem}
+.st-key-ym_prev button,.st-key-ym_next button{border:1.5px solid #2f6db5 !important;color:#1d4e89 !important;background:#fff !important;font-weight:700}
+.st-key-ym_quick button{border-radius:999px !important;min-height:2.1rem;padding:0 .9rem}
+.st-key-ym_quick button[kind="primary"],.st-key-ym_quick button[data-testid="stBaseButton-primary"]{background:#2f6db5 !important;border-color:#2f6db5 !important;color:#fff !important}
+.ym-sum{margin-top:6px;background:#f7f9fc;border:1px solid #e1e6ee;border-radius:10px;padding:8px 12px;font-weight:700;color:#24405f}
+.ym-sum span{font-weight:400;font-size:.82rem;color:#8a94a6;margin-left:.6rem}
+.ym-per{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;border:1.5px dashed #b8a1d9;background:#faf7fe;border-radius:10px;
+  padding:8px 14px;color:#4b2f7a}
+.ym-per .ps{font-size:.8rem;color:#7a6a96}
+.ym-per .pbtn{margin-left:auto;border:1.5px solid #6d4bb0;color:#4b2f7a !important;background:#fff;border-radius:8px;padding:5px 12px;font-weight:700;
+  font-size:.88rem;text-decoration:none !important;white-space:nowrap}
+.ym-per .pbtn:hover{background:#f1eafb}
+@media (max-width:640px){.ym-big{font-size:1.6rem;min-width:0}.st-key-ym_pick > div:has(.st-key-ym_quick){margin-left:0}}
+</style>"""
+
+
+def _ym_set(y, m):
+    st.session_state["sel_year"], st.session_state["sel_month"] = int(y), int(m)
+
+
+def _ym_shift(delta):
+    t = int(st.session_state["sel_year"]) * 12 + int(st.session_state["sel_month"]) - 1 + delta
+    _ym_set(t // 12, t % 12 + 1)
+
+
+def month_picker(today):
+    """作る年月を選ぶ。選んだ年月は session_state の sel_year / sel_month に入る（途中保存の読み込みもここを書き換える）。"""
+    st.markdown(YM_PICK_CSS, unsafe_allow_html=True)
+    y, m = int(st.session_state["sel_year"]), int(st.session_state["sel_month"])
+    with st.container(key="ym_pick"):
+        st.button("◀ 前の月", key="ym_prev", on_click=_ym_shift, args=(-1,))
+        st.markdown(f"<div class='ym-big'>{y}<small>年</small>{m}<small>月</small></div>", unsafe_allow_html=True)
+        st.button("次の月 ▶", key="ym_next", on_click=_ym_shift, args=(1,))
+        with st.container(key="ym_quick"):
+            for i, name in enumerate(("今月", "来月", "再来月")):
+                t = today.year * 12 + today.month - 1 + i
+                qy, qm = t // 12, t % 12 + 1
+                label = f"{name}（{qm}月）" if qy == today.year else f"{name}（{qy}年{qm}月）"
+                st.button(label, key=f"ym_q{i}", type="primary" if (qy, qm) == (y, m) else "secondary",
+                          on_click=_ym_set, args=(qy, qm))
+    return y, m
+
+
+def ym_summary(year, month):
+    """選んだ月の期間・日数・土日祝の数（選び間違いに気づけるように）。"""
+    W = "月火水木金土日"
+    n = calendar.monthrange(year, month)[1]
+    first, last = datetime.date(year, month, 1), datetime.date(year, month, n)
+    hol = sum(1 for d in range(1, n + 1)
+              if datetime.date(year, month, d).weekday() >= 5 or jpholiday.is_holiday(datetime.date(year, month, d)))
+    st.markdown(f"<div class='ym-sum'>🗓 {year}/{month}/1（{W[first.weekday()]}）〜 {month}/{n}（{W[last.weekday()]}）・{n}日間・土日祝 {hol}日"
+                "<span>（土日祝は自動で休日になります）</span></div>", unsafe_allow_html=True)
 
 
 def admin_logged_in(widget_key):
@@ -4713,7 +4781,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 
 **年末年始など、月をまたいで作るとき**
 
-年月の設定の下にある「📆 期間指定版」から、今月1日〜翌月の指定日までを通しで作る別のページに移れます。先生方の専用URLは同じものを使えます。
+年月を選ぶ欄の下にある「期間指定版を開く →」から、今月1日〜翌月の指定日までを通しで作る別のページに移れます。先生方の専用URLは同じものを使えます。
 
 **管理用パスワード**
 
@@ -4729,7 +4797,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
         st.markdown("""
 **毎月の作業は、画面の上から順に進めれば完了します。**
 
-1. **年月を選ぶ**：いちばん上で、作る年月を選びます。
+1. **年月を選ぶ**：いちばん上で、作る年月を選びます。ふつうは「来月」のボタンを押すだけです。「◀ 前の月」「次の月 ▶」でも動かせます。
    同じ月の作業の続きなら、上の帯の「📂 前回の作業の続きから始める」で、NG日なども含めてそのまま戻せます（この場合、2〜7は確認だけで済みます）。
 2. **休日を設定**：カレンダーで、次の2つを必要な日だけチェックします。土日祝は自動で休日になります。
     - **休日にする**：病院独自の休みなど、平日でも土日祝と同じ扱いにする日。日直の枠ができます。
@@ -4919,16 +4987,6 @@ def section_banner(icon, title, sub="", tag="", first=False, anchor=""):
 # ==========================================
 st.markdown(CSV_UPLOAD_CSS, unsafe_allow_html=True)   # CSVのアップロード欄・①の取り込み欄の見た目（画面全体で1回だけ）
 section_banner("📅", "年月・休日・必要人数の設定", "作る月・休日と別途決定の日・1枠の人数を決めます", "必須", first=True)
-st.info("作成する年月を選んでください。土日祝日は自動で休日扱いになります。下のカレンダーで、平日でも休日扱いにする日は「休日にする」、別の方法で当番を決める日は「別途決定」にチェックします。")
-# 年末年始など、翌月にまたがって通しで作りたいときの入口（同じアプリの中で ?mode=period を開く）
-try:
-    _period_exists = (pathlib.Path(__file__).resolve().parent / "period_page.py").exists()
-except Exception:
-    _period_exists = False
-if _period_exists:
-    st.markdown("<a href='./?mode=period' target='_self' style='font-weight:700'>📆 年末年始など、翌月の数日まで含めて通しで作る場合はこちら（期間指定版）</a>",
-                unsafe_allow_html=True)
-
 today = datetime.date.today()
 if today.month == 12:
     default_year = today.year + 1
@@ -5006,14 +5064,24 @@ if "sel_year" not in st.session_state:
     st.session_state["sel_year"] = default_year
 if "sel_month" not in st.session_state:
     st.session_state["sel_month"] = default_month
-col_y, col_m = st.columns(2)
-year = int(col_y.number_input("年", min_value=2000, step=1, key="sel_year"))
-month = int(col_m.number_input("月", min_value=1, max_value=12, step=1, key="sel_month"))
+step_header(1, "作る月を選ぶ")
+year, month = month_picker(today)
+ym_summary(year, month)
+# 年末年始など、翌月にまたがって通しで作りたいときの入口（同じアプリの中で ?mode=period を開く）
+try:
+    _period_exists = (pathlib.Path(__file__).resolve().parent / "period_page.py").exists()
+except Exception:
+    _period_exists = False
+if _period_exists:
+    st.markdown("<div class='ym-per'><div><b>📆 年末年始など、翌月の数日まで通しで作るとき</b>"
+                "<div class='ps'>今月1日〜翌月の指定日を、1つの当直案として作ります</div></div>"
+                "<a class='pbtn' href='./?mode=period' target='_self'>期間指定版を開く →</a></div>", unsafe_allow_html=True)
+# （期間指定版への入口ここまで）
 restored_state = st.session_state.get("restored_state")
 
 st.divider()
 
-st.subheader(f"📅 休日と別途決定の日の設定 - {month}月")
+step_header(2, f"休日と別途決定の日の設定（{month}月）", "土日祝は自動で休日です。下のカレンダーで、平日でも休日にする日・別途決定の日にチェックします")
 st.caption("**休日にする**：病院独自の休みなど、平日でも土日祝と同じ扱いにする日です。日直の枠ができ、日直・宿直とも休日回数に数えます。")
 st.caption("**別途決定**：年末年始など、別の方法で当番を決める日です。このアプリでは当直を決めず、先生の専用URLの画面でも灰色になってNGを入力できません。確定当直に入れた分だけは当直案に表示されます。")
 
