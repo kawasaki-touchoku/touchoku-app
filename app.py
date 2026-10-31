@@ -2954,6 +2954,16 @@ YM_PICK_CSS = """<style>
 .st-key-ym_pick > div{align-self:center}
 .st-key-ym_pick [data-testid="stMarkdown"], .st-key-ym_pick [data-testid="stMarkdownContainer"],
 .st-key-ym_pick [data-testid="stMarkdownContainer"] > *{margin:0 !important;padding:0 !important}
+.st-key-ym_inputs{flex-direction:row !important;align-items:center;gap:.35rem !important}
+.st-key-ym_inputs > div{width:auto !important;flex:0 0 auto;align-self:center}
+.st-key-ym_inputs [data-testid="stMarkdown"], .st-key-ym_inputs [data-testid="stMarkdownContainer"],
+.st-key-ym_inputs [data-testid="stMarkdownContainer"] > *{margin:0 !important;padding:0 !important}
+.st-key-ym_year_in{width:8.2rem !important}.st-key-ym_month_in{width:5.6rem !important}
+.st-key-ym_year_in [data-baseweb="select"] > div, .st-key-ym_month_in [data-baseweb="select"] > div{
+  background:#fff !important;border:1.5px solid #9fb6d6 !important;border-radius:8px !important;min-height:3rem}
+.st-key-ym_year_in [data-baseweb="select"] *, .st-key-ym_month_in [data-baseweb="select"] *{font-size:1.65rem;font-weight:800;color:#1d4e89}
+.st-key-ym_year_in [data-baseweb="select"] svg, .st-key-ym_month_in [data-baseweb="select"] svg{width:1.3rem;height:1.3rem;color:#1d4e89}
+.ym-unit{font-size:1.05rem;font-weight:800;color:#1d4e89}
 .ym-big{font-size:2rem;font-weight:800;color:#1d4e89;min-width:12rem;text-align:center;line-height:1;white-space:nowrap;margin:0 !important}
 .ym-big small{font-size:1rem;margin:0 .25rem 0 .1rem}
 .st-key-ym_prev button,.st-key-ym_next button{border:1.5px solid #2f6db5 !important;color:#1d4e89 !important;background:#fff !important;font-weight:700}
@@ -2975,6 +2985,12 @@ def _ym_set(y, m):
     st.session_state["sel_year"], st.session_state["sel_month"] = int(y), int(m)
 
 
+def _ym_from_inputs():
+    """年・月の入力欄で選んだとき。"""
+    _ym_set(st.session_state.get("ym_year_in", st.session_state["sel_year"]),
+            st.session_state.get("ym_month_in", st.session_state["sel_month"]))
+
+
 def _ym_shift(delta):
     t = int(st.session_state["sel_year"]) * 12 + int(st.session_state["sel_month"]) - 1 + delta
     _ym_set(t // 12, t % 12 + 1)
@@ -2986,7 +3002,17 @@ def month_picker(today):
     y, m = int(st.session_state["sel_year"]), int(st.session_state["sel_month"])
     with st.container(key="ym_pick"):
         st.button("◀ 前の月", key="ym_prev", on_click=_ym_shift, args=(-1,))
-        st.markdown(f"<div class='ym-big'>{y}<small>年</small>{m}<small>月</small></div>", unsafe_allow_html=True)
+        # 年と月は、大きな入力欄で直接選べる（年は数字を打ち込んで絞り込める）
+        if st.session_state.get("ym_year_in") != y:
+            st.session_state["ym_year_in"] = y
+        if st.session_state.get("ym_month_in") != m:
+            st.session_state["ym_month_in"] = m
+        _years = sorted(set(range(today.year - 3, today.year + 6)) | {y})
+        with st.container(key="ym_inputs"):
+            st.selectbox("年", _years, key="ym_year_in", label_visibility="collapsed", on_change=_ym_from_inputs)
+            st.markdown("<span class='ym-unit'>年</span>", unsafe_allow_html=True)
+            st.selectbox("月", list(range(1, 13)), key="ym_month_in", label_visibility="collapsed", on_change=_ym_from_inputs)
+            st.markdown("<span class='ym-unit'>月</span>", unsafe_allow_html=True)
         st.button("次の月 ▶", key="ym_next", on_click=_ym_shift, args=(1,))
         with st.container(key="ym_quick"):
             for i, name in enumerate(("今月", "来月", "再来月")):
