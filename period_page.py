@@ -903,6 +903,7 @@ st.divider()
 step_header(2, f"休日と別途決定の日の設定（{P.title()}）", "土日祝は自動で休日です。下のカレンダーで、平日でも休日にする日・別途決定の日にチェックします")
 st.caption("**休日にする**：病院独自の休みなど、平日でも土日祝と同じ扱いにする日です。日直の枠ができ、日直・宿直とも休日回数に数えます。")
 st.caption("**別途決定**：年末年始など、別の方法で当番を決める日です。このアプリでは当直を決めず、先生の専用URLの画面でも灰色になってNGを入力できません。確定当直に入れた分だけは当直案に表示されます。")
+holiday_total_placeholder = st.empty()   # 🏥 埋める必要がある枠（カレンダーの上に出す。数は休日・増員の設定を読んだあとで入れる）
 
 cal_matrix = calendar.monthcalendar(year, month)
 custom_holidays = []
@@ -1023,7 +1024,6 @@ else:
     st.caption(f"期間の翌日 {next_month_first_label} は平日です。病院が休みの場合だけチェックしてください。"
                f"チェックすると、最終日 {month_last_label} の宿直は「翌日PM duty」の制限を受けません。")
 
-holiday_total_placeholder = st.empty()
 
 st.divider()
 
