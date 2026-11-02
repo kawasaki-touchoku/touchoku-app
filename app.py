@@ -930,17 +930,25 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
                 tr.append(f'<td class="c{info["day"]}"></td>')
         tr.append(f'<td class="sum" colspan="{len(MATRIX_COUNT_COLUMNS)}" style="color:#c0392b">{slot_total}枠</td></tr>')
         body.append(''.join(tr))
-    # カーソルを合わせたセルの「行」と「列」を薄い黄色で示す（縦横に長い表での見間違いを防ぐ）
-    # 色は置き換えずに、半透明の黄色を上に重ねる（薄紫・休日の薄い赤・斜線などの元の色が、黄色がかって見えたまま残るように）
-    hl = "inset 0 0 0 999px rgba(255,214,0,.22)"
-    hl_img = "linear-gradient(rgba(255,214,0,.22),rgba(255,214,0,.22))"
+    # カーソルを合わせたセルの「行」と「列」を、オレンジの線で囲んで示す（縦横に長い表での見間違いを防ぐ）
+    # マスの色は変えない（薄紫・休日の薄い赤・斜線などがそのまま見える）。線はマスの中身より手前に、::before で描く
+    C = "#e8890c"
+    line = f"content:'';position:absolute;pointer-events:none;"
     hover_css = ("<style>"
-                 f".dm tbody tr:hover td:not(.sum){{box-shadow:{hl} !important}}"
-                 f".dm tbody tr:hover td.sum{{background-image:{hl_img} !important}}"
-                 f".dm tbody tr:hover td.nm{{background-color:#ffe08a !important;box-shadow:none !important}}"
-                 + "".join(f".dm:has(.c{info['day']}:hover) td.c{info['day']}{{box-shadow:{hl} !important}}"
-                           f".dm:has(.c{info['day']}:hover) th.c{info['day']}{{background-color:#ffe08a !important}}" for info in days)
-                 + ".dm tbody td:hover{outline:2px solid #e0a800;outline-offset:-2px}"
+                 # 行：上下の線（左端は名前のマス、右端は最後のマス）
+                 ".dm tbody tr:hover td:not(.nm){position:relative}"
+                 f".dm tbody tr:hover td:not(.nm)::before{{{line}left:0;right:0;top:-1px;bottom:-1px;border-top:2px solid {C};border-bottom:2px solid {C}}}"
+                 f".dm tbody tr:hover td:last-child::before{{border-right:2px solid {C}}}"
+                 f".dm tbody tr:hover td.nm{{background-color:#ffe08a !important;box-shadow:inset 2px 0 0 {C},inset 0 2px 0 {C},inset 0 -2px 0 {C}}}"
+                 # 列：左右の線（上端は日付の見出し、下端は最後の行）
+                 + "".join(
+                     f".dm:has(.c{d}:hover) td.c{d}{{position:relative}}"
+                     f".dm:has(.c{d}:hover) td.c{d}::before{{{line}top:0;bottom:0;left:-1px;right:-1px;border-left:2px solid {C};border-right:2px solid {C}}}"
+                     f".dm:has(.c{d}:hover) tbody tr:last-child td.c{d}::before{{border-bottom:2px solid {C}}}"
+                     f".dm:has(.c{d}:hover) th.c{d}{{background-color:#ffe08a !important;box-shadow:inset 2px 0 0 {C},inset -2px 0 0 {C},inset 0 2px 0 {C}}}"
+                     for d in (info['day'] for info in days))
+                 # カーソルのあるマス：4辺を太めに囲む
+                 + f".dm tbody td:hover{{outline:3px solid {C};outline-offset:-2px}}"
                  "</style>")
     return css + hover_css + ''.join(legend) + f'<div class="dm-wrap"><table class="dm"><thead>{"".join(head)}</thead><tbody>{"".join(body)}</tbody></table></div>'
 
@@ -4920,7 +4928,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 - **右端の回数**：病棟・外来／宿直・日直／平日・休日／合計。回数が多い先生は**赤い枠**で表示されます。該当する先生は、作成ボタンの下の「計算状況・条件の注意事項と対処方法」にも一覧で出ます。基準は表のすぐ上の「⚠ アラートの基準」で変えられます（初期設定は宿直4回以上・休日3回以上。0にした項目はアラートなし）。
 - **メモ欄**：💬は先生からのコメント（取り込んだ先生だけ）、📝は医師条件の備考です。カーソルを合わせると全文が出ます。全員分は「💬 先生方のコメント・備考の一覧」でまとめて見られます。
 - 行の見間違いを防ぐため、先生の行は1行おきに薄いグレーになっています。
-- マスにカーソルを合わせると、その先生の行と、その日の列が黄色く色付きます。
+- マスにカーソルを合わせると、その先生の行と、その日の列がオレンジの線で囲まれます（マスの色はそのまま見えます）。
 
 **📥 Excelでダウンロード（緑のボタン）**
 
@@ -6125,7 +6133,7 @@ if len(staff_df) > 0:
         st.markdown("<div id='sec-result'></div>", unsafe_allow_html=True)
         st.subheader("🗓️ 医師別の当直一覧")
         st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。休日のマスは上半分が日直、下半分が宿直です。"
-                   "希望日が通った当直は茶色の太い枠で囲み、回数が多い先生は右端の回数を赤い枠で示します。マスにカーソルを合わせると、その先生の行とその日の列が黄色く色付きます。")
+                   "希望日が通った当直は茶色の太い枠で囲み、回数が多い先生は右端の回数を赤い枠で示します。マスにカーソルを合わせると、その先生の行とその日の列がオレンジの線で囲まれます。")
         # 先月末・来月初めの確定当直から「間隔下限」以内で、入れない日（今月の確定当直の前後は含めない）
         gap_blocked = {}
         for _, _r in staff_df.iterrows():
