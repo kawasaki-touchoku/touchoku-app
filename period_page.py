@@ -1620,7 +1620,7 @@ with staff_box_ng:
                         hol = day_is_holiday[d]
                         options = ["OK", "全NG", "日NG", "宿NG"] if hol else ["OK", "宿NG"]
                         component_days.append({
-                            "day": d, "weekday": WEEKDAYS_JA[dt.weekday()],
+                            "day": (P.label(d) if (dt.month != P.month or d == 1) else dt.day), "weekday": WEEKDAYS_JA[dt.weekday()],
                             "options": options, "value": shown[d],
                             "warning": pm_duty_restricted(dt, hard_days, year, month, custom_holidays, next_month_special_holiday),
                             "kind": "saturday" if dt.weekday() == 5 and not jpholiday.is_holiday(dt) and d not in custom_holidays else ("holiday" if hol else "weekday"),
