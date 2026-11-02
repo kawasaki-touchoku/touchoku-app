@@ -638,7 +638,7 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
             if m:
                 shortage.append({'slot': s, 'count': int(m.group(1))})
         days.append({'day': d, 'weekday': WEEKDAYS_JA[dt.weekday()], 'holiday': hol, 'kind': kind, 'shortage': shortage,
-                     'ng_count': 0})   # その日にNG（翌日PM dutyで宿直を外す先生を含む）の先生の数
+                     'ng_count': 0, 'ng_day': 0, 'ng_night': 0})   # その日にNG（翌日PM dutyで宿直を外す先生を含む）の先生の数
 
     # 備考は「備考」で始まる列から読む（列名の書き方の違いに対応）
     note_columns = [c for c in staff_df.columns if str(c).strip().startswith("備考")]
@@ -655,10 +655,15 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
             r = df_result.iloc[d - 1]
             # 日ごとのNG人数：その日にNG（平日は宿NG・全NG、休日は日NGも）か、翌日PM dutyで宿直を外す先生を数える
             # 前後の月の確定当直との勤務間隔で入れない日（薄紫のマス）も、実質NGとして数える
-            if effective_ng(ng.get(d, 'OK'), info['holiday']) != 'OK' or pm_duty_restricted(
-                    datetime.date(year, month, d), pm_days, year, month, custom_holidays, next_month_special_holiday) \
-                    or d in (gap_blocked or {}).get(name, ()):
+            _kind = effective_ng(ng.get(d, 'OK'), info['holiday'])
+            _pmr = pm_duty_restricted(datetime.date(year, month, d), pm_days, year, month, custom_holidays, next_month_special_holiday)
+            _gap = d in (gap_blocked or {}).get(name, ())
+            if _kind != 'OK' or _pmr or _gap:
                 info['ng_count'] += 1
+            # 休日は、日直NGと宿直NGを分けても数える（日直NG＝全NG・日NG、宿直NG＝全NG・宿NG・翌日PM duty）
+            if info['holiday']:
+                info['ng_day'] += int(_kind in ('全NG', '日NG') or _gap)
+                info['ng_night'] += int(_kind in ('全NG', '宿NG') or _pmr or _gap)
             assigned = [s for s in RESULT_COLUMNS[2:] if name in [x.strip() for x in re.split(r'[、,]', str(r[s]))]]
             if assigned:
                 if info['holiday']:
@@ -822,6 +827,10 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
 .dm td.half{position:relative;min-width:38px}
 .dm td.half span{position:absolute;left:0;right:0;height:50%;display:flex;align-items:center;justify-content:center;color:#c0392b;font-weight:700;font-size:13px;line-height:1}
 .dm td.half span.t{top:0} .dm td.half span.b{bottom:0}
+.dm td.ngh{position:relative;min-width:38px;height:34px;color:#7a3a00;font-weight:700}
+.dm td.ngh span{position:absolute;left:0;right:0;height:50%;display:flex;align-items:center;justify-content:center;font-size:11px;line-height:1}
+.dm td.ngh span.t{top:0}.dm td.ngh span.b{bottom:0}
+.dm td.ngh::after{content:"";position:absolute;left:5px;right:5px;top:50%;border-top:1px dashed #d9a066}
 .dm td.half::after{content:"";position:absolute;left:5px;right:5px;top:50%;border-top:1px dashed #dcb8b8}
 /* 行の境目を見やすくする：先生の行を1行おきに薄いグレーにする（休日の色・斜線などの上に薄く重ねる） */
 /* 右端の回数の列（色をマスごとに指定している）まで同じ縞にするため !important を付ける */
@@ -865,7 +874,7 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
                   '下半分だけ斜線：休日の翌日PM dutyの日。宿直は外し、日直には入れる（×の意味は休日のマスと同じ）</span>')
     legend.append('<span><i>💬📝</i>メモ欄：先生からのコメント・備考（カーソルを合わせると全文）</span>')
     legend.append('<span><i style="color:#c0392b;border-color:#c0392b">⚠️ 未決定</i>赤線の下：当直が決まっていない枠</span>')
-    legend.append('<span><i style="background:#ffd2a1;color:#7a3a00">3</i>NG人数の行：その日にNGの先生の数（翌日PM dutyで宿直を外す先生・薄紫のマスの先生を含む）</span>')
+    legend.append('<span><i style="background:#ffd2a1;color:#7a3a00">3</i>NG人数の行：その日にNGの先生の数（翌日PM dutyで宿直を外す先生・薄紫のマスの先生を含む）。休日は上＝日直NG・下＝宿直NGの人数</span>')
     if count_alert_text(alerts):
         legend.append('<span><i style="color:#c0392b;background:#ffd8d8;border-color:#e03131">⚠</i>右端の赤いマス：' + count_alert_text(alerts) + '</span>')
     legend.append('</div>')
@@ -881,10 +890,17 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
     # 日ごとのNG人数（翌日PM dutyを含む）。多い日ほど濃い色にする
     n_doctors = max(len(rows), 1)
     ng_tr = ['<tr class="ngcount"><td class="nm" colspan="3" style="background:#ffe2c2;color:#7a3a00;font-weight:800">NG人数（翌日PM duty含む）</td>']
+    def ng_bg(cnt):
+        ratio = cnt / n_doctors
+        return '#ffffff' if ratio == 0 else ('#ffefdc' if ratio < 0.25 else ('#ffd2a1' if ratio < 0.5 else '#ffad5c'))
     for info in days:
-        ratio = info.get('ng_count', 0) / n_doctors
-        bg = '#ffffff' if ratio == 0 else ('#ffefdc' if ratio < 0.25 else ('#ffd2a1' if ratio < 0.5 else '#ffad5c'))
-        ng_tr.append(f'<td class="c{info["day"]}" style="background:{bg};text-align:center;font-weight:700;color:#7a3a00">{info.get("ng_count", 0)}</td>')
+        if info['holiday']:
+            # 休日：上半分＝日直NGの人数、下半分＝宿直NGの人数（当直案の休日のマスと同じ並び）
+            top, bot = info.get('ng_day', 0), info.get('ng_night', 0)
+            ng_tr.append(f'<td class="c{info["day"]} ngh" style="background:linear-gradient({ng_bg(top)} 0 50%,{ng_bg(bot)} 50% 100%)" '
+                         f'title="日直NG {top}名・宿直NG {bot}名"><span class="t">{top}</span><span class="b">{bot}</span></td>')
+        else:
+            ng_tr.append(f'<td class="c{info["day"]}" style="background:{ng_bg(info.get("ng_count", 0))};text-align:center;font-weight:700;color:#7a3a00">{info.get("ng_count", 0)}</td>')
     ng_tr.append(f'<td class="sum" colspan="{len(MATRIX_COUNT_COLUMNS)}" style="font-size:11px;background:#ffe2c2;color:#7a3a00;font-weight:800">／{len(rows)}名中</td></tr>')
     body.append(''.join(ng_tr))
     for idx, row in enumerate(rows):
@@ -1066,16 +1082,23 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
     n_doctors = max(len(rows), 1)
     for i, info in enumerate(days):
         cnt = info.get('ng_count', 0)
-        c = ws.cell(row=ng_row, column=first_day_col + i, value=cnt)
+        if info['holiday']:
+            # 休日は「日直NG／宿直NG」の人数を2段で書く（色は多いほうに合わせる）
+            c = ws.cell(row=ng_row, column=first_day_col + i, value=f"{info.get('ng_day', 0)}\n{info.get('ng_night', 0)}")
+            cnt = max(info.get('ng_day', 0), info.get('ng_night', 0))
+        else:
+            c = ws.cell(row=ng_row, column=first_day_col + i, value=cnt)
         ratio = cnt / n_doctors
         c.fill = fill('#FFFFFF' if ratio == 0 else ('#FFEFDC' if ratio < 0.25 else ('#FFD2A1' if ratio < 0.5 else '#FFAD5C')))
-        c.font = Font(bold=True, color='7A3A00'); c.alignment = center; c.border = border
+        c.font = Font(bold=True, color='7A3A00', **({'size': 8} if info['holiday'] else {}))
+        c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True) if info['holiday'] else center
+        c.border = border
     for col in range(1, first_day_col):
         ws.cell(row=ng_row, column=col).border = border
     ws.cell(row=ng_row, column=sum_col, value=f"／{len(rows)}名中").font = Font(bold=True, size=9, color='7A3A00')
     for j in range(n_counts):
         ws.cell(row=ng_row, column=sum_col + j).fill = fill('#FFE2C2')
-    ws.row_dimensions[ng_row].height = 20
+    ws.row_dimensions[ng_row].height = 26 if any(info['holiday'] for info in days) else 20
 
     for r_idx, row in enumerate(rows, header_row + 2):
         ws.cell(row=r_idx, column=1, value=row['name']).font = Font(bold=True)
@@ -1247,7 +1270,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
     s5.value = '未決定'; s5.font = Font(bold=True, size=8, color='C0392B')
     s6 = legend_line(7, 'メモ：💬＝先生からのコメント、📝＝備考（セルにカーソルを乗せると全文。「メモ全文」シートにも一覧）')
     s6.value = '💬📝'; s6.border = Border()
-    s8 = legend_line(8, 'NG人数の行（見出しのすぐ下）：その日にNGの先生の数（翌日PM dutyで宿直を外す先生・薄紫のマスの先生を含む）')
+    s8 = legend_line(8, 'NG人数の行（見出しのすぐ下）：その日にNGの先生の数（翌日PM dutyで宿直を外す先生・薄紫のマスの先生を含む）。休日は「日直NG／宿直NG」の人数')
     s8.value = 3; s8.fill = fill('#FFD2A1'); s8.font = Font(bold=True, color='7A3A00')
     legend_line(10, '薄紫：前後の月（先月末・来月初めなど）の確定当直との勤務間隔のため、入れない日').fill = fill('#E2DAF2')
     legend_line(3, '下半分だけ黄色：休日の翌日PM dutyの日。宿直は外し、日直には入れる（×の意味は休日のマスと同じ）').fill = PM_HALF_FILL
@@ -4710,7 +4733,7 @@ def period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month
             if m:
                 shortage.append({'slot': s, 'count': int(m.group(1))})
         days.append({'day': d, 'weekday': WEEKDAYS_JA[dt.weekday()], 'holiday': hol, 'kind': kind, 'shortage': shortage,
-                     'ng_count': 0, 'label': P.label(d)})   # その日にNG（翌日PM dutyで宿直を外す先生を含む）の先生の数
+                     'ng_count': 0, 'ng_day': 0, 'ng_night': 0, 'label': P.label(d)})   # その日にNG（翌日PM dutyで宿直を外す先生を含む）の先生の数
 
     # 備考は「備考」で始まる列から読む（列名の書き方の違いに対応）
     note_columns = [c for c in staff_df.columns if str(c).strip().startswith("備考")]
@@ -4727,9 +4750,15 @@ def period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month
             r = df_result.iloc[d - 1]
             # 日ごとのNG人数：その日にNG（平日は宿NG・全NG、休日は日NGも）か、翌日PM dutyで宿直を外す先生を数える
             # 前後の月の確定当直との勤務間隔で入れない日（薄紫のマス）も、実質NGとして数える
-            if effective_ng(ng.get(d, 'OK'), info['holiday']) != 'OK' or period_pm_restricted(P, d, pm_days, custom_holidays, next_month_special_holiday) \
-                    or d in (gap_blocked or {}).get(name, ()):
+            _kind = effective_ng(ng.get(d, 'OK'), info['holiday'])
+            _pmr = period_pm_restricted(P, d, pm_days, custom_holidays, next_month_special_holiday)
+            _gap = d in (gap_blocked or {}).get(name, ())
+            if _kind != 'OK' or _pmr or _gap:
                 info['ng_count'] += 1
+            # 休日は、日直NGと宿直NGを分けても数える（日直NG＝全NG・日NG、宿直NG＝全NG・宿NG・翌日PM duty）
+            if info['holiday']:
+                info['ng_day'] += int(_kind in ('全NG', '日NG') or _gap)
+                info['ng_night'] += int(_kind in ('全NG', '宿NG') or _pmr or _gap)
             assigned = [s for s in RESULT_COLUMNS[2:] if name in [x.strip() for x in re.split(r'[、,]', str(r[s]))]]
             if assigned:
                 if info['holiday']:
@@ -4923,7 +4952,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 - **休日のマス**：上半分＝日直、下半分＝宿直です。上に×＝日直NG、下に×＝宿直NG、上下とも×＝全NG
 - **黄色の斜線**：翌日PM dutyのため宿直を外す日。×があれば、NGも付いている日です
 - **下半分だけ黄色の斜線**：休日の翌日PM dutyの日。宿直は外しますが、日直には入れます（×の意味は休日のマスと同じ）
-- **NG人数の行**（見出しのすぐ下）：その日にNGの先生の数。翌日PM dutyで宿直を外す先生と、薄紫のマス（勤務間隔のため入れない日）の先生も数えます。多い日ほど濃いオレンジです
+- **NG人数の行**（見出しのすぐ下）：その日にNGの先生の数。翌日PM dutyで宿直を外す先生と、薄紫のマス（勤務間隔のため入れない日）の先生も数えます。休日は、上半分が日直NG、下半分が宿直NGの人数です（宿直NGには翌日PM dutyの先生も含みます）。多い日ほど濃いオレンジです
 - **赤線の下の「⚠️ 未決定」**：人数が足りず、担当が決まっていない枠
 - **右端の回数**：病棟・外来／宿直・日直／平日・休日／合計。回数が多い先生は**赤い枠**で表示されます。該当する先生は、作成ボタンの下の「計算状況・条件の注意事項と対処方法」にも一覧で出ます。基準は表のすぐ上の「⚠ アラートの基準」で変えられます（初期設定は宿直4回以上・休日3回以上。0にした項目はアラートなし）。
 - **メモ欄**：💬は先生からのコメント（取り込んだ先生だけ）、📝は医師条件の備考です。カーソルを合わせると全文が出ます。全員分は「💬 先生方のコメント・備考の一覧」でまとめて見られます。
