@@ -931,11 +931,14 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
         tr.append(f'<td class="sum" colspan="{len(MATRIX_COUNT_COLUMNS)}" style="color:#c0392b">{slot_total}枠</td></tr>')
         body.append(''.join(tr))
     # カーソルを合わせたセルの「行」と「列」を薄い黄色で示す（縦横に長い表での見間違いを防ぐ）
-    hl = "#fff1b8"
+    # 色は置き換えずに、半透明の黄色を上に重ねる（薄紫・休日の薄い赤・斜線などの元の色が、黄色がかって見えたまま残るように）
+    hl = "inset 0 0 0 999px rgba(255,214,0,.22)"
+    hl_img = "linear-gradient(rgba(255,214,0,.22),rgba(255,214,0,.22))"
     hover_css = ("<style>"
-                 f".dm tbody tr:hover td{{background-color:{hl} !important}}"
-                 f".dm tbody tr:hover td.nm{{background-color:#ffe08a !important}}"
-                 + "".join(f".dm:has(.c{info['day']}:hover) .c{info['day']}{{background-color:{hl} !important}}"
+                 f".dm tbody tr:hover td:not(.sum){{box-shadow:{hl} !important}}"
+                 f".dm tbody tr:hover td.sum{{background-image:{hl_img} !important}}"
+                 f".dm tbody tr:hover td.nm{{background-color:#ffe08a !important;box-shadow:none !important}}"
+                 + "".join(f".dm:has(.c{info['day']}:hover) td.c{info['day']}{{box-shadow:{hl} !important}}"
                            f".dm:has(.c{info['day']}:hover) th.c{info['day']}{{background-color:#ffe08a !important}}" for info in days)
                  + ".dm tbody td:hover{outline:2px solid #e0a800;outline-offset:-2px}"
                  "</style>")
