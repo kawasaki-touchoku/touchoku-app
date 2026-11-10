@@ -595,7 +595,6 @@ def work_save_floating():
 # ============================================================
 st.title("当直作成アプリ（期間指定版・年末年始など）")
 st.caption("今月の1日から、翌月の指定した日までを1つの当直案として作ります。使い方は通常版と同じです。")
-st.markdown("<a href='./' target='_self' style='font-weight:700'>🏠 ← 通常版の当直作成に戻る</a>", unsafe_allow_html=True)
 with st.expander("📖 使い方（期間指定版・作業の流れ・結果の見方）", expanded=False):
     tab_intro, tab_flow, tab_ng, tab_result, tab_trouble = st.tabs(["はじめに（期間指定版）", "作業の流れ", "NG日の集め方", "結果の見方・Excel", "困ったとき"])
     with tab_intro:
@@ -603,7 +602,7 @@ with st.expander("📖 使い方（期間指定版・作業の流れ・結果の
 **この画面（期間指定版）でできること**
 
 年末年始など、月をまたいで通しで当直を決めたいときに使います。今月の1日から、翌月の指定した日までを1つの当直案として作ります（例：12/1〜1/5）。
-画面の作りと使い方は通常版と同じです。ふだんの月の当直は、上の「🏠 ← 通常版の当直作成に戻る」から通常版で作ってください。
+画面の作りと使い方は通常版と同じです。ふだんの月の当直は、「① 作る期間を選ぶ」の下にある青い枠の「通常版に戻る →」から、通常版で作ってください。
 
 **通常版と違うところ**
 
@@ -896,6 +895,7 @@ P = TouchokuPeriod(year, month, extra)
 _install_period(P)
 st.info(f"**作る期間：{P.title()}（{P.n}日間）**　この期間全体を1つの当直案として作ります。"
         "医師条件の回数（月上限・月下限・休日上限・各枠の上限など）は、この期間全体での回数として扱います。")
+mode_switch_box("normal")   # 通常版へ戻る入口（通常版の「期間指定版を開く」と同じ場所・同じ形）
 restored_state = st.session_state.get("restored_state")
 
 st.divider()
