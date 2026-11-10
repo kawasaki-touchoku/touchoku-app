@@ -3005,12 +3005,17 @@ YM_PICK_CSS = """<style>
 .st-key-ym_quick button[kind="primary"],.st-key-ym_quick button[data-testid="stBaseButton-primary"]{background:#2f6db5 !important;border-color:#2f6db5 !important;color:#fff !important}
 .ym-sum{margin-top:6px;background:#f7f9fc;border:1px solid #e1e6ee;border-radius:10px;padding:8px 12px;font-weight:700;color:#24405f}
 .ym-sum span{font-weight:400;font-size:.82rem;color:#8a94a6;margin-left:.6rem}
-.ym-per{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;border:1.5px dashed #b8a1d9;background:#faf7fe;border-radius:10px;
-  padding:8px 14px;color:#4b2f7a}
-.ym-per .ps{font-size:.8rem;color:#7a6a96}
-.ym-per .pbtn{margin-left:auto;border:1.5px solid #6d4bb0;color:#4b2f7a !important;background:#fff;border-radius:8px;padding:5px 12px;font-weight:700;
-  font-size:.88rem;text-decoration:none !important;white-space:nowrap}
-.ym-per .pbtn:hover{background:#f1eafb}
+.ym-per{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:10px;border:1px solid #e1e6ee;border-left:8px solid var(--c);
+  background:var(--bg);border-radius:12px;padding:12px 18px;color:var(--fg)}
+.ym-per.to-period{--c:#7a52c2;--bg:#f1eafb;--fg:#3f2370}
+.ym-per.to-normal{--c:#2f6db5;--bg:#e8f1fb;--fg:#173f73}
+.ym-per .ic{display:inline-flex;flex:0 0 auto;width:2.6rem;height:2.6rem;border-radius:50%;background:var(--c);align-items:center;justify-content:center;font-size:1.35rem}
+.ym-per .tx{flex:1 1 16rem;min-width:0}
+.ym-per .tt{font-weight:800;font-size:1.05rem;line-height:1.4}
+.ym-per .ps{font-size:.84rem;opacity:.85;margin-top:2px}
+.ym-per .pbtn{margin-left:auto;background:var(--c);color:#fff !important;border-radius:9px;padding:.55rem 1.1rem;font-weight:800;
+  font-size:.95rem;text-decoration:none !important;white-space:nowrap}
+.ym-per .pbtn:hover{filter:brightness(1.08)}
 @media (max-width:640px){.ym-big{font-size:1.6rem;min-width:0}.st-key-ym_pick > div:has(.st-key-ym_quick){margin-left:0}}
 </style>"""
 
@@ -3056,6 +3061,19 @@ def month_picker(today):
                 st.button(label, key=f"ym_q{i}", type="primary" if (qy, qm) == (y, m) else "secondary",
                           on_click=_ym_set, args=(qy, qm))
     return y, m
+
+
+def mode_switch_box(to):
+    """通常版⇔期間指定版を切りかえる入口（どちらの画面でも「① 作る月／期間を選ぶ」の下の同じ場所に、同じ形で出す）。
+    色は行き先に合わせる（期間指定版へ＝紫、通常版へ＝青）。"""
+    if to == "period":
+        cls, icon, title, sub, href, btn = ("to-period", "📆", "年末年始など、翌月の数日まで通しで作るとき",
+                                            "今月1日〜翌月の指定日を、1つの当直案として作ります", "./?mode=period", "期間指定版を開く →")
+    else:
+        cls, icon, title, sub, href, btn = ("to-normal", "🏠", "ふだんの月（1日〜末日）の当直を作るとき",
+                                            "1か月分を、通常版で作ります", "./", "通常版に戻る →")
+    st.markdown(f"<div class='ym-per {cls}'><span class='ic'>{icon}</span><div class='tx'><div class='tt'>{title}</div>"
+                f"<div class='ps'>{sub}</div></div><a class='pbtn' href='{href}' target='_self'>{btn}</a></div>", unsafe_allow_html=True)
 
 
 def ym_summary(year, month):
@@ -4866,7 +4884,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 
 **年末年始など、月をまたいで作るとき**
 
-年月を選ぶ欄の下にある「期間指定版を開く →」から、今月1日〜翌月の指定日までを通しで作る別のページに移れます。先生方の専用URLは同じものを使えます。
+年月を選ぶ欄の下にある紫の枠の「期間指定版を開く →」から、今月1日〜翌月の指定日までを通しで作る別のページに移れます。先生方の専用URLは同じものを使えます。
 
 **管理用パスワード**
 
@@ -5161,9 +5179,7 @@ try:
 except Exception:
     _period_exists = False
 if _period_exists:
-    st.markdown("<div class='ym-per'><div><b>📆 年末年始など、翌月の数日まで通しで作るとき</b>"
-                "<div class='ps'>今月1日〜翌月の指定日を、1つの当直案として作ります</div></div>"
-                "<a class='pbtn' href='./?mode=period' target='_self'>期間指定版を開く →</a></div>", unsafe_allow_html=True)
+    mode_switch_box("period")
 # （期間指定版への入口ここまで）
 restored_state = st.session_state.get("restored_state")
 
