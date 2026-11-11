@@ -623,7 +623,7 @@ MATRIX_SATURDAY_HEAD = '#1f6fbf'
 def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday=False, comments=None, gap_blocked=None):
     """
     医師ごと・日ごとのマスの内容を作る。
-    優先順：決まった当直 ＞ ×（当直NG）＞ PM（翌日PM duty）。
+    優先順：決まった当直 ＞ ×（当直NG）＞ 翌日PM duty で宿直を外す日。
     """
     num_days = len(df_result)
     days = []
@@ -4630,8 +4630,8 @@ def period_validate_staff_inputs(df, P):
 
 
 def period_validate_fixed_inputs(df, doctors, P, holidays=None):
-    year, month = P.year, P.month
     """確定当直の入力チェック。holidays を渡すと、対象月の平日に日直が入っていないかも確認する。"""
+    year, month = P.year, P.month
     errors = []
     if df is None:
         return None, errors
@@ -4733,11 +4733,11 @@ def period_generate_shift(P, staff_df, custom_holidays, multi_slots_dict, fixed_
 
 
 def period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month_special_holiday=False, comments=None, gap_blocked=None):
-    year, month = P.year, P.month
     """
     医師ごと・日ごとのマスの内容を作る。
-    優先順：決まった当直 ＞ ×（当直NG）＞ PM（翌日PM duty）。
+    優先順：決まった当直 ＞ ×（当直NG）＞ 翌日PM duty で宿直を外す日。
     """
+    year, month = P.year, P.month
     num_days = len(df_result)
     days = []
     for d in range(1, num_days + 1):
