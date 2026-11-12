@@ -1605,9 +1605,10 @@ with staff_box_ng:
 
                     saved_strs = []
                     for d, val in shown.items():
-                        if val == "全NG": saved_strs.append(_day_label(d))
-                        elif val == "日NG": saved_strs.append(f"{_day_label(d)}(日直NG)")
-                        elif val == "宿NG": saved_strs.append(f"{_day_label(d)}(宿直NG)")
+                        # 表示は、すべての日を「12/3」の形にする（保存するNG日の書き方は変えない）
+                        if val == "全NG": saved_strs.append(P.label(d))
+                        elif val == "日NG": saved_strs.append(f"{P.label(d)}(日直NG)")
+                        elif val == "宿NG": saved_strs.append(f"{P.label(d)}(宿直NG)")
                     if saved_strs:
                         st.success(f"✅ **反映済みのNG日:** {', '.join(saved_strs)}")
                     else:
@@ -1625,7 +1626,7 @@ with staff_box_ng:
                         hol = day_is_holiday[d]
                         options = ["OK", "全NG", "日NG", "宿NG"] if hol else ["OK", "宿NG"]
                         component_days.append({
-                            "day": (P.label(d) if (dt.month != P.month or d == 1) else dt.day), "weekday": WEEKDAYS_JA[dt.weekday()],
+                            "day": P.label(d), "weekday": WEEKDAYS_JA[dt.weekday()],   # すべての日を「12/2」の形で書く
                             "options": options, "value": shown[d],
                             "warning": pm_duty_restricted(dt, hard_days, year, month, custom_holidays, next_month_special_holiday),
                             "kind": "saturday" if dt.weekday() == 5 and not jpholiday.is_holiday(dt) and d not in custom_holidays else ("holiday" if hol else "weekday"),
