@@ -1455,36 +1455,30 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
         b0 = c.border
         c.border = Border(left=b0.left, right=b0.right, top=b0.top, bottom=edge)
 
-    # 凡例：日付の列（右へスクロールすると表と一緒に動く側）に置く。見本のマスは日付2列分、説明はその右
-    # （動かない列にまたがせると、スクロールしたときに説明が境目で途中から切れて見えるため）
-    legend_row = last_row + 2
+    # 凡例は別のシート「凡例」（当直表の右隣）に置き、当直表の下には案内を1行だけ書く
+    # （当直表のシートに置くと、横にスクロールしたときに説明が切れて見えるため）
+    note = ws.cell(row=last_row + 2, column=1, value='※ 色や記号の意味は「凡例」シート')
+    note.font = Font(bold=True, color='1D4E89'); note.alignment = Alignment(vertical='center')
+    lgs = wb.create_sheet("凡例")
+    lgs.sheet_view.showGridLines = False
     one_line = Alignment(horizontal='center', vertical='center', wrap_text=False, shrink_to_fit=True)
     middle = Alignment(vertical='center')   # 説明の文字は、見本のマスと高さをそろえて上下中央にする
-
-    def merged_sample(r, col):
-        """日付2列分をつないだ見本のマス（左上のマスを返す。枠線は2つのマスの両方に付ける）。"""
-        ws.merge_cells(start_row=r, start_column=col, end_row=r, end_column=col + 1)
-        ws.cell(row=r, column=col + 1).border = border
-        cell = ws.cell(row=r, column=col)
-        cell.border = border; cell.alignment = one_line
-        return cell
-
-    lg = ws.cell(row=legend_row, column=first_day_col, value='凡例（当直表の色・記号の意味）')
-    lg.font = Font(bold=True, size=12); lg.alignment = middle
-    ws.row_dimensions[legend_row].height = 22
+    lgs.cell(row=1, column=1, value='凡例（当直表の色・記号の意味）').font = Font(bold=True, size=15)
+    lgs.row_dimensions[1].height = 30
+    lgs.cell(row=3, column=1, value='当直の枠の色').font = Font(bold=True)
     # 当直の枠の色：宿直3つ・日直3つの2段で並べる
     for k, (label, (bg, fg)) in enumerate(MATRIX_SHIFT_COLORS.items()):
-        c = merged_sample(legend_row + 1 + k // 3, first_day_col + (k % 3) * 2)
-        c.value = label; c.fill = fill(bg); c.font = Font(bold=True, size=9, color=fg.lstrip('#'))
-    for k in (1, 2):
-        ws.row_dimensions[legend_row + k].height = 20
-    legend_row += 3   # この下に「見本のマス＋説明」を1行ずつ並べる
+        c = lgs.cell(row=4 + k // 3, column=1 + k % 3, value=label)
+        c.fill = fill(bg); c.font = Font(bold=True, size=10, color=fg.lstrip('#')); c.alignment = one_line; c.border = border
+    for r in (4, 5):
+        lgs.row_dimensions[r].height = 22
+    legend_row = 6   # この下に「見本のマス＋説明」を1行ずつ並べる
 
     def legend_line(offset, text):
         r = legend_row + offset
-        ws.cell(row=r, column=first_day_col + 2, value=text).alignment = middle
-        ws.row_dimensions[r].height = 20
-        sample = merged_sample(r, first_day_col)
+        lgs.cell(row=r, column=2, value=text).alignment = middle
+        lgs.row_dimensions[r].height = 24
+        sample = lgs.cell(row=r, column=1)
         sample.border = border; sample.alignment = one_line
         return sample
 
@@ -1497,10 +1491,10 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
     sample_slot = 'B日直' if 'B日直' in MATRIX_SHIFT_COLORS else next(iter(MATRIX_SHIFT_COLORS))
     first_bg, first_fg = MATRIX_SHIFT_COLORS[sample_slot]
     s4.value = sample_slot; s4.fill = fill(first_bg)
-    s4.font = Font(bold=True, size=8, color=first_fg.lstrip('#')); s4.border = wish_border
+    s4.font = Font(bold=True, size=9, color=first_fg.lstrip('#')); s4.border = wish_border
     s5 = legend_line(6, '赤線より下の「⚠️ 未決定」の行：当直が決まっていない枠（その枠の色で表示）')
     s5.border = Border(left=thin, right=thin, bottom=thin, top=red)
-    s5.value = '未決定'; s5.font = Font(bold=True, size=8, color='C0392B')
+    s5.value = '未決定'; s5.font = Font(bold=True, size=9, color='C0392B')
     s6 = legend_line(7, 'メモ：💬＝先生からのコメント、📝＝備考（セルにカーソルを乗せると全文。「メモ全文」シートにも一覧）')
     s6.value = '💬📝'; s6.border = Border()
     s8 = legend_line(8, 'NG人数の行（見出しのすぐ下）：その日にNGの先生の数（翌日PM dutyで宿直を外す先生・薄紫のマスの先生を含む）。休日は「日直NG／宿直NG」の人数')
@@ -1513,13 +1507,14 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
         s7.value = next(v for k, v in alerts.items() if v) if alerts else 4
         s7.fill = fill('#FFD8D8'); s7.font = Font(bold=True, color='C0392B')
         s7.border = Border(left=red_side, right=red_side, top=red_side, bottom=red_side)
-    # 2列分をつないだ見本のマスは、右半分のマスにも同じ枠（右・上・下）を付けないと、枠が半分だけになる
-    for r in range(legend_row + 1, legend_row + 12):
-        left_cell = ws.cell(row=r, column=first_day_col)
-        if ws.cell(row=r, column=first_day_col + 2).value is None:
-            continue
-        b0 = left_cell.border
-        ws.cell(row=r, column=first_day_col + 1).border = Border(right=b0.right, top=b0.top, bottom=b0.bottom)
+    for col in 'ABC':
+        lgs.column_dimensions[col].width = 13
+    # 凡例のシートは、A4横向き・1ページに収めて印刷
+    lgs.page_setup.orientation = 'landscape'
+    lgs.page_setup.paperSize = lgs.PAPERSIZE_A4
+    lgs.sheet_properties.pageSetUpPr.fitToPage = True
+    lgs.page_setup.fitToWidth = 1
+    lgs.page_setup.fitToHeight = 1
 
     ws.column_dimensions['A'].width = 14
     ws.column_dimensions['B'].width = 12
