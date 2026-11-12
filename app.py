@@ -1218,7 +1218,9 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
     for i, info in enumerate(days):
         c = ws.cell(row=header_row, column=first_day_col + i, value=f"{info.get('label', info['day'])}\n{info['weekday']}")
         color = MATRIX_HOLIDAY_HEAD if info['kind'] == 'holiday' else (MATRIX_SATURDAY_HEAD if info['kind'] == 'saturday' else '#243247')
-        c.font = Font(bold=True, color=color.lstrip('#'))
+        # 期間指定版の「12/10」のような長い日付は、列の幅に入るよう文字を小さくする（入らないと3段に折れるため）
+        label_len = len(str(info.get('label', info['day'])))
+        c.font = Font(bold=True, color=color.lstrip('#'), size=7.5 if label_len >= 5 else (9 if label_len == 4 else 11))
     sum_col = first_day_col + len(days)
     n_counts = len(MATRIX_COUNT_COLUMNS)
     # 休日の列の目印（回数の式で使う。印刷には出ないよう、この行は隠す）
@@ -1439,22 +1441,26 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
             c.alignment = center if col > 1 else Alignment(vertical='center')
         ws.row_dimensions[last_row].height = 24
 
-    # 凡例：見本のマスは表と同じ幅の日付の列に、表と同じ見た目で置き、説明はその右に書く
+    # 凡例：横にスクロールしても残る左端の列（名前・翌日PM duty・メモ）に、見本のマスと説明の書き出しを置く
+    # （日付の列に置くと、右へスクロールしたときに書き出しが隠れて、途中から切れて見えるため）
     legend_row = last_row + 2
     one_line = Alignment(horizontal='center', vertical='center', wrap_text=False, shrink_to_fit=True)
     middle = Alignment(vertical='center')   # 説明の文字は、見本のマスと高さをそろえて上下中央にする
-    lg = ws.cell(row=legend_row, column=1, value='凡例'); lg.font = Font(bold=True); lg.alignment = middle
-    ws.cell(row=legend_row, column=2, value='当直の枠（色）').alignment = middle
+    lg = ws.cell(row=legend_row, column=1, value='凡例（当直表の色・記号の意味）'); lg.font = Font(bold=True, size=12); lg.alignment = middle
+    ws.row_dimensions[legend_row].height = 22
+    # 当直の枠の色：左端の3列に、宿直3つ・日直3つの2段で並べる
     for k, (label, (bg, fg)) in enumerate(MATRIX_SHIFT_COLORS.items()):
-        c = ws.cell(row=legend_row, column=first_day_col + k * 2, value=label)
-        c.fill = fill(bg); c.font = Font(bold=True, size=xlsx_label_size(label), color=fg.lstrip('#')); c.alignment = one_line; c.border = border
-    ws.row_dimensions[legend_row].height = 20
+        c = ws.cell(row=legend_row + 1 + k // 3, column=1 + k % 3, value=label)
+        c.fill = fill(bg); c.font = Font(bold=True, size=9, color=fg.lstrip('#')); c.alignment = one_line; c.border = border
+    for k in (1, 2):
+        ws.row_dimensions[legend_row + k].height = 20
+    legend_row += 3   # この下に「見本のマス＋説明」を1行ずつ並べる
 
     def legend_line(offset, text):
         r = legend_row + offset
-        ws.cell(row=r, column=first_day_col + 1, value=text).alignment = middle
+        ws.cell(row=r, column=2, value=text).alignment = middle
         ws.row_dimensions[r].height = 20
-        sample = ws.cell(row=r, column=first_day_col)
+        sample = ws.cell(row=r, column=1)
         sample.border = border; sample.alignment = one_line
         return sample
 
@@ -2897,19 +2903,19 @@ def staff_column_specs():
             "例：10,15 または 10:A宿直。複数は半角カンマ区切り。日直は休日（または「休日にする」にした日）だけ指定できます。通常の希望は各種条件の範囲内で割り当てます。"),
         "希望優先度(数字が大きいほど優先)": ("優先度", 56, "num",
             "希望優先度。通常は1。1〜99は数字が大きいほど優先。100以上はこの先生の希望日すべてが確定当直と同じ扱いになり、NG日・上限より優先されます。ほかの勤務との間隔は空けます。"),
-        "宿⇔宿 間隔下限": ("宿⇔宿", 72, "days",
+        "宿⇔宿 間隔下限": ("宿⇔宿", 76, "days",
             "【宿⇔宿 間隔下限】宿直と次の宿直の間に空ける日数の下限。5日なら10日の宿直の次の宿直は16日以降。日直がからむ組み合わせは右の「宿⇔日・日⇔日 間隔下限」を使います。確定当直とほかの勤務の間も空けます。確定当直同士が近すぎる場合は注意を表示します。"),
         DAY_GAP_COLUMN: ("宿⇔日・日⇔日", 118, "days",
             f"【{DAY_GAP_COLUMN}】日直がからむ組み合わせ（日直→宿直・宿直→日直・日直→日直）で、勤務の間に空ける日数の下限。2日なら10日の次は13日以降。"
             "宿直→宿直は「宿⇔宿 間隔下限」を使います。空欄なら宿⇔宿 間隔下限と同じ日数にします。"),
-        "月下限": ("月下限", 56, "num", "月下限（目標）：できるだけ確保したい回数です。条件によっては届きません。月上限以下にしてください。"),
-        "月上限": ("月上限", 56, "num", "月上限：日直・宿直を合わせた月間の上限です。確定当直がある場合は、超えることがあります。"),
-        "休日上限": ("休日上限", 66, "num", "休日上限：土日祝と「休日にする」にした日の、日直と宿直の合計の上限です。1枠を1回と数えます。"),
-        "宿直上限": ("宿直上限", 66, "num0", "A宿直・B宿直・外来宿直を合わせた月間の上限です。空欄なら制限なし。確定当直がある場合は、超えることがあります。"),
-        "日直上限": ("日直上限", 66, "num0", "A日直・B日直・外来日直を合わせた月間の上限です。空欄なら制限なし。確定当直がある場合は、超えることがあります。"),
+        "月下限": ("月下限", 60, "count", "月下限（目標）：できるだけ確保したい回数です。条件によっては届きません。月上限以下にしてください。"),
+        "月上限": ("月上限", 60, "count", "月上限：日直・宿直を合わせた月間の上限です。確定当直がある場合は、超えることがあります。"),
+        "休日上限": ("休日上限", 66, "count", "休日上限：土日祝と「休日にする」にした日の、日直と宿直の合計の上限です。1枠を1回と数えます。"),
+        "宿直上限": ("宿直上限", 66, "count0", "A宿直・B宿直・外来宿直を合わせた月間の上限です。空欄なら制限なし。確定当直がある場合は、超えることがあります。"),
+        "日直上限": ("日直上限", 66, "count0", "A日直・B日直・外来日直を合わせた月間の上限です。空欄なら制限なし。確定当直がある場合は、超えることがあります。"),
     }
     for slot, short in STAFF_SLOT_SHORT.items():
-        specs[slot + "上限"] = (short + "上限", 62 if len(short) == 2 and short[0] in "AB" else 66, "num", f"{short}上限＝{slot}" + cap)
+        specs[slot + "上限"] = (short + "上限", 62 if len(short) == 2 and short[0] in "AB" else 66, "count", f"{short}上限＝{slot}" + cap)
     return specs
 
 
@@ -2927,8 +2933,11 @@ def staff_column_config(columns, as_index=False):
         elif kind == "num0":
             config[c] = st.column_config.NumberColumn(label, width=width, help=help_text, min_value=0, step=1)
         elif kind == "days":
-            # 日数の列は「5日」のように単位を付けて見せる（中身は数字のまま。入力は数字だけでよい）
-            config[c] = st.column_config.NumberColumn(label, width=width, help=help_text, min_value=0, step=1, format="%d日")
+            # 日数の列は「5日間」のように単位を付けて見せる（中身は数字のまま。入力は数字だけでよい）
+            config[c] = st.column_config.NumberColumn(label, width=width, help=help_text, min_value=0, step=1, format="%d日間")
+        elif kind in ("count", "count0"):
+            # 回数の列は「3回」のように見せる（count0 は空欄＝制限なし を使える列）
+            config[c] = st.column_config.NumberColumn(label, width=width, help=help_text, min_value=0, step=1, format="%d回")
         else:
             config[c] = st.column_config.NumberColumn(label, width=width, help=help_text)
     if as_index:
