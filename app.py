@@ -1448,6 +1448,12 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
         c = ws.cell(row=r, column=first_day_col - 1)
         b0 = c.border
         c.border = Border(left=b0.left, top=b0.top, bottom=b0.bottom, right=edge)
+    # 縦にスクロールしても動かない行（題・日付の見出し・NG人数）と先生の行の境目にも、同じ線を引く
+    # （NG人数の行の下側に付ける。先生の行のマスに付けると、ドラッグしたときに線までついて行くため）
+    for col in range(1, sum_col + n_counts):
+        c = ws.cell(row=header_row + 1, column=col)
+        b0 = c.border
+        c.border = Border(left=b0.left, right=b0.right, top=b0.top, bottom=edge)
 
     # 凡例：日付の列（右へスクロールすると表と一緒に動く側）に置く。見本のマスは日付2列分、説明はその右
     # （動かない列にまたがせると、スクロールしたときに説明が境目で途中から切れて見えるため）
