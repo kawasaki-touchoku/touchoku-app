@@ -85,12 +85,28 @@ STAFF_OLD_COLUMN_NAMES = {"月間" + "最小回数": "月下限", "月間" + "�
                           "日直" + "間隔": "宿⇔日・日⇔日 間隔下限", "日直" + "間隔下限": "宿⇔日・日⇔日 間隔下限"}
 
 
+def rename_old_staff_columns(df):
+    """
+    以前の列名を今の列名に読み替える。同じ列の以前の名前が2つ以上ある（版の途中で保存した）ときは、
+    今の名前の列があればそれを、なければいちばん左の列を使い、残りは捨てる（同じ名前の列が2つあると表が出せないため）。
+    """
+    for new in dict.fromkeys(STAFF_OLD_COLUMN_NAMES.values()):
+        olds = [c for c in df.columns if STAFF_OLD_COLUMN_NAMES.get(c) == new]
+        if not olds:
+            continue
+        if new in df.columns:
+            df = df.drop(columns=olds)
+        else:
+            df = df.drop(columns=olds[1:]).rename(columns={olds[0]: new})
+    return df.loc[:, ~df.columns.duplicated()]
+
+
 @st.cache_data
 def parse_staff_csv(file_bytes):
     df = normalize_shift_names(_read_csv_any_encoding(file_bytes))
     # 旧CSVの列名も受け付け、画面・出力CSVでは新名称に統一する。
     # 以前の列名のCSV・途中保存も、今の列名に読み替える
-    df = df.rename(columns={k: v for k, v in STAFF_OLD_COLUMN_NAMES.items() if k in df.columns and v not in df.columns})
+    df = rename_old_staff_columns(df)
     weekday_column = "翌日PM duty"
     for old_column in ("原則、宿直を外す曜日", "入れない曜日(半角カンマ区切り)", "入れない曜日"):
         if old_column not in df.columns:
@@ -2933,9 +2949,14 @@ def staff_table(df, editable):
         kwargs = dict(num_rows="dynamic", use_container_width=True, height=300, column_order=cols,
                       column_config=staff_column_config(df.columns, as_index=True))
         try:
-            out = st.data_editor(df, row_height=STAFF_ROW_HEIGHT, **kwargs)
-        except TypeError:   # 古いStreamlitで row_height が使えない場合
-            out = st.data_editor(df, **kwargs)
+            try:
+                out = st.data_editor(df, row_height=STAFF_ROW_HEIGHT, **kwargs)
+            except TypeError:   # 古いStreamlitで row_height が使えない場合
+                out = st.data_editor(df, **kwargs)
+        except Exception as e:
+            # 表を出せないときは、原因の文をそのまま画面に出す（ふつうのエラー表示では中身が隠されるため）
+            st.error(f"医師条件の表を表示できませんでした。この画面の写真を管理担当者に送ってください。\n\n詳細：{type(e).__name__}: {e}")
+            st.stop()
     else:
         cols = ["先生の名前"] + [c for c in df.columns if str(c).startswith("備考")] \
             + [c for c in df.columns if c != "先生の名前" and not str(c).startswith("備考") and c != NG_COLUMN]
@@ -5873,7 +5894,7 @@ with staff_box_cond:
             base_df.insert(_pos, _gc, None)
         base_df[_gc] = pd.to_numeric(base_df[_gc], errors="coerce")
     # 宿⇔日・日⇔日 間隔下限の列がない（以前の）CSV・途中保存でも、「宿⇔宿 間隔下限」の右に、宿⇔宿 間隔下限と同じ値で列を足す
-    base_df = add_day_gap_column(base_df)
+    base_df = add_day_gap_column(base_df.loc[:, ~base_df.columns.duplicated()])   # 同じ名前の列が2つあると表が出せないので1つにする
     if DAY_GAP_COLUMN in base_df.columns:
         base_df[DAY_GAP_COLUMN] = pd.to_numeric(base_df[DAY_GAP_COLUMN], errors="coerce")
     base_df = base_df.set_index("先生の名前")
