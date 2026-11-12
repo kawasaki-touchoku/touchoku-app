@@ -2945,6 +2945,23 @@ def staff_column_specs():
     return specs
 
 
+def header_fit_width(label, width):
+    """列の見出しが全部見える幅（px）。見出しの左には型の印（≡）が付くので、その分も足す。"""
+    need = sum(14 if ord(ch) > 255 else 8 for ch in str(label)) + 46
+    return max(int(width), need)
+
+
+def _column(maker, label, width, help_text, pinned=False, **kw):
+    """列の設定を作る。名前の列は左に固定する（固定の機能がない古いStreamlitでは、固定せずに作る）。"""
+    width = header_fit_width(label, width)
+    if pinned:
+        try:
+            return maker(label, width=width, help=help_text, pinned=True, **kw)
+        except TypeError:
+            pass
+    return maker(label, width=width, help=help_text, **kw)
+
+
 def staff_column_config(columns, as_index=False):
     """st.data_editor / st.dataframe に渡す column_config。as_index=True なら「先生の名前」は表の見出し列（index）。"""
     specs = staff_column_specs()
@@ -2955,20 +2972,20 @@ def staff_column_config(columns, as_index=False):
             continue
         label, width, kind, help_text = specs.get(c, (str(c), 80, "text", None))
         if kind == "text":
-            config[c] = st.column_config.TextColumn(label, width=width, help=help_text)
+            config[c] = _column(st.column_config.TextColumn, label, width, help_text, pinned=(c == "先生の名前"))
         elif kind == "num0":
-            config[c] = st.column_config.NumberColumn(label, width=width, help=help_text, min_value=0, step=1)
+            config[c] = _column(st.column_config.NumberColumn, label, width, help_text, min_value=0, step=1)
         elif kind == "days":
             # 日数の列は「5日間」のように単位を付けて見せる（中身は数字のまま。入力は数字だけでよい）
-            config[c] = st.column_config.NumberColumn(label, width=width, help=help_text, min_value=0, step=1, format="%d日間")
+            config[c] = _column(st.column_config.NumberColumn, label, width, help_text, min_value=0, step=1, format="%d日間")
         elif kind in ("count", "count0"):
             # 回数の列は「3回」のように見せる（count0 は空欄＝制限なし を使える列）
-            config[c] = st.column_config.NumberColumn(label, width=width, help=help_text, min_value=0, step=1, format="%d回")
+            config[c] = _column(st.column_config.NumberColumn, label, width, help_text, min_value=0, step=1, format="%d回")
         else:
-            config[c] = st.column_config.NumberColumn(label, width=width, help=help_text)
+            config[c] = _column(st.column_config.NumberColumn, label, width, help_text)
     if as_index:
         label, width, _, help_text = specs["先生の名前"]
-        config["_index"] = st.column_config.TextColumn(label, width=width, help=help_text)
+        config["_index"] = _column(st.column_config.TextColumn, label, width, help_text, pinned=True)
     return config
 
 
