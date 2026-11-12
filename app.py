@@ -2897,9 +2897,9 @@ def staff_column_specs():
             "例：10,15 または 10:A宿直。複数は半角カンマ区切り。日直は休日（または「休日にする」にした日）だけ指定できます。通常の希望は各種条件の範囲内で割り当てます。"),
         "希望優先度(数字が大きいほど優先)": ("優先度", 56, "num",
             "希望優先度。通常は1。1〜99は数字が大きいほど優先。100以上はこの先生の希望日すべてが確定当直と同じ扱いになり、NG日・上限より優先されます。ほかの勤務との間隔は空けます。"),
-        "宿⇔宿 間隔下限": ("宿⇔宿 間隔下限", 112, "num",
+        "宿⇔宿 間隔下限": ("宿⇔宿 間隔下限", 130, "num",
             "宿直と次の宿直の間に空ける日数の下限。5日なら10日の宿直の次の宿直は16日以降。日直がからむ組み合わせは右の「宿⇔日・日⇔日 間隔下限」を使います。確定当直とほかの勤務の間も空けます。確定当直同士が近すぎる場合は注意を表示します。"),
-        DAY_GAP_COLUMN: ("宿⇔日・日⇔日 間隔下限", 150, "num",
+        DAY_GAP_COLUMN: ("宿⇔日・日⇔日 間隔下限", 190, "num",
             "日直がからむ組み合わせ（日直→宿直・宿直→日直・日直→日直）で、勤務の間に空ける日数の下限。2日なら10日の次は13日以降。"
             "宿直→宿直は「宿⇔宿 間隔下限」を使います。空欄なら宿⇔宿 間隔下限と同じ日数にします。"),
         "月下限": ("月下限", 56, "num", "月下限（目標）：できるだけ確保したい回数です。条件によっては届きません。月上限以下にしてください。"),
@@ -2938,12 +2938,21 @@ def staff_legend_text():
     return ("列名の意味：優先度＝希望優先度　宿⇔宿 間隔下限＝宿直と宿直の間に空ける日数　宿⇔日・日⇔日 間隔下限＝日直がからむ勤務（日直→宿直・宿直→日直・日直→日直）の間に空ける日数　"
             "月下限＝月の回数の目標（できるだけ確保）　"
             "月上限＝月の回数の上限　休日上限＝休日の回数の上限　宿直上限・日直上限＝A・B・外来を合わせた上限　"
-            "A宿上限〜外日上限＝各枠（A宿直・B宿直・外来宿直・A日直・B日直・外来日直）の月の上限"
-            "（列名にカーソルを合わせると説明が出ます）")
+            "A宿上限〜外日上限＝各枠（A宿直・B宿直・外来宿直・A日直・B日直・外来日直）の月の上限")
+
+
+# 表のすぐ上に出す、青い案内の帯（列名にカーソルを合わせると説明が出ることを知らせる）
+STAFF_COLUMN_HINT_HTML = (
+    "<style>.col-hint{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;background:#eaf3ff;border:1.5px solid #6ea2e6;"
+    "border-radius:10px;padding:9px 14px;margin:2px 0 8px;font-size:1rem;color:#1d4e89;font-weight:700;line-height:1.5}"
+    ".col-hint .ic{font-size:1.25rem}.col-hint small{font-weight:500;color:#41618a;font-size:.85rem}</style>"
+    "<div class='col-hint'><span class='ic'>💡</span>列名にカーソルを合わせると、その列の説明が出ます"
+    f"<small>（例：「{DAY_GAP_COLUMN}」に合わせると、どの組み合わせに使うかが出ます）</small></div>")
 
 
 def staff_table(df, editable):
     """医師条件の表。③（編集用）と①（見るだけ）で、列名・幅・行の高さ・並びを同じにする。"""
+    st.markdown(STAFF_COLUMN_HINT_HTML, unsafe_allow_html=True)
     if editable:
         cols = [c for c in df.columns if str(c).startswith("備考")] + [c for c in df.columns if not str(c).startswith("備考")]
         kwargs = dict(num_rows="dynamic", use_container_width=True, height=300, column_order=cols,
@@ -5772,7 +5781,7 @@ with staff_box_roster:
                 (st.success if _co_msg[0] == "success" else st.error)(_co_msg[1])
 with staff_box_cond:
     step_header(3, "医師条件を調整する", "当直案の枠ができるだけ埋まるように、ここで医師条件を直します（直すと①の表示も同じ内容になります）", anchor="sec-cond")
-    st.info("下の表に先生ごとの条件を入力してください。セルをクリックして編集できます。列名にカーソルを合わせると、入力例や説明が表示されます。")
+    st.info("下の表に先生ごとの条件を入力してください。セルをクリックして編集できます。")
     st.caption("最初に表示される「型1」〜「型9」は、よくある条件の入力例です。名前の欄が型の中身です（例：型4＝A宿直・A日直・外来日直に入る先生）。実際の先生の名前に置き換え、回数などを調整して使ってください。行は「＋」で増やせます。")
     with st.expander("入力例：曜日・希望日・備考", expanded=False):
         st.markdown("""
