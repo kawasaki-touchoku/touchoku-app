@@ -1909,7 +1909,7 @@ if len(staff_df) > 0:
                                     if any(abs((datetime.date(year, month, d) - e).days) <= _gap for e in _ext)}
         matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday,
                                                      comments=imported_comments(year, month), gap_blocked=gap_blocked)
-        missing_total = sum(len(info['shortage']) for info in matrix_days)
+        missing_total = shortage_total(matrix_days)
         # 下の帯の「当直案を作成」ボタンの横に、結果のまとめを出す
         _t = remote_now()[-8:-3]
         _summary = (f"<div class='cb-res bad'>⚠ {_t} 作成：未決定 {missing_total}枠</div>" if missing_total
