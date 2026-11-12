@@ -738,6 +738,21 @@ def shortage_slots(days):
     return [s for s in RESULT_COLUMNS[2:] if s in used]
 
 
+def shortage_lines(days):
+    """「⚠️ 未決定」の行の並び [(枠, 何段目)]。同じ日に同じ枠が2名以上足りないときは、行を分けて1マス＝1枠にする
+    （「B日直×2」のように1マスにまとめると、枠の数え方やExcelでのドラッグがずれるため）。"""
+    lines = []
+    for slot in shortage_slots(days):
+        most = max(sum(x['count'] for x in info['shortage'] if x['slot'] == slot) for info in days)
+        lines.extend((slot, j) for j in range(most))
+    return lines
+
+
+def shortage_total(days):
+    """未決定の枠の数（1名分＝1枠）。"""
+    return sum(x['count'] for info in days for x in info['shortage'])
+
+
 # 当直が多すぎる先生を目立たせる基準（この回数以上でアラート。0はアラートなし）。画面で変えられる
 MATRIX_COUNT_ALERTS = {'night': 4, 'day': 0, 'ward': 0, 'outpatient': 0, 'weekday': 0, 'holiday': 3}
 MATRIX_ALERT_LABELS = {'night': '宿直', 'day': '日直', 'ward': '病棟', 'outpatient': '外来', 'weekday': '平日', 'holiday': '休日', 'total': '合計'}
@@ -931,16 +946,16 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
             for key, _ in MATRIX_COUNT_COLUMNS) + '</tr>')
         body.append(''.join(tr))
     # 当直が決まっていない枠：枠ごとに1行、その枠の色で表示
-    for k, slot in enumerate(shortage_slots(days)):
+    for k, (slot, j) in enumerate(shortage_lines(days)):
         first = ' first' if k == 0 else ''
         tr = [f'<tr class="short{first}"><td class="nm">⚠️ 未決定</td><td></td><td></td>']
         bg, fg = MATRIX_SHIFT_COLORS[slot]
         slot_total = 0
         for info in days:
             count = sum(x['count'] for x in info['shortage'] if x['slot'] == slot)
-            if count:
+            if count > j:
                 slot_total += 1
-                label = slot_label(slot, "<br>") + ("" if count == 1 else f"×{count}")
+                label = slot_label(slot, "<br>")
                 tr.append(f'<td class="c{info["day"]}"><div class="cell" style="background:{bg};color:{fg};white-space:normal;line-height:1.15;font-size:10px">{label}</div></td>')
             else:
                 tr.append(f'<td class="c{info["day"]}"></td>')
@@ -1211,7 +1226,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
         for col in range(1, sum_col + n_counts):
             ws.cell(row=last_row, column=col).fill = fill('#C0392B')
         ws.row_dimensions[last_row].height = 4
-    for k, slot in enumerate(shortage_slots(days)):
+    for k, (slot, j) in enumerate(shortage_lines(days)):
         last_row += 1
         bg, fg = MATRIX_SHIFT_COLORS[slot]
         ws.cell(row=last_row, column=1, value='⚠️ 未決定').font = Font(bold=True, color='C0392B')
@@ -1220,9 +1235,9 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
             count = sum(x['count'] for x in info['shortage'] if x['slot'] == slot)
             c = ws.cell(row=last_row, column=first_day_col + i)
             c.border = border
-            if count:
+            if count > j:
                 slot_total += 1
-                c.value = slot + ('' if count == 1 else f'×{count}')
+                c.value = slot
                 c.fill = fill(bg); c.font = Font(bold=True, size=xlsx_label_size(c.value), color=fg.lstrip('#'))
                 ws.cell(row=header_row, column=first_day_col + i).fill = fill('#FDE2E0')
             c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=False, shrink_to_fit=True)
@@ -1912,7 +1927,7 @@ def show_schedule_notice(result, messages, alerts=None):
     if result is None:
         st.error("当直案を作成できませんでした。")
     elif shortage_rows:
-        st.warning(f"不足が残っています：{len(shortage_rows)}枠、合計{sum(shortage_rows)}名分（医師別の当直一覧のいちばん下、赤線の下で確認できます）")
+        st.warning(f"不足が残っています：未決定の枠が{sum(shortage_rows)}枠あります（医師別の当直一覧のいちばん下、赤線の下で確認できます）")
     else:
         st.success("必要人数を満たす当直案ができました。")
 
@@ -6191,7 +6206,7 @@ if len(staff_df) > 0:
                                     if any(abs((datetime.date(year, month, d) - e).days) <= _gap for e in _ext)}
         matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday,
                                                      comments=imported_comments(year, month), gap_blocked=gap_blocked)
-        missing_total = sum(len(info['shortage']) for info in matrix_days)
+        missing_total = shortage_total(matrix_days)
         # 下の帯の「当直案を作成」ボタンの横に、結果のまとめを出す
         _t = remote_now()[-8:-3]
         _summary = (f"<div class='cb-res bad'>⚠ {_t} 作成：未決定 {missing_total}枠</div>" if missing_total
