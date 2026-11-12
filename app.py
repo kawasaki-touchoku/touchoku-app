@@ -25,6 +25,10 @@ NG_COLUMN = 'NG日(半角カンマ区切り)'
 # 宿直・日直それぞれの月間上限（A・B・外来を合わせた回数）。空欄なら制限なし
 GROUP_CAP_COLUMNS = {'宿直上限': ['A宿直', 'B宿直', '外来宿直'], '日直上限': ['A日直', 'B日直', '外来日直']}
 REQUEST_COLUMN = '希望日(半角カンマ区切り)'
+# 日直がからむ勤務の間隔（日直→宿直・宿直→日直・日直→日直）。宿直→宿直は「間隔下限」を使う。
+# この列がない・空欄のときは「間隔下限」と同じ値にする（以前の動きのまま）
+DAY_GAP_COLUMN = '日直間隔下限'
+DAY_GAP_TEMPLATE_DEFAULT = 2   # 新しいひな形の初めの値
 
 
 def clean_text(value):
@@ -96,6 +100,23 @@ def parse_staff_csv(file_bytes):
             blank = df[weekday_column].fillna("").astype(str).str.strip().eq("")
             df.loc[blank, weekday_column] = df.loc[blank, old_column]
             df = df.drop(columns=[old_column])
+    return add_day_gap_column(df)
+
+
+def add_day_gap_column(df):
+    """「日直間隔下限」の列がない（以前の）CSV・途中保存では、「間隔下限」の右に列を足し、間隔下限と同じ値を入れる。
+    空欄のマスも間隔下限と同じ値にする（今までの動きを変えないため）。"""
+    if "間隔下限" not in df.columns:
+        return df
+    df = df.copy()
+    base = pd.to_numeric(df["間隔下限"], errors="coerce")
+    if DAY_GAP_COLUMN not in df.columns:
+        df.insert(list(df.columns).index("間隔下限") + 1, DAY_GAP_COLUMN, base)
+    else:
+        blank = df[DAY_GAP_COLUMN].map(lambda v: clean_text(v).lower() in ("", "nan", "none", "<na>"))
+        if blank.any():
+            df[DAY_GAP_COLUMN] = df[DAY_GAP_COLUMN].astype(object)
+            df.loc[blank, DAY_GAP_COLUMN] = base[blank]
     return df
 
 
@@ -290,6 +311,131 @@ def set_all_ng(doc_name, y, m, ndays, val, custom_hols=()):
 # ==========================================
 # 勤務間隔制約：自動割当は確定勤務・月外勤務との間隔も守る
 # ==========================================
+def duty_kind(slot):
+    """枠名から 'day'（日直）か 'night'（宿直）かを返す。"""
+    return 'day' if slot in DAY_SHIFTS else 'night'
+
+
+def worked_items(items):
+    """前後の月の確定当直の一覧を [(日付, 'day'|'night')] にそろえる（日付だけの古い形は宿直として扱う）。"""
+    out = []
+    for it in items or []:
+        if isinstance(it, (tuple, list)) and len(it) == 2:
+            out.append((it[0], it[1] if it[1] in ('day', 'night') else 'night'))
+        else:
+            out.append((it, 'night'))
+    return out
+
+
+def gap_needed(kind_a, kind_b, night_gap, day_gap):
+    """2つの勤務の間に空ける日数。宿直→宿直は間隔下限、日直がからむ組み合わせは日直間隔。"""
+    return night_gap if (kind_a == 'night' and kind_b == 'night') else day_gap
+
+
+def external_gap_block(dt, external, night_gap, day_gap):
+    """前後の月の確定当直のため、その日に (日直に入れない, 宿直に入れない) を返す。"""
+    day_block = night_block = False
+    for ext, kind in worked_items(external):
+        dist = abs((dt - ext).days)
+        if dist <= gap_needed(kind, 'day', night_gap, day_gap):
+            day_block = True
+        if dist <= gap_needed(kind, 'night', night_gap, day_gap):
+            night_block = True
+    return day_block, night_block
+
+
+def external_gap_blocked(staff_df, past, future, num_days, date_of):
+    """
+    医師別の当直一覧の薄紫のマス用：前後の月の確定当直のため入れない日。
+    {先生: {日: (日直に入れない, 宿直に入れない)}}（どちらも入れる日は入れない）
+    """
+    blocked = {}
+    for _, r in staff_df.iterrows():
+        name = str(r['先生の名前'])
+        gv = pd.to_numeric(pd.Series([r.get('間隔下限')]), errors='coerce').iloc[0]
+        night_gap = 0 if pd.isna(gv) else int(gv)
+        dv = pd.to_numeric(pd.Series([r.get(DAY_GAP_COLUMN)]), errors='coerce').iloc[0]
+        day_gap = night_gap if pd.isna(dv) else int(dv)
+        ext = worked_items((past or {}).get(name, [])) + worked_items((future or {}).get(name, []))
+        if not ext:
+            continue
+        marks = {}
+        for d in range(1, num_days + 1):
+            b = external_gap_block(date_of(d), ext, night_gap, day_gap)
+            if any(b):
+                marks[d] = b
+        if marks:
+            blocked[name] = marks
+    return blocked
+
+
+def gap_marks(gap_blocked, name, d, holiday):
+    """その日のマスの (日直側が薄紫, 宿直側が薄紫)。平日は日直がないので宿直側だけを見る。"""
+    v = (gap_blocked or {}).get(name, {})
+    if isinstance(v, dict):
+        day_b, night_b = v.get(d, (False, False))
+    else:   # 以前の形（日の集まり）
+        day_b = night_b = d in v
+    return (bool(day_b) and holiday), bool(night_b)
+
+
+def _add_typed_interval_constraints(model, shifts, doctors, daily_active_shifts, num_days, date_of, min_intervals, day_intervals,
+                                    past_worked_dates, future_worked_dates, absolute_req_days, absolute_req_specific):
+    """
+    勤務間隔の条件（通常版・期間指定版で共通）。
+    宿直→宿直は「間隔下限」、日直→宿直・宿直→日直・日直→日直は「日直間隔」の日数を空ける。
+    確定同士は維持し、自動割当と全勤務（前後の月の確定当直を含む）の間隔を制限する。
+    日直間隔と間隔下限が同じ先生は、以前とまったく同じ条件になる（短いほうの日数までは「どの勤務どうしも」、
+    そこから長いほうの日数までは、該当する組み合わせだけを制限する）。
+    """
+    for doc in doctors:
+        night_gap = min_intervals[doc]
+        day_gap = (day_intervals or {}).get(doc, night_gap)
+        short_gap, long_gap = min(night_gap, day_gap), max(night_gap, day_gap)
+        fixed_days = set(absolute_req_days[doc]) | {d for d, s in absolute_req_specific[doc]}
+        external = worked_items(past_worked_dates.get(doc, [])) + worked_items(future_worked_dates.get(doc, []))
+        worked = {}                       # その日に何か勤務があるか（以前と同じ）
+        typed = {}                        # 間隔下限と日直間隔が違うときだけ：その日に宿直（または日直）があるか
+        typed_kind = 'night' if night_gap > day_gap else 'day'
+        typed_group = NIGHT_SHIFTS if typed_kind == 'night' else DAY_SHIFTS
+        for d in range(1, num_days + 1):
+            variables = [shifts[d, doc, s] for s in daily_active_shifts.get(d, []) if (d, doc, s) in shifts]
+            if not variables:
+                continue
+            worked[d] = model.NewBoolVar(f'working_{doc}_{d}')
+            model.AddMaxEquality(worked[d], variables)
+            if long_gap > short_gap:
+                tv = [shifts[d, doc, s] for s in daily_active_shifts.get(d, []) if s in typed_group and (d, doc, s) in shifts]
+                if tv:
+                    typed[d] = model.NewBoolVar(f'working_{typed_kind}_{doc}_{d}')
+                    model.AddMaxEquality(typed[d], tv)
+            # 前後の月の確定当直との間隔（今月・期間中の確定の日は対象外）
+            if d not in fixed_days and external:
+                day_block, night_block = external_gap_block(date_of(d), external, night_gap, day_gap)
+                if day_block and night_block:
+                    model.Add(worked[d] == 0)
+                else:
+                    for s in daily_active_shifts.get(d, []):
+                        if (d, doc, s) in shifts and ((day_block and s in DAY_SHIFTS) or (night_block and s in NIGHT_SHIFTS)):
+                            model.Add(shifts[d, doc, s] == 0)
+        for d in worked:
+            for other in range(d + 1, min(num_days, d + long_gap) + 1):
+                if other not in worked or (d in fixed_days and other in fixed_days):
+                    continue
+                if other - d <= short_gap:
+                    model.Add(worked[d] + worked[other] <= 1)
+                elif typed_kind == 'night':
+                    # 宿直→宿直だけ、間隔下限まで空ける
+                    if d in typed and other in typed:
+                        model.Add(typed[d] + typed[other] <= 1)
+                else:
+                    # 日直がからむ組み合わせだけ、日直間隔まで空ける（日直→何か、何か→日直）
+                    if d in typed:
+                        model.Add(typed[d] + worked[other] <= 1)
+                    if other in typed:
+                        model.Add(worked[d] + typed[other] <= 1)
+
+
 def add_interval_constraints(
     model,
     shifts,
@@ -303,25 +449,12 @@ def add_interval_constraints(
     future_worked_dates,
     absolute_req_days,
     absolute_req_specific,
+    day_intervals=None,
 ):
-    """確定同士は維持し、自動割当と全勤務の間隔を制限する。"""
-    for doc in doctors:
-        gap = min_intervals[doc]
-        fixed_days = set(absolute_req_days[doc]) | {d for d, s in absolute_req_specific[doc]}
-        external = set(past_worked_dates.get(doc, [])) | set(future_worked_dates.get(doc, []))
-        worked = {}
-        for d in range(1, num_days + 1):
-            variables = [shifts[d, doc, s] for s in daily_active_shifts.get(d, []) if (d, doc, s) in shifts]
-            if not variables: continue
-            worked[d] = model.NewBoolVar(f'working_{doc}_{d}')
-            model.AddMaxEquality(worked[d], variables)
-            dt = datetime.date(target_year, target_month, d)
-            if d not in fixed_days and any(abs((dt - ext).days) <= gap for ext in external):
-                model.Add(worked[d] == 0)
-        for d in worked:
-            for other in range(d + 1, min(num_days, d + gap) + 1):
-                if other in worked and not (d in fixed_days and other in fixed_days):
-                    model.Add(worked[d] + worked[other] <= 1)
+    """確定同士は維持し、自動割当と全勤務の間隔を制限する（宿直→宿直は間隔下限、日直がからむ組み合わせは日直間隔）。"""
+    _add_typed_interval_constraints(model, shifts, doctors, daily_active_shifts, num_days,
+                                    lambda d: datetime.date(target_year, target_month, d), min_intervals, day_intervals,
+                                    past_worked_dates, future_worked_dates, absolute_req_days, absolute_req_specific)
 
 
 # ==========================================
@@ -657,13 +790,15 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
             # 前後の月の確定当直との勤務間隔で入れない日（薄紫のマス）も、実質NGとして数える
             _kind = effective_ng(ng.get(d, 'OK'), info['holiday'])
             _pmr = pm_duty_restricted(datetime.date(year, month, d), pm_days, year, month, custom_holidays, next_month_special_holiday)
-            _gap = d in (gap_blocked or {}).get(name, ())
+            # （日直と宿直で空ける日数が違うので、日直側・宿直側を分けて見る。平日は宿直側だけ）
+            _gday, _gnight = gap_marks(gap_blocked, name, d, info['holiday'])
+            _gap = _gday or _gnight
             if _kind != 'OK' or _pmr or _gap:
                 info['ng_count'] += 1
             # 休日は、日直NGと宿直NGを分けても数える（日直NG＝全NG・日NG、宿直NG＝全NG・宿NG・翌日PM duty）
             if info['holiday']:
-                info['ng_day'] += int(_kind in ('全NG', '日NG') or _gap)
-                info['ng_night'] += int(_kind in ('全NG', '宿NG') or _pmr or _gap)
+                info['ng_day'] += int(_kind in ('全NG', '日NG') or _gday)
+                info['ng_night'] += int(_kind in ('全NG', '宿NG') or _pmr or _gnight)
             assigned = [s for s in RESULT_COLUMNS[2:] if name in [x.strip() for x in re.split(r'[、,]', str(r[s]))]]
             if assigned:
                 if info['holiday']:
@@ -683,7 +818,16 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
             pm = pm_duty_restricted(datetime.date(year, month, d), pm_days, year, month, custom_holidays, next_month_special_holiday)
             # 先月末・来月初めの確定当直との勤務間隔のため入れない日：マスを薄紫にする（×の表示はそのまま）
             # （今月の確定当直の前後は、色を付けない）
-            if d in (gap_blocked or {}).get(name, ()):
+            gday, gnight = gap_marks(gap_blocked, name, d, info['holiday'])
+            if info['holiday'] and gday != gnight:
+                # 休日で、日直か宿直の片方だけ入れない日：入れない側の半分だけを薄紫にする
+                # （上半分＝日直、下半分＝宿直。宿直だけ入れる日の翌日PM dutyは、下半分を斜線にする）
+                top = '×' if kind in ('全NG', '日NG') else ''
+                bottom = '×' if kind in ('全NG', '宿NG') else ''
+                cells.append({'type': 'pmhalf' if (pm and not gnight) else 'half', 'top': top, 'bottom': bottom,
+                              'text': '×' if (top or bottom) else '', 'gap_top': gday, 'gap_bottom': gnight})
+                continue
+            if gnight:
                 if info['holiday'] and kind in ('全NG', '宿NG', '日NG'):
                     top = '×' if kind in ('全NG', '日NG') else ''
                     bottom = '×' if kind in ('全NG', '宿NG') else ''
@@ -854,6 +998,19 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
 .dm tbody tr:not(.ngcount):nth-child(odd) td.pmhalf{background-image:linear-gradient(rgba(36,64,95,.075),rgba(36,64,95,.075)),
   repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px) !important;
   background-size:100% 50%,100% 50% !important;background-position:left top,left bottom !important;background-repeat:no-repeat !important}
+/* 休日の、日直か宿直の片方だけが前後の月の確定当直のため入れない日：入れない側の半分だけ薄紫（上＝日直、下＝宿直） */
+.dm td.half.gtop{background:linear-gradient(#e2daf2,#e2daf2) left top/100% 50% no-repeat,#fdf1f1}
+.dm td.half.gbot{background:linear-gradient(#e2daf2,#e2daf2) left bottom/100% 50% no-repeat,#fdf1f1}
+.dm td.pmhalf.gtop{background:linear-gradient(#e2daf2,#e2daf2) left top/100% 50% no-repeat,
+  repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px) left bottom/100% 50% no-repeat,#fdf1f1}
+.dm tbody tr:not(.ngcount):nth-child(odd) td.half.gtop,.dm tbody tr:not(.ngcount):nth-child(odd) td.half.gbot{
+  background-image:linear-gradient(rgba(36,64,95,.075),rgba(36,64,95,.075)),linear-gradient(#e2daf2,#e2daf2) !important;
+  background-size:100% 100%,100% 50% !important;background-repeat:no-repeat !important}
+.dm tbody tr:not(.ngcount):nth-child(odd) td.half.gtop{background-position:0 0,left top !important}
+.dm tbody tr:not(.ngcount):nth-child(odd) td.half.gbot{background-position:0 0,left bottom !important}
+.dm tbody tr:not(.ngcount):nth-child(odd) td.pmhalf.gtop{background-image:linear-gradient(rgba(36,64,95,.075),rgba(36,64,95,.075)),
+  linear-gradient(#e2daf2,#e2daf2),repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px) !important;
+  background-size:100% 100%,100% 50%,100% 50% !important;background-position:0 0,left top,left bottom !important;background-repeat:no-repeat !important}
 .dm tr.short.first td{border-top:2px solid #c0392b}
 .dm tr.short td.nm{color:#c0392b}
 .dm th.miss{background:#fde2e0}
@@ -881,6 +1038,8 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
     legend.append(f'<span><i style="box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME}">&nbsp;&nbsp;&nbsp;</i>茶色の枠：希望日が通った当直</span>')
     legend.append('<span><i style="background:#fdf1f1">&nbsp;</i>薄い赤の列：土日祝・休日にした日</span>')
     legend.append('<span><i style="background:#e2daf2">&nbsp;</i>薄紫：前後の月（先月末・来月初めなど）の確定当直との勤務間隔のため、入れない日</span>')
+    legend.append('<span><i style="background:linear-gradient(#e2daf2,#e2daf2) left top/100% 50% no-repeat,#fdf1f1;line-height:1">&nbsp;<br>&nbsp;</i>'
+                  '上半分だけ薄紫：休日の日直だけ入れない日（下半分だけ薄紫＝宿直だけ入れない日）。日直がからむ組み合わせは「日直間隔」で空けるため</span>')
     legend.append('<span><i style="color:#c0392b">×</i>当直NG（平日は宿直NG）</span>')
     legend.append('<span><i style="color:#c0392b;background:#fdf1f1;line-height:1;padding:0 4px">×<br>&nbsp;</i>'
                   '休日のマス：上半分＝日直、下半分＝宿直。上の×＝日直NG、下の×＝宿直NG（上下とも×＝全NG）</span>')
@@ -935,7 +1094,8 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
             elif cell['type'] == 'pm':
                 tr.append(f'<td class="{col}"><div class="cell pm"></div></td>')
             elif cell['type'] in ('pmhalf', 'half'):
-                hol_class = (' hol' if cell['type'] == 'half' else '') + (' gap' if cell.get('gap') else '')
+                hol_class = (' hol' if cell['type'] == 'half' else '') + (' gap' if cell.get('gap') else '') \
+                    + (' gtop' if cell.get('gap_top') else '') + (' gbot' if cell.get('gap_bottom') else '')
                 tr.append(f'<td class="{col}{hol_class} {cell["type"]}"><span class="t">{cell["top"]}</span><span class="b">{cell["bottom"]}</span></td>')
             else:
                 tr.append(f'<td{td_class}></td>')
@@ -1026,6 +1186,11 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
     # （Excelはマスの半分だけを塗れないため、途中から色が変わる塗りで表す）
     PM_HALF_FILL = GradientFill(type='linear', degree=90, stop=(Stop('FDF1F1', 0), Stop('FDF1F1', 0.45),
                                                                 Stop(PM_COLOR, 0.6), Stop(PM_COLOR, 1)))
+
+    def half_fill(top_color, bottom_color):
+        """上半分と下半分で色が変わる塗り（Excelはマスの半分だけを塗れないため）。"""
+        return GradientFill(type='linear', degree=90, stop=(Stop(top_color, 0), Stop(top_color, 0.45),
+                                                            Stop(bottom_color, 0.6), Stop(bottom_color, 1)))
 
     ws.cell(row=1, column=1, value=f"{year}年{month}月分 当直表" if title is None else f"{title} 当直表").font = Font(bold=True, size=14)
     header_row, first_day_col = 3, 4
@@ -1163,6 +1328,11 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
                 c.fill = fill('#FDF1F1')
             if cell.get('gap'):
                 c.fill = fill('#E2DAF2')   # 先月末・来月初めの確定当直との勤務間隔のため入れない日
+            elif cell.get('gap_top') or cell.get('gap_bottom'):
+                # 休日の、日直か宿直の片方だけ入れない日：入れない側（上＝日直、下＝宿直）の半分だけ薄紫にする
+                other = PM_COLOR if cell['type'] == 'pmhalf' else 'FDF1F1'
+                top_c, bottom_c = ('E2DAF2', other) if cell.get('gap_top') else ('FDF1F1', 'E2DAF2')
+                c.fill = half_fill(top_c, bottom_c)
         if row.get('comment') or row.get('note'):
             # 右どなりの日付のマスが空だと、メモの長い文字が当直表の上にはみ出して見えるので、空白を1つ入れて止める
             nxt = ws.cell(row=r_idx, column=first_day_col)
@@ -1208,7 +1378,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
                 if col in shift_cols:
                     continue
                 c = ws.cell(row=r_idx, column=col)
-                if isinstance(c.fill, GradientFill):
+                if getattr(c.fill, 'tagname', '') == 'gradientFill':   # 途中で色が変わる塗り（c.fill は包まれているので型では判定できない）
                     c.fill = GradientFill(type='linear', degree=90, stop=[
                         Stop(stripe_color(st.color.rgb), st.position) for st in c.fill.stop])
                 elif c.fill is not None and c.fill.fill_type == 'solid':
@@ -1288,6 +1458,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
     s8 = legend_line(8, 'NG人数の行（見出しのすぐ下）：その日にNGの先生の数（翌日PM dutyで宿直を外す先生・薄紫のマスの先生を含む）。休日は「日直NG／宿直NG」の人数')
     s8.value = 3; s8.fill = fill('#FFD2A1'); s8.font = Font(bold=True, color='7A3A00')
     legend_line(10, '薄紫：前後の月（先月末・来月初めなど）の確定当直との勤務間隔のため、入れない日').fill = fill('#E2DAF2')
+    legend_line(11, '上半分だけ薄紫：休日の日直だけ入れない日（下半分だけ薄紫＝宿直だけ入れない日）。日直がからむ組み合わせは「日直間隔」で空けるため').fill = half_fill('E2DAF2', 'FDF1F1')
     legend_line(3, '下半分だけ黄色：休日の翌日PM dutyの日。宿直は外し、日直には入れる（×の意味は休日のマスと同じ）').fill = PM_HALF_FILL
     if count_alert_text(alerts):
         s7 = legend_line(9, '右端の赤い枠の回数：' + count_alert_text(alerts))
@@ -1355,11 +1526,11 @@ def validate_staff_inputs(df, year, month):
     for col, default in NUMERIC_DEFAULTS.items():
         if col not in df:
             df[col] = default
-    for col in [NG_COLUMN, REQUEST_COLUMN, '翌日PM duty'] + list(GROUP_CAP_COLUMNS):
+    for col in [NG_COLUMN, REQUEST_COLUMN, '翌日PM duty', DAY_GAP_COLUMN] + list(GROUP_CAP_COLUMNS):
         if col not in df:
             df[col] = ''
-    for col in GROUP_CAP_COLUMNS:
-        df[col] = df[col].astype(object)   # 空欄（制限なし）と数字が混ざるため
+    for col in list(GROUP_CAP_COLUMNS) + [DAY_GAP_COLUMN]:
+        df[col] = df[col].astype(object)   # 空欄（制限なし／間隔下限と同じ）と数字が混ざるため
     for i, row in df.iterrows():
         name = row['先生の名前']
         if any(c in name for c in ',、') or name == '-' or '⚠️不足' in name:
@@ -1378,6 +1549,18 @@ def validate_staff_inputs(df, year, month):
                 errors.append(f'{name}：月下限は月上限以下にしてください。')
         except (ValueError, TypeError):
             pass
+        # 日直間隔は空欄なら「間隔下限」と同じ値にする
+        raw = clean_text(row.get(DAY_GAP_COLUMN, ''))
+        if raw.lower() in ('', 'nan', 'none', '<na>'):
+            df.at[i, DAY_GAP_COLUMN] = df.at[i, '間隔下限']
+        else:
+            try:
+                n = float(raw)
+                if not math.isfinite(n) or n < 0 or n != int(n) or n > 1000000:
+                    raise ValueError()
+                df.at[i, DAY_GAP_COLUMN] = int(n)
+            except (TypeError, ValueError, OverflowError):
+                errors.append(f'{name}：日直間隔は0以上の整数にしてください（空欄なら間隔下限と同じ）。')
         # 宿直上限・日直上限は空欄なら制限なし
         for col in GROUP_CAP_COLUMNS:
             raw = clean_text(row.get(col, ''))
@@ -1485,6 +1668,30 @@ def shortage_priority_text(priority):
 # ==========================================
 # 作成結果の点検（確定指定で条件を超えた箇所などを知らせる）
 # ==========================================
+def close_fixed_duty_warnings(name, worked, past, future, night_gap, day_gap, in_range):
+    """
+    確定当直同士の間隔が短すぎるときの注意。宿直→宿直は「間隔下限」、日直がからむ組み合わせは「日直間隔」と比べる。
+    worked：作った当直案の (日付, 'day'|'night')。past・future：前後の月の確定当直。in_range：作る月（期間）の日なら True。
+    """
+    items = sorted(set(worked_items(worked)) | set(worked_items((past or {}).get(name, []))) | set(worked_items((future or {}).get(name, []))))
+    label = {'day': '日直', 'night': '宿直'}
+    out = []
+    # となり合う勤務どうし、と、宿直だけを並べたときのとなり合う宿直どうしを比べる（同じ組は1回だけ）
+    nights = [x for x in items if x[1] == 'night']
+    pairs = list(dict.fromkeys(list(zip(items, items[1:])) + list(zip(nights, nights[1:]))))
+    pairs.sort()
+    for (a, ka), (b, kb) in pairs:
+        if b == a:
+            continue   # 同じ日の日直と宿直（確定で1日2回）は、間隔の注意の対象にしない
+        need = gap_needed(ka, kb, night_gap, day_gap)
+        if (b - a).days > need or not (in_range(a) or in_range(b)):
+            continue
+        col = '間隔下限' if (ka, kb) == ('night', 'night') else '日直間隔'
+        out.append(f'{name}：確定当直同士の間隔が「{col}」より短くなっています（{a.month}/{a.day} {label[ka]}→{b.month}/{b.day} {label[kb]}、'
+                   f'空き{(b - a).days - 1}日／設定{need}日）。確定当直のまま残しました。')
+    return out
+
+
 def audit_schedule(result, staff, year, month, holidays, multi, past, future, next_month_special_holiday=False):
     warnings = []
     for _, row in staff.iterrows():
@@ -1497,7 +1704,7 @@ def audit_schedule(result, staff, year, month, holidays, multi, past, future, ne
             for slot in ALL_SHIFT_TYPES:
                 if name not in [n.strip() for n in re.split('[、,]', str(r[slot]))]:
                     continue
-                worked.append(dt); counts[slot] += 1
+                worked.append((dt, duty_kind(slot))); counts[slot] += 1
                 hol_count += int(r['平日/休日'] == '休日')
                 kind = ng.get(dt.day, 'OK')
                 night = slot in NIGHT_SHIFTS
@@ -1513,12 +1720,8 @@ def audit_schedule(result, staff, year, month, holidays, multi, past, future, ne
         for label, value, cap in [('月上限', total, int(row['月上限'])), ('休日上限', hol_count, int(row['休日上限']))] + group_items + [(s + '上限', counts[s], int(row[s + '上限'])) for s in ALL_SHIFT_TYPES]:
             if value > cap:
                 warnings.append(f'{name}：確定当直のため{staff_column_specs().get(label, (label,))[0]}を超えています（設定{cap}回／結果{value}回）。')
-        dates = sorted(set(worked) | set((past or {}).get(name, [])) | set((future or {}).get(name, [])))
-        for a, b in zip(dates, dates[1:]):
-            if (a.year, a.month) != (year, month) and (b.year, b.month) != (year, month): continue
-            gap = (b - a).days - 1
-            if gap < int(row['間隔下限']):
-                warnings.append(f'{name}：確定当直同士の間隔が「間隔下限」より短くなっています（{a.month}/{a.day}→{b.month}/{b.day}、空き{gap}日／設定{int(row["間隔下限"])}日）。確定当直のまま残しました。')
+        warnings += close_fixed_duty_warnings(name, worked, past, future, int(row['間隔下限']), int(row.get(DAY_GAP_COLUMN, row['間隔下限'])),
+                                              lambda dt: (dt.year, dt.month) == (year, month))
     for _, r in result.iterrows():
         d = parse_shift_date(r['日付'], year, month).day
         for s in ALL_SHIFT_TYPES:
@@ -1561,6 +1764,7 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
     req_priority = {}
     hard_weekdays = {}
     min_intervals = {}
+    day_intervals = {}   # 日直がからむ勤務の間隔
     min_shifts_total = {}
     max_shifts_total = {}
     max_hol_shifts_per_doc = {}
@@ -1589,9 +1793,9 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
                             absolute_req_specific[doc_val].append((date_obj.day, s_type))
                             fixed_specific[doc_val].add((date_obj.day, s_type))
                         elif date_obj < datetime.date(target_year, target_month, 1):
-                            past_worked_dates[doc_val].append(date_obj)
+                            past_worked_dates[doc_val].append((date_obj, duty_kind(s_type)))   # 日付と、日直か宿直か
                         else:
-                            future_worked_dates[doc_val].append(date_obj)
+                            future_worked_dates[doc_val].append((date_obj, duty_kind(s_type)))
 
     # --- 医師条件の読み取り ---
     for _, row in staff_df.iterrows():
@@ -1603,6 +1807,7 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
         req_specific[doc] = [(d, s) for d, s in req_specific[doc] if d not in locked_days]
         req_priority[doc] = safe_int(row.get('希望優先度(数字が大きいほど優先)'), 1)
         min_intervals[doc] = safe_int(row.get('間隔下限'), 5)
+        day_intervals[doc] = safe_int(row.get(DAY_GAP_COLUMN), min_intervals[doc])
         min_shifts_total[doc] = safe_int(row.get('月下限'), 0)
         max_shifts_total[doc] = safe_int(row.get('月上限'), 5)
         max_hol_shifts_per_doc[doc] = safe_int(row.get('休日上限'), 4)
@@ -1730,7 +1935,7 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
             num_days=num_days, target_year=target_year, target_month=target_month,
             min_intervals=min_intervals, past_worked_dates=past_worked_dates,
             future_worked_dates=future_worked_dates, absolute_req_days=absolute_req_days,
-            absolute_req_specific=absolute_req_specific,
+            absolute_req_specific=absolute_req_specific, day_intervals=day_intervals,
         )
         return worked_all, holiday_worked
 
@@ -2675,7 +2880,10 @@ def staff_column_specs():
         "希望優先度(数字が大きいほど優先)": ("優先度", 56, "num",
             "希望優先度。通常は1。1〜99は数字が大きいほど優先。100以上はこの先生の希望日すべてが確定当直と同じ扱いになり、NG日・上限より優先されます。ほかの勤務との間隔は空けます。"),
         "間隔下限": ("間隔下限", 66, "num",
-            "勤務と勤務の間に空ける日数の下限。5日なら10日の次は16日以降。確定当直とほかの勤務の間も空けます。確定当直同士が近すぎる場合は注意を表示します。"),
+            "宿直と次の宿直の間に空ける日数の下限。5日なら10日の宿直の次の宿直は16日以降。日直がからむ組み合わせは右の「日直間隔」を使います。確定当直とほかの勤務の間も空けます。確定当直同士が近すぎる場合は注意を表示します。"),
+        DAY_GAP_COLUMN: ("日直間隔", 66, "num",
+            "日直がからむ組み合わせ（日直→宿直・宿直→日直・日直→日直）で、勤務の間に空ける日数の下限。2日なら10日の次は13日以降。"
+            "宿直→宿直は「間隔下限」を使います。空欄なら間隔下限と同じ日数にします。"),
         "月下限": ("月下限", 56, "num", "月下限（目標）：できるだけ確保したい回数です。条件によっては届きません。月上限以下にしてください。"),
         "月上限": ("月上限", 56, "num", "月上限：日直・宿直を合わせた月間の上限です。確定当直がある場合は、超えることがあります。"),
         "休日上限": ("休日上限", 66, "num", "休日上限：土日祝と「休日にする」にした日の、日直と宿直の合計の上限です。1枠を1回と数えます。"),
@@ -2709,7 +2917,8 @@ def staff_column_config(columns, as_index=False):
 
 
 def staff_legend_text():
-    return ("列名の意味：優先度＝希望優先度　間隔下限＝勤務と勤務の間に空ける日数　月下限＝月の回数の目標（できるだけ確保）　"
+    return ("列名の意味：優先度＝希望優先度　間隔下限＝宿直と宿直の間に空ける日数　日直間隔＝日直がからむ勤務（日直→宿直・宿直→日直・日直→日直）の間に空ける日数　"
+            "月下限＝月の回数の目標（できるだけ確保）　"
             "月上限＝月の回数の上限　休日上限＝休日の回数の上限　宿直上限・日直上限＝A・B・外来を合わせた上限　"
             "A宿上限〜外日上限＝各枠（A宿直・B宿直・外来宿直・A日直・B日直・外来日直）の月の上限"
             "（列名にカーソルを合わせると説明が出ます）")
@@ -2800,7 +3009,8 @@ def staff_add_remove_ui(staff_df, year, month, is_template=False):
                     x = pd.to_numeric(pd.Series([src_row.get(c)]), errors="coerce").iloc[0]
                     return "なし" if pd.isna(x) else str(int(x))
                 caps = "・".join(f"{s}{v(s + '上限')}" for s in RESULT_COLUMNS[2:] if v(s + "上限") not in ("0", "なし"))
-                st.caption(f"写す内容：間隔下限 {v('間隔下限')}日、月間 {v('月下限')}〜{v('月上限')}回、"
+                st.caption(f"写す内容：間隔下限 {v('間隔下限')}日、日直間隔 {v(DAY_GAP_COLUMN) if v(DAY_GAP_COLUMN) != 'なし' else v('間隔下限')}日、"
+                           f"月間 {v('月下限')}〜{v('月上限')}回、"
                            f"休日 {v('休日上限')}回まで、宿直上限 {v('宿直上限')}・日直上限 {v('日直上限')}、枠 {caps or 'なし'}。"
                            "備考・希望日・NG日は写しません。")
             st.text_input("翌日PM dutyの曜日（任意）", key="add_doc_pm", placeholder="例：水　（複数は 水,木）")
@@ -4209,25 +4419,11 @@ def period_add_interval_constraints(
     future_worked_dates,
     absolute_req_days,
     absolute_req_specific,
+    day_intervals=None,
 ):
-    """確定同士は維持し、自動割当と全勤務の間隔を制限する。"""
-    for doc in doctors:
-        gap = min_intervals[doc]
-        fixed_days = set(absolute_req_days[doc]) | {d for d, s in absolute_req_specific[doc]}
-        external = set(past_worked_dates.get(doc, [])) | set(future_worked_dates.get(doc, []))
-        worked = {}
-        for d in range(1, num_days + 1):
-            variables = [shifts[d, doc, s] for s in daily_active_shifts.get(d, []) if (d, doc, s) in shifts]
-            if not variables: continue
-            worked[d] = model.NewBoolVar(f'working_{doc}_{d}')
-            model.AddMaxEquality(worked[d], variables)
-            dt = period.date(d)
-            if d not in fixed_days and any(abs((dt - ext).days) <= gap for ext in external):
-                model.Add(worked[d] == 0)
-        for d in worked:
-            for other in range(d + 1, min(num_days, d + gap) + 1):
-                if other in worked and not (d in fixed_days and other in fixed_days):
-                    model.Add(worked[d] + worked[other] <= 1)
+    """確定同士は維持し、自動割当と全勤務の間隔を制限する（宿直→宿直は間隔下限、日直がからむ組み合わせは日直間隔）。"""
+    _add_typed_interval_constraints(model, shifts, doctors, daily_active_shifts, num_days, period.date, min_intervals, day_intervals,
+                                    past_worked_dates, future_worked_dates, absolute_req_days, absolute_req_specific)
 
 
 def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_special_holiday=False, shortage_priority=None, locked_days=()):
@@ -4253,6 +4449,7 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
     req_priority = {}
     hard_weekdays = {}
     min_intervals = {}
+    day_intervals = {}   # 日直がからむ勤務の間隔
     min_shifts_total = {}
     max_shifts_total = {}
     max_hol_shifts_per_doc = {}
@@ -4281,9 +4478,9 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
                             absolute_req_specific[doc_val].append((P.index(date_obj), s_type))
                             fixed_specific[doc_val].add((P.index(date_obj), s_type))
                         elif date_obj < P.start:
-                            past_worked_dates[doc_val].append(date_obj)
+                            past_worked_dates[doc_val].append((date_obj, duty_kind(s_type)))   # 日付と、日直か宿直か
                         else:
-                            future_worked_dates[doc_val].append(date_obj)
+                            future_worked_dates[doc_val].append((date_obj, duty_kind(s_type)))
 
     # --- 医師条件の読み取り ---
     for _, row in staff_df.iterrows():
@@ -4295,6 +4492,7 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
         req_specific[doc] = [(d, s) for d, s in req_specific[doc] if d not in locked_days]
         req_priority[doc] = safe_int(row.get('希望優先度(数字が大きいほど優先)'), 1)
         min_intervals[doc] = safe_int(row.get('間隔下限'), 5)
+        day_intervals[doc] = safe_int(row.get(DAY_GAP_COLUMN), min_intervals[doc])
         min_shifts_total[doc] = safe_int(row.get('月下限'), 0)
         max_shifts_total[doc] = safe_int(row.get('月上限'), 5)
         max_hol_shifts_per_doc[doc] = safe_int(row.get('休日上限'), 4)
@@ -4422,7 +4620,7 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
             num_days=num_days, period=P,
             min_intervals=min_intervals, past_worked_dates=past_worked_dates,
             future_worked_dates=future_worked_dates, absolute_req_days=absolute_req_days,
-            absolute_req_specific=absolute_req_specific,
+            absolute_req_specific=absolute_req_specific, day_intervals=day_intervals,
         )
         return worked_all, holiday_worked
 
@@ -4596,11 +4794,11 @@ def period_validate_staff_inputs(df, P):
     for col, default in NUMERIC_DEFAULTS.items():
         if col not in df:
             df[col] = default
-    for col in [NG_COLUMN, REQUEST_COLUMN, '翌日PM duty'] + list(GROUP_CAP_COLUMNS):
+    for col in [NG_COLUMN, REQUEST_COLUMN, '翌日PM duty', DAY_GAP_COLUMN] + list(GROUP_CAP_COLUMNS):
         if col not in df:
             df[col] = ''
-    for col in GROUP_CAP_COLUMNS:
-        df[col] = df[col].astype(object)   # 空欄（制限なし）と数字が混ざるため
+    for col in list(GROUP_CAP_COLUMNS) + [DAY_GAP_COLUMN]:
+        df[col] = df[col].astype(object)   # 空欄（制限なし／間隔下限と同じ）と数字が混ざるため
     for i, row in df.iterrows():
         name = row['先生の名前']
         if any(c in name for c in ',、') or name == '-' or '⚠️不足' in name:
@@ -4619,6 +4817,18 @@ def period_validate_staff_inputs(df, P):
                 errors.append(f'{name}：月下限は月上限以下にしてください。')
         except (ValueError, TypeError):
             pass
+        # 日直間隔は空欄なら「間隔下限」と同じ値にする
+        raw = clean_text(row.get(DAY_GAP_COLUMN, ''))
+        if raw.lower() in ('', 'nan', 'none', '<na>'):
+            df.at[i, DAY_GAP_COLUMN] = df.at[i, '間隔下限']
+        else:
+            try:
+                n = float(raw)
+                if not math.isfinite(n) or n < 0 or n != int(n) or n > 1000000:
+                    raise ValueError()
+                df.at[i, DAY_GAP_COLUMN] = int(n)
+            except (TypeError, ValueError, OverflowError):
+                errors.append(f'{name}：日直間隔は0以上の整数にしてください（空欄なら間隔下限と同じ）。')
         # 宿直上限・日直上限は空欄なら制限なし
         for col in GROUP_CAP_COLUMNS:
             raw = clean_text(row.get(col, ''))
@@ -4695,7 +4905,7 @@ def period_audit_schedule(result, staff, P, holidays, multi, past, future, next_
             for slot in ALL_SHIFT_TYPES:
                 if name not in [n.strip() for n in re.split('[、,]', str(r[slot]))]:
                     continue
-                worked.append(dt); counts[slot] += 1
+                worked.append((dt, duty_kind(slot))); counts[slot] += 1
                 hol_count += int(r['平日/休日'] == '休日')
                 kind = ng.get(P.index(dt), 'OK')
                 night = slot in NIGHT_SHIFTS
@@ -4711,12 +4921,8 @@ def period_audit_schedule(result, staff, P, holidays, multi, past, future, next_
         for label, value, cap in [('月上限', total, int(row['月上限'])), ('休日上限', hol_count, int(row['休日上限']))] + group_items + [(s + '上限', counts[s], int(row[s + '上限'])) for s in ALL_SHIFT_TYPES]:
             if value > cap:
                 warnings.append(f'{name}：確定当直のため{staff_column_specs().get(label, (label,))[0]}を超えています（設定{cap}回／結果{value}回）。')
-        dates = sorted(set(worked) | set((past or {}).get(name, [])) | set((future or {}).get(name, [])))
-        for a, b in zip(dates, dates[1:]):
-            if P.index(a) is None and P.index(b) is None: continue
-            gap = (b - a).days - 1
-            if gap < int(row['間隔下限']):
-                warnings.append(f'{name}：確定当直同士の間隔が「間隔下限」より短くなっています（{a.month}/{a.day}→{b.month}/{b.day}、空き{gap}日／設定{int(row["間隔下限"])}日）。確定当直のまま残しました。')
+        warnings += close_fixed_duty_warnings(name, worked, past, future, int(row['間隔下限']), int(row.get(DAY_GAP_COLUMN, row['間隔下限'])),
+                                              lambda dt: P.index(dt) is not None)
     for _, r in result.iterrows():
         d = int(r['_idx'])
         for s in ALL_SHIFT_TYPES:
@@ -4785,13 +4991,15 @@ def period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month
             # 前後の月の確定当直との勤務間隔で入れない日（薄紫のマス）も、実質NGとして数える
             _kind = effective_ng(ng.get(d, 'OK'), info['holiday'])
             _pmr = period_pm_restricted(P, d, pm_days, custom_holidays, next_month_special_holiday)
-            _gap = d in (gap_blocked or {}).get(name, ())
+            # （日直と宿直で空ける日数が違うので、日直側・宿直側を分けて見る。平日は宿直側だけ）
+            _gday, _gnight = gap_marks(gap_blocked, name, d, info['holiday'])
+            _gap = _gday or _gnight
             if _kind != 'OK' or _pmr or _gap:
                 info['ng_count'] += 1
             # 休日は、日直NGと宿直NGを分けても数える（日直NG＝全NG・日NG、宿直NG＝全NG・宿NG・翌日PM duty）
             if info['holiday']:
-                info['ng_day'] += int(_kind in ('全NG', '日NG') or _gap)
-                info['ng_night'] += int(_kind in ('全NG', '宿NG') or _pmr or _gap)
+                info['ng_day'] += int(_kind in ('全NG', '日NG') or _gday)
+                info['ng_night'] += int(_kind in ('全NG', '宿NG') or _pmr or _gnight)
             assigned = [s for s in RESULT_COLUMNS[2:] if name in [x.strip() for x in re.split(r'[、,]', str(r[s]))]]
             if assigned:
                 if info['holiday']:
@@ -4811,7 +5019,16 @@ def period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month
             pm = period_pm_restricted(P, d, pm_days, custom_holidays, next_month_special_holiday)
             # 先月末・来月初めの確定当直との勤務間隔のため入れない日：マスを薄紫にする（×の表示はそのまま）
             # （今月の確定当直の前後は、色を付けない）
-            if d in (gap_blocked or {}).get(name, ()):
+            gday, gnight = gap_marks(gap_blocked, name, d, info['holiday'])
+            if info['holiday'] and gday != gnight:
+                # 休日で、日直か宿直の片方だけ入れない日：入れない側の半分だけを薄紫にする
+                # （上半分＝日直、下半分＝宿直。宿直だけ入れる日の翌日PM dutyは、下半分を斜線にする）
+                top = '×' if kind in ('全NG', '日NG') else ''
+                bottom = '×' if kind in ('全NG', '宿NG') else ''
+                cells.append({'type': 'pmhalf' if (pm and not gnight) else 'half', 'top': top, 'bottom': bottom,
+                              'text': '×' if (top or bottom) else '', 'gap_top': gday, 'gap_bottom': gnight})
+                continue
+            if gnight:
                 if info['holiday'] and kind in ('全NG', '宿NG', '日NG'):
                     top = '×' if kind in ('全NG', '日NG') else ''
                     bottom = '×' if kind in ('全NG', '宿NG') else ''
@@ -4980,7 +5197,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 - 枠名のマス：決まった当直（色は枠の種類）
 - **茶色の太い枠**：希望日が、希望どおりに通った当直
 - **薄い赤の列**：土日祝と「休日にする」にした日
-- **薄紫のマス**：先月末・来月初めの確定当直から「間隔下限」以内のため、入れない日（今月の確定当直の前後には色を付けません）
+- **薄紫のマス**：先月末・来月初めの確定当直から「間隔下限」（日直がからむ組み合わせは「日直間隔」）以内のため、入れない日（今月の確定当直の前後には色を付けません）。休日のマスで上半分だけ薄紫＝日直だけ入れない日、下半分だけ薄紫＝宿直だけ入れない日です
 - **×**：当直NGの日（平日は宿直NG）
 - **休日のマス**：上半分＝日直、下半分＝宿直です。上に×＝日直NG、下に×＝宿直NG、上下とも×＝全NG
 - **黄色の斜線**：翌日PM dutyのため宿直を外す日。×があれば、NGも付いている日です
@@ -5408,7 +5625,7 @@ with st.container(key="fixed_section"):
 - 今月の平日に日直を入力する場合は、先に上のカレンダーでその日を「休日にする」にしてください。
 - 「別途決定」にした日（年末年始など）の当番が決まったら、ここに入れておくと、当直案と一覧に表示され、前後の勤務間隔の計算にも使われます。
 - 今月の確定当直は、NG日や翌日PM duty（宿直を外す曜日）よりも優先されます。回数の上限（月上限・休日上限・各枠の上限など）を超える場合も、確定した分はそのまま入ります。
-- ほかの勤務は、確定当直から「間隔下限」以上あけて自動で入れます。確定当直同士の間隔が近すぎる場合は、確定内容をそのまま残し、注意を表示します。
+- ほかの勤務は、確定当直から「間隔下限」（日直がからむ組み合わせは「日直間隔」）以上あけて自動で入れます。確定当直同士の間隔が近すぎる場合は、確定内容をそのまま残し、注意を表示します。
 
 **今月の同じ日・同じ枠を指定した場合、確定当直への入力と「希望優先度100以上」での指定は、どちらも固定され、計算上の扱いは基本的に同じです。両方に入力する必要はありません。**
         """)
@@ -5550,7 +5767,8 @@ with staff_box_cond:
         st.markdown("""
 | 項目 | 意味・入力例 |
 | --- | --- |
-| 間隔下限 | 勤務と次の勤務の間に空ける日数です。5日なら、10日の次は16日以降です。 |
+| 間隔下限 | 宿直と次の宿直の間に空ける日数です。5日なら、10日の宿直の次の宿直は16日以降です。 |
+| 日直間隔 | 日直がからむ組み合わせ（日直→宿直、宿直→日直、日直→日直）で空ける日数です。2日なら、10日の次は13日以降です。宿直どうしより負担が小さいので、間隔下限より短くできます。空欄なら間隔下限と同じです。 |
 | 月下限 | できるだけ確保したい回数です。条件によっては、この回数に届かないことがあります。 |
 | 月上限 | 日直と宿直を合わせた月間の上限です。 |
 | 休日上限 | 土日祝日と「休日にする」にした日に担当する、日直と宿直の合計上限です。 |
@@ -5559,13 +5777,13 @@ with staff_box_cond:
 
 1つの枠を1回と数えます。確定当直で同じ日に日直と宿直を担当する場合は2回です。
 月下限は、月上限以下に設定してください。
-確定当直や希望優先度100以上の希望がある場合は、上限を超えることがあります。ほかの勤務は確定当直から「間隔下限」以上あけて入れ、確定当直同士が近すぎる場合は注意を表示します。
+確定当直や希望優先度100以上の希望がある場合は、上限を超えることがあります。ほかの勤務は確定当直から「間隔下限」（日直がからむ組み合わせは「日直間隔」）以上あけて入れ、確定当直同士が近すぎる場合は注意を表示します。
     """)
     with st.expander("希望優先度：通常の希望と、100以上の特別な設定", expanded=False):
         st.markdown("""
 - **通常は「1」**を使用します。1〜99は、数字が大きいほど希望を優先しますが、NG日・回数上限・勤務間隔などの範囲内で割り当てます。
 - **100以上は、その先生の希望日すべてを確定当直と同じ扱いにする設定**です。「できれば入りたい」という用途には使わないでください。
-- 確定にした日は、NG日や翌日PM duty（宿直を外す曜日）よりも優先されます。回数の上限を超える場合も、確定した分はそのまま入ります。ほかの勤務は、確定の日から「間隔下限」以上あけて入れます。確定当直同士の間隔が近すぎる場合は、注意を表示します。
+- 確定にした日は、NG日や翌日PM duty（宿直を外す曜日）よりも優先されます。回数の上限を超える場合も、確定した分はそのまま入ります。ほかの勤務は、確定の日から「間隔下限」（日直がからむ組み合わせは「日直間隔」）以上あけて入れます。確定当直同士の間隔が近すぎる場合は、注意を表示します。
 - 一部の勤務だけを確定させたい場合は、上の「📅 先月今月来月の確定当直」へ入力し、希望優先度は通常の値にしてください。
 - 指定の誤りや条件の組み合わせによっては作成できない場合があります。作成後に、確定にした日が当直案に入っているか確認してください。
 
@@ -5581,26 +5799,26 @@ with staff_box_roster:
                   if datetime.date(year, month, d).weekday() >= 5 or jpholiday.is_holiday(datetime.date(year, month, d))][:2]
     _tmpl_wish2 = ",".join(f"{d}:A日直" for d in _tmpl_hols)
     _tmpl_rows = [
-        # 名前, 備考, 希望日, 希望優先度, 間隔下限, 月下限, 月上限, 休日上限, 宿直上限, 日直上限, A宿直, B宿直, 外来宿直, A日直, B日直, 外来日直
-        ("型1_A宿直・A日直", "Aの宿直・日直だけ。月1回", "", 1, 5, 1, 1, 1, 3, 3, 1, 0, 0, 1, 0, 0),
-        ("型2_A日直のみ・希望日確定", "決めた日のA日直だけ（希望優先度100で確定）", _tmpl_wish2, 100, 0, 0, 2, 2, 3, 3, 0, 0, 0, 2, 0, 0),
-        ("型3_外来日直のみ", "外来日直だけ。月1回まで", "", 1, 5, 0, 1, 4, 3, 3, 0, 0, 0, 0, 0, 1),
-        ("型4_A宿直・A日直・外来日直", "Aの宿直・日直と外来日直。月2〜3回", "", 1, 5, 2, 3, 1, 3, 3, 3, 0, 0, 1, 0, 1),
-        ("型5_A・B宿直・A日直・外来日直", "型4にB宿直を追加。月2〜3回", "", 1, 5, 2, 3, 1, 3, 3, 3, 3, 0, 1, 0, 1),
-        ("型6_外来宿直以外すべて", "型5にB日直を追加。月3〜4回", "", 1, 5, 3, 4, 2, 3, 3, 3, 3, 0, 1, 1, 2),
-        ("型7_全枠", "6枠すべて。月3〜4回", "", 1, 5, 3, 4, 2, 3, 3, 3, 3, 3, 1, 1, 2),
-        ("型8_日直のみ", "A・B・外来の日直だけ。月1〜3回", "", 1, 4, 1, 3, 3, 3, 3, 0, 0, 0, 3, 3, 3),
-        ("型9_A以外", "B・外来の宿直と日直。月3〜4回", "", 1, 4, 3, 4, 2, 3, 3, 0, 3, 3, 0, 3, 3),
+        # 名前, 備考, 希望日, 希望優先度, 間隔下限, 日直間隔, 月下限, 月上限, 休日上限, 宿直上限, 日直上限, A宿直, B宿直, 外来宿直, A日直, B日直, 外来日直
+        ("型1_A宿直・A日直", "Aの宿直・日直だけ。月1回", "", 1, 5, 2, 1, 1, 1, 3, 3, 1, 0, 0, 1, 0, 0),
+        ("型2_A日直のみ・希望日確定", "決めた日のA日直だけ（希望優先度100で確定）", _tmpl_wish2, 100, 0, 0, 0, 2, 2, 3, 3, 0, 0, 0, 2, 0, 0),
+        ("型3_外来日直のみ", "外来日直だけ。月1回まで", "", 1, 5, 2, 0, 1, 4, 3, 3, 0, 0, 0, 0, 0, 1),
+        ("型4_A宿直・A日直・外来日直", "Aの宿直・日直と外来日直。月2〜3回", "", 1, 5, 2, 2, 3, 1, 3, 3, 3, 0, 0, 1, 0, 1),
+        ("型5_A・B宿直・A日直・外来日直", "型4にB宿直を追加。月2〜3回", "", 1, 5, 2, 2, 3, 1, 3, 3, 3, 3, 0, 1, 0, 1),
+        ("型6_外来宿直以外すべて", "型5にB日直を追加。月3〜4回", "", 1, 5, 2, 3, 4, 2, 3, 3, 3, 3, 0, 1, 1, 2),
+        ("型7_全枠", "6枠すべて。月3〜4回", "", 1, 5, 2, 3, 4, 2, 3, 3, 3, 3, 3, 1, 1, 2),
+        ("型8_日直のみ", "A・B・外来の日直だけ。月1〜3回", "", 1, 4, 2, 1, 3, 3, 3, 3, 0, 0, 0, 3, 3, 3),
+        ("型9_A以外", "B・外来の宿直と日直。月3〜4回", "", 1, 4, 2, 3, 4, 2, 3, 3, 0, 3, 3, 0, 3, 3),
     ]
     _tmpl_cols = ["先生の名前", "備考（メモ・説明など自由記入）", REQUEST_COLUMN, "希望優先度(数字が大きいほど優先)",
-                  "間隔下限", "月下限", "月上限", "休日上限", "宿直上限", "日直上限",
+                  "間隔下限", DAY_GAP_COLUMN, "月下限", "月上限", "休日上限", "宿直上限", "日直上限",
                   "A宿直上限", "B宿直上限", "外来宿直上限", "A日直上限", "B日直上限", "外来日直上限"]
     template_data = {c: [r[k] for r in _tmpl_rows] for k, c in enumerate(_tmpl_cols)}
     template_data["翌日PM duty"] = [""] * len(_tmpl_rows)
     template_data[NG_COLUMN] = [""] * len(_tmpl_rows)
     # 列の並びは、これまでのひな形と同じにする
     template_data = {c: template_data[c] for c in ["先生の名前", "備考（メモ・説明など自由記入）", "翌日PM duty", NG_COLUMN, REQUEST_COLUMN,
-                                                   "希望優先度(数字が大きいほど優先)", "間隔下限", "月下限", "月上限",
+                                                   "希望優先度(数字が大きいほど優先)", "間隔下限", DAY_GAP_COLUMN, "月下限", "月上限",
                                                    "休日上限", "宿直上限", "日直上限", "A宿直上限", "B宿直上限", "外来宿直上限",
                                                    "A日直上限", "B日直上限", "外来日直上限"]}
     df_template = pd.DataFrame(template_data)
@@ -5652,6 +5870,10 @@ with staff_box_cond:
             _pos = list(base_df.columns).index("休日上限") + 1 if "休日上限" in base_df.columns else len(base_df.columns)
             base_df.insert(_pos, _gc, None)
         base_df[_gc] = pd.to_numeric(base_df[_gc], errors="coerce")
+    # 日直間隔の列がない（以前の）CSV・途中保存でも、「間隔下限」の右に、間隔下限と同じ値で列を足す
+    base_df = add_day_gap_column(base_df)
+    if DAY_GAP_COLUMN in base_df.columns:
+        base_df[DAY_GAP_COLUMN] = pd.to_numeric(base_df[DAY_GAP_COLUMN], errors="coerce")
     base_df = base_df.set_index("先生の名前")
 
     if "希望優先度(数字が大きいほど優先)" in base_df.columns:
@@ -6194,16 +6416,10 @@ if len(staff_df) > 0:
         st.subheader("🗓️ 医師別の当直一覧")
         st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。休日のマスは上半分が日直、下半分が宿直です。"
                    "希望日が通った当直は茶色の太い枠で囲み、回数が多い先生は右端の回数を赤い枠で示します。マスにカーソルを合わせると、その先生の行とその日の列がオレンジの線で囲まれます。")
-        # 先月末・来月初めの確定当直から「間隔下限」以内で、入れない日（今月の確定当直の前後は含めない）
-        gap_blocked = {}
-        for _, _r in staff_df.iterrows():
-            _nm = str(_r['先生の名前'])
-            _gv = pd.to_numeric(pd.Series([_r.get('間隔下限')]), errors='coerce').iloc[0]
-            _gap = 0 if pd.isna(_gv) else int(_gv)
-            _ext = list(past_worked_dates.get(_nm, [])) + list(future_worked_dates.get(_nm, []))
-            if _ext and _gap > 0:
-                gap_blocked[_nm] = {d for d in range(1, num_days + 1)
-                                    if any(abs((datetime.date(year, month, d) - e).days) <= _gap for e in _ext)}
+        # 先月末・来月初めの確定当直から「間隔下限」（日直がからむときは「日直間隔」）以内で、入れない日
+        # （今月の確定当直の前後は含めない）。日ごとに (日直に入れない, 宿直に入れない)
+        gap_blocked = external_gap_blocked(staff_df, past_worked_dates, future_worked_dates, num_days,
+                                           lambda d: datetime.date(year, month, d))
         matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday,
                                                      comments=imported_comments(year, month), gap_blocked=gap_blocked)
         missing_total = shortage_total(matrix_days)
