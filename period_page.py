@@ -1371,6 +1371,7 @@ with staff_box_cond:
 
     st.caption("先生の名前は、ほかの先生と重ならない表記にしてください。")
 
+    st.session_state["staff_table_ym"] = (year, month)   # 「列の幅」を動かしたときに、直しかけの表を引き継ぐため
     edited_df = staff_table(base_df, editable=True)
 
     staff_df = edited_df.reset_index()
