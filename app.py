@@ -2951,9 +2951,23 @@ def header_fit_width(label, width):
     return max(int(width), need)
 
 
+STAFF_COL_SCALE_KEY = "staff_col_scale"   # 医師条件の表の「列の幅」（％。100＝ふつう）
+
+
+def staff_col_scale():
+    """表の上のつまみで選んだ列の幅の割合（0.7〜1.5）。"""
+    try:
+        return min(150, max(70, int(st.session_state.get(STAFF_COL_SCALE_KEY, 100)))) / 100
+    except (TypeError, ValueError):
+        return 1.0
+
+
 def _column(maker, label, width, help_text, pinned=False, **kw):
-    """列の設定を作る。名前の列は左に固定する（固定の機能がない古いStreamlitでは、固定せずに作る）。"""
+    """列の設定を作る。名前の列は左に固定する（固定の機能がない古いStreamlitでは、固定せずに作る）。
+    列の幅は、見出しが全部見える幅に、表の上のつまみの割合を掛ける（名前の列は割合を掛けない）。"""
     width = header_fit_width(label, width)
+    if not pinned:
+        width = max(40, int(round(width * staff_col_scale())))
     if pinned:
         try:
             return maker(label, width=width, help=help_text, pinned=True, **kw)
@@ -3005,10 +3019,33 @@ STAFF_COLUMN_HINT_HTML = (
     "<small>（例：「宿⇔日・日⇔日」に合わせると、どの組み合わせに使うかが出ます）</small></div>")
 
 
+def _staff_keep_edits_for_width(base_df):
+    """「列の幅」を動かしたとき（コールバック）：表で直しかけた内容があれば、それを次の画面の表として使う。
+    （列の幅を変えると表が作り直され、そのままだと直しかけの内容が消えるため）"""
+    current = st.session_state.get("staff_current_csv")
+    if not current:
+        return
+    try:
+        if current == base_df.reset_index().to_csv(index=False):
+            return   # 直していなければ、何もしなくてよい
+    except Exception:
+        pass
+    year, month = st.session_state.get("staff_table_ym", (None, None))
+    if year is None:
+        return
+    _staff_apply_new_table(parse_staff_csv(current.encode("utf-8")), year, month, None)
+
+
 def staff_table(df, editable):
     """医師条件の表。③（編集用）と①（見るだけ）で、列名・幅・行の高さ・並びを同じにする。"""
     st.markdown(STAFF_COLUMN_HINT_HTML, unsafe_allow_html=True)
     if editable:
+        # 表の右上に「列の幅」のつまみ。動かすと表が作り直されるので、直しかけの内容を先に引き継いでおく
+        _sp, _sl = st.columns([5, 2])
+        with _sl:
+            st.slider("列の幅", min_value=70, max_value=150, value=100, step=10, format="%d%%", key=STAFF_COL_SCALE_KEY,
+                      on_change=_staff_keep_edits_for_width, args=(df,),
+                      help="表の列の幅を、全部の列そろって広げたり、せばめたりします（名前の列はそのまま）。100％がふつうの幅です。")
         cols = [c for c in df.columns if str(c).startswith("備考")] + [c for c in df.columns if not str(c).startswith("備考")]
         kwargs = dict(num_rows="dynamic", use_container_width=True, height=300, column_order=cols,
                       column_config=staff_column_config(df.columns, as_index=True))
@@ -5973,6 +6010,7 @@ with staff_box_cond:
 
     st.caption("先生の名前は、ほかの先生と重ならない表記にしてください。")
 
+    st.session_state["staff_table_ym"] = (year, month)   # 「列の幅」を動かしたときに、直しかけの表を引き継ぐため
     edited_df = staff_table(base_df, editable=True)
 
     staff_df = edited_df.reset_index()
