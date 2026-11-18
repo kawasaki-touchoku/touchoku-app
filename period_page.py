@@ -515,6 +515,8 @@ def carry_over_staff(year, month):
             del st.session_state[key]
     state = dict(st.session_state.get("restored_state") or {"year": year, "month": month})
     state["staff_csv"] = df.to_csv(index=False)
+    if data.get("group_rules"):
+        state["group_rules"] = data["group_rules"]   # グループの設定も引き継ぐ
     st.session_state["restored_state"] = state
     st.session_state["uploader_gen"] = st.session_state.get("uploader_gen", 0) + 1
     st.session_state.pop("last_uploaded_file_id", None)
@@ -631,7 +633,7 @@ with st.expander("📖 使い方（期間指定版・作業の流れ・結果の
    読み込むと、①に「今の名簿」と「読み込んだ医師条件」（見るだけの表）が出るので、正しく読み込めたかを確認します。
    新しく来た先生は「➕ 先生を追加する」で、入れる位置と条件のもとを選んで追加します。いなくなった先生は「➖ 先生を外す」で外します。
 6. **NG日**（②）：先生を選んでカレンダーでNG日を入れ、「NG日を反映する」を押します（紙やメールで集めたNG日を入力します）。専用URLで集める場合は、「📨 先生方からのNG日入力（専用URL）」で受付を開始し、提出されたNG日を取り込みます（「NG日の集め方」のタブを参照）。
-7. **医師条件の調整**（③・④）：当直案の枠ができるだけ埋まるように、③の表で回数・上限・勤務間隔・希望日を調整します（①の表は見るだけなので、直すのは③です）。④の「⚖️ 当直の枠は足りそう？」で、赤い棒がないかを確認します。
+7. **医師条件の調整**（③・④）：当直案の枠ができるだけ埋まるように、③の表で回数・上限・勤務間隔・希望日を調整します（①の表は見るだけなので、直すのは③です）。同じ扱いにしたい先生がいるときは、③の表の上の「👥 グループの設定」でグループごとに入れる枠（◯入れる・△できれば入れない・×入れない）を決め、表の「グループ」の列で先生のグループを選びます。④の「⚖️ 当直の枠は足りそう？」で、赤い棒がないかを確認します。
 8. **年間の当直回数（任意）**：「📊 年間の当直回数」に、これまでの月の掲示用Excelをまとめて読み込むと（当直表が見つからない月は、右の「📋 集計だけのファイル」に、ひな形で期間と先生ごとの回数を書いて読み込みます）、先生ごとの回数（合計と1か月あたり）（病棟・外来、平日・休日、宿直・日直、合計）が出ます。「年間の回数を、期間中の当直案に反映する」にチェックすると、当直合計・休日（平日）・宿直（日直）・外来（病棟）のそれぞれを、選んだ強さでそろえて作ります。
 9. **不足時の優先順位（任意）**
 10. **当直案を作る**：下の帯の「🚀 当直案を作成」を押します（計算に最大1分少々かかります）。
@@ -1321,6 +1323,9 @@ with staff_box_cond:
                     del st.session_state[key]
             st.session_state['last_uploaded_file_id'] = uploaded_file.file_id
             st.session_state["staff_source_label"] = f"ファイル「{uploaded_file.name}」から"
+            _gr = group_rules_from_xlsx(uploaded_file.getvalue())
+            if _gr:
+                set_group_rules_base(_gr)   # 医師条件のExcelに「グループの設定」のシートがあれば、その設定にする
             st.session_state.pop("staff_added_names", None)
         try:
             base_df = parse_staff_csv(uploaded_file.getvalue())
@@ -1345,6 +1350,7 @@ with staff_box_cond:
         base_df[_gc] = pd.to_numeric(base_df[_gc], errors="coerce")
     # 宿⇔日・日⇔日 間隔下限の列がない（以前の）CSV・途中保存でも、「宿⇔宿 間隔下限」の右に、宿⇔宿 間隔下限と同じ値で列を足す
     base_df = add_day_gap_column(base_df.loc[:, ~base_df.columns.duplicated()])   # 同じ名前の列が2つあると表が出せないので1つにする
+    base_df = add_group_column(base_df.drop(columns=[DOC_GROUP_AVOID_COLUMN], errors="ignore"))   # 「グループ」の列（ないファイルでは空欄で足す）
     if DAY_GAP_COLUMN in base_df.columns:
         base_df[DAY_GAP_COLUMN] = pd.to_numeric(base_df[DAY_GAP_COLUMN], errors="coerce")
     base_df = base_df.set_index("先生の名前")
@@ -1357,6 +1363,7 @@ with staff_box_cond:
         if c in base_df.columns:
             base_df[c] = base_df[c].apply(lambda x: "" if pd.isna(x) or str(x).lower() in ["nan", "none", "<na>"] else str(x))
 
+    group_rules = group_rules_ui(restored_state)   # 👥 グループの設定（任意）
     st.caption("先生の名前は、ほかの先生と重ならない表記にしてください。")
 
     st.session_state["staff_table_ym"] = (year, month)   # 「列の幅」を動かしたときに、直しかけの表を引き継ぐため
@@ -1390,6 +1397,7 @@ with staff_box_cond:
             # st.table は長い文章を折り返して全部表示する
             st.table(pd.DataFrame(_notes, columns=["先生の名前", "備考"]).set_index("先生の名前"))
     staff_df, staff_input_errors = validate_staff_inputs(staff_df, year, month)
+    staff_df_calc = apply_group_rules(staff_df, group_rules)   # 計算用：グループの×の枠は上限0、△の枠は「できれば入れない」
     if staff_input_errors:
         show_input_errors(staff_input_errors)
         if create_bar_request:
@@ -1404,7 +1412,7 @@ with staff_box_cap:
 
     st.markdown(CAPACITY_CSS, unsafe_allow_html=True)
     cap_needs = slot_needs(year, month, num_days, custom_holidays, locked_days, multi_slots_dict)
-    cap_rows, total_max_capacity = capacity_rows(staff_df, cap_needs)
+    cap_rows, total_max_capacity = capacity_rows(staff_df_calc, cap_needs)
     margin = total_max_capacity - total_slots
     c1, c2, c3 = st.columns(3)
     c1.metric("🏥 埋める必要がある枠", f"{total_slots} 枠")
@@ -1692,8 +1700,9 @@ with staff_box_dl:
 
     # ダウンロードするExcelも、画面と同じく「先生の名前 → 備考 → その他」の順にそろえる（読み込みは列名で行うので、古い並びのファイルもそのまま使える）
     _first = ["先生の名前"] + [c for c in staff_df.columns if str(c).startswith("備考")]
-    current_xlsx = table_xlsx(staff_df[_first + [c for c in staff_df.columns if c not in _first]], "医師条件",
-                              text_cols=[c for c in staff_df.columns if c not in NUMERIC_DEFAULTS and c not in GROUP_CAP_COLUMNS and c != DAY_GAP_COLUMN])
+    current_xlsx = staff_xlsx_with_groups(staff_df[_first + [c for c in staff_df.columns if c not in _first and not str(c).startswith("_")]],
+                                          [c for c in staff_df.columns if c not in NUMERIC_DEFAULTS and c not in GROUP_CAP_COLUMNS and c != DAY_GAP_COLUMN],
+                                          st.session_state.get("group_rules_current"))
     st.download_button(
         label="📥 医師条件をExcelでダウンロード",
         data=current_xlsx,
@@ -1804,6 +1813,7 @@ work_snapshot = {
     "comments": {n: list(v) for n, v in imported_comments(year, month).items()},
     "alerts": {k: int(st.session_state.get(f"alert_{k}", v) or 0) for k, v in MATRIX_COUNT_ALERTS.items()},
     "annual": annual_snapshot(year, month),   # 年間の当直回数（月ごとの回数だけ）
+    "group_rules": st.session_state.get("group_rules_current") or default_group_rules(),   # 👥 グループの設定
 }
 # 右上の途中保存ボタンが押されていたら、ここで（全部の入力を読み終えてから）保存する
 if work_save_request:
@@ -1839,7 +1849,7 @@ if fixed_input_errors:
     if create_bar_request:
         create_bar_show("<div class='cb-res bad'>⚠ 確定当直の入力に誤りがあります。赤い表示を確認してください。</div>")
     st.stop()
-current_signature = (input_signature(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority), tuple(sorted(locked_days)),
+current_signature = (input_signature(year, month, staff_df_calc, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority), tuple(sorted(locked_days)),
                      json.dumps(annual_balance, ensure_ascii=False, sort_keys=True))
 if 'generated_df' in st.session_state and st.session_state.get('generated_signature') != current_signature:
     for key in ['generated_df', 'past_worked_dates', 'future_worked_dates', 'generated_warnings', 'generated_signature', 'generated_year', 'generated_month']:
@@ -1861,7 +1871,7 @@ if len(staff_df) > 0:
     if create_clicked:
         with st.spinner("当直案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
             try:
-                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority, locked_days, annual_balance=annual_balance)
+                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df_calc, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority, locked_days, annual_balance=annual_balance)
 
                 if df_result is not None:
                     st.session_state['generated_signature'] = current_signature
