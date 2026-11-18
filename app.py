@@ -53,6 +53,78 @@ def _read_csv_any_encoding(file_bytes):
     raise ValueError("CSVの文字コードを判定できませんでした。Excelの「名前を付けて保存」で「CSV UTF-8」形式を選んで保存し直してください。")
 
 
+def _read_table_any(file_bytes):
+    """
+    Excel（.xlsx）でもCSVでも、表として読む。Excelは1枚目のシートを読む。
+    ・Excelで日付になってしまったマスは「月/日」の文字に戻す（NG日・確定当直の日付が読めるように）
+    ・見出しのない空の列（Excelで書式だけ残った列など）と、空の行は捨てる
+    """
+    if not bytes(file_bytes[:4]) == b"PK\x03\x04":
+        return _read_csv_any_encoding(file_bytes)
+    try:
+        df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=0, engine="openpyxl")
+    except Exception:
+        raise ValueError("Excelファイルとして読めませんでした。ファイルが壊れていないか、パスワードが付いていないかを確認してください。")
+    df = df[[c for c in df.columns if not (str(c).startswith("Unnamed:") and df[c].isna().all())]]
+    df = df.dropna(how="all").reset_index(drop=True)
+
+    def _fix(v):
+        if isinstance(v, (datetime.datetime, datetime.date)) and not pd.isna(v):
+            return f"{v.month}/{v.day}"
+        return v
+    return df.apply(lambda col: col.map(_fix) if col.dtype == object or str(col.dtype).startswith("datetime") else col)
+
+
+def table_xlsx(df, sheet_name, text_cols=None, blank_rows=0):
+    """
+    表をExcelにする（見出しは色つき・固定、列の幅を整える）。
+    ・text_cols の列は「文字」の形にして、入れた「11/3」などが勝手に日付に変わらないようにする（None なら数字以外の列すべて）
+    ・blank_rows：ひな形のように、下に入力用の空の行を「文字」の形で用意する行数
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name[:31]
+    cols = [str(c) for c in df.columns]
+    if text_cols is None:
+        text_cols = [c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]
+    text_idx = {i for i, c in enumerate(df.columns, 1) if c in set(text_cols)}
+    for i, c in enumerate(cols, 1):
+        cell = ws.cell(1, i, c)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="DFE6EF")
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
+    for r, row in enumerate(df.itertuples(index=False), 2):
+        for i, v in enumerate(row, 1):
+            if v is None or (not isinstance(v, str) and pd.isna(v)):
+                v = None
+            elif isinstance(v, float) and v.is_integer():
+                v = int(v)
+            elif hasattr(v, "item") and not isinstance(v, str):
+                v = v.item()
+            if i in text_idx and v is not None:
+                v = str(v)
+            cell = ws.cell(r, i, v)
+            if i in text_idx:
+                cell.number_format = "@"
+    for r in range(len(df) + 2, len(df) + 2 + blank_rows):
+        for i in text_idx:
+            ws.cell(r, i).number_format = "@"
+    for i, c in enumerate(cols, 1):
+        longest = max([len(c)] + [len(str(v)) for v in df.iloc[:, i - 1].tolist() if v is not None and not (not isinstance(v, str) and pd.isna(v))])
+        ws.column_dimensions[get_column_letter(i)].width = max(8, min(40, longest * 1.8 + 2))
+    ws.row_dimensions[1].height = 30
+    ws.freeze_panes = "B2"
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
 def normalize_shift_names(df):
     """以前のCSVの枠名・上限列・希望枠を現在の名称へ変換する。"""
     aliases = {"宿直A": "A宿直", "宿直B": "B宿直", "A当直": "A宿直", "B当直": "B宿直", "日直A": "A日直", "日直B": "B日直"}
@@ -103,7 +175,8 @@ def rename_old_staff_columns(df):
 
 @st.cache_data
 def parse_staff_csv(file_bytes):
-    df = normalize_shift_names(_read_csv_any_encoding(file_bytes))
+    """医師条件のファイル（Excel・CSV）を読む。"""
+    df = normalize_shift_names(_read_table_any(file_bytes))
     # 旧CSVの列名も受け付け、画面・出力CSVでは新名称に統一する。
     # 以前の列名のCSV・途中保存も、今の列名に読み替える
     df = rename_old_staff_columns(df)
@@ -140,7 +213,8 @@ def add_day_gap_column(df):
 
 @st.cache_data
 def parse_fixed_csv(file_bytes):
-    df = normalize_shift_names(_read_csv_any_encoding(file_bytes))
+    """確定当直のファイル（Excel・CSV）を読む。"""
+    df = normalize_shift_names(_read_table_any(file_bytes))
     if '区分' in df.columns:
         df = df.rename(columns={'区分': '平日/休日'})
     return df
@@ -335,7 +409,7 @@ def fixed_duty_table(fixed_file, restored_state, fixed_columns, start, end, year
                 st.error(f"確定当直ファイルの読み込みに失敗しました。詳細: {e}")
                 st.stop()
             if "日付" not in base.columns:
-                st.error("確定当直CSVに「日付」の列がありません。ひな形の列名を確認してください。")
+                st.error("確定当直のファイルに「日付」の列がありません。ひな形の列名を確認してください。")
                 st.stop()
         elif src[0] == "restored":
             base = parse_fixed_csv(restored_state["fixed_csv"].encode("utf-8"))
@@ -1901,7 +1975,7 @@ def validate_staff_inputs(df, year, month):
     df = df.copy()
     errors = []
     if '先生の名前' not in df:
-        return df, ['医師条件CSVに「先生の名前」の列がありません。']
+        return df, ['医師条件のファイルに「先生の名前」の列がありません。']
     df['先生の名前'] = df['先生の名前'].map(clean_text)
     blank = df['先生の名前'].eq('')
     for i, row in df[blank].iterrows():
@@ -1980,7 +2054,7 @@ def validate_fixed_inputs(df, doctors, year, month, holidays=None):
         return None, errors
     df = df.copy()
     if '日付' not in df:
-        return df, ['確定当直CSVに「日付」の列がありません。']
+        return df, ['確定当直のファイルに「日付」の列がありません。']
     unknown = [c for c in df if c not in ['日付', '平日/休日', FIXED_KUBUN_COLUMN] + ALL_SHIFT_TYPES]
     for c in unknown:
         if df[c].map(clean_text).ne('').any():
@@ -3444,7 +3518,7 @@ def staff_add_remove_ui(staff_df, year, month, is_template=False):
         st.markdown(staff_roster_html(names, "入力例の型1〜型9を表示中"), unsafe_allow_html=True)
         st.warning("まだ先生の名簿が読み込まれていません。"
                    + ("上の「📋 先月の医師条件を引き継ぐ」か、" if remote_is_configured() else "")
-                   + "下のCSVのアップロードで読み込んでください。「➕ 先生を追加する」で1人ずつ足すこともできます。")
+                   + "下のファイルのアップロードで読み込んでください。「➕ 先生を追加する」で1人ずつ足すこともできます。")
     else:
         st.markdown(staff_roster_html(names, st.session_state.get("staff_source_label", ""),
                                       set(st.session_state.get("staff_added_names") or [])), unsafe_allow_html=True)
@@ -3509,7 +3583,7 @@ CSV_UPLOAD_CSS = """<style>
 [data-testid="stFileUploaderDropzone"]{border:2.5px dashed #2e8a5b !important;background:#fff !important;border-radius:12px !important;
   min-height:7.5rem;padding:1rem !important;display:flex !important;flex-direction:column !important;align-items:center !important;
   justify-content:center !important;gap:.45rem;text-align:center}
-[data-testid="stFileUploaderDropzone"]::before{content:"📄⬇　ここにCSVファイルをドラッグ＆ドロップ";order:-1;display:block;
+[data-testid="stFileUploaderDropzone"]::before{content:"📄⬇　ここにファイルをドラッグ＆ドロップ";order:-1;display:block;
   font-weight:800;color:#1f6b45;font-size:1rem}
 [data-testid="stFileUploaderDropzone"] button{border:0 !important;color:#fff !important;background:#2e8a5b !important;font-weight:700}
 [data-testid="stFileUploaderDropzone"] button p{color:#fff}
@@ -3599,7 +3673,8 @@ def csv_upload_card(card_key, tag, title, desc, uploader_key, template_bytes, te
         if template_note:
             st.caption(template_note)
         if template_bytes is not None:   # 方法2（医師条件）は、ひな形のダウンロードを枠の下に出すので、ここには出さない
-            st.download_button(label=template_label, data=template_bytes, file_name=template_name, mime="text/csv")
+            st.download_button(label=template_label, data=template_bytes, file_name=template_name,
+                               mime=XLSX_MIME if template_name.endswith(".xlsx") else "text/csv")
     return up
 
 
@@ -3627,7 +3702,7 @@ def csv_ng_wish_choice(df, uploaded_file, box, year, month):
     fname = html_escape(uploaded_file.name)
     with box:
         if not ng_vals and not wish_vals:
-            st.success(f"CSV「{uploaded_file.name}」を読み込みました：**{n_doc}名**（NG日・希望日は入っていません）")
+            st.success(f"ファイル「{uploaded_file.name}」を読み込みました：**{n_doc}名**（NG日・希望日は入っていません）")
             return df
         parts = []
         if ng_vals:
@@ -3635,13 +3710,13 @@ def csv_ng_wish_choice(df, uploaded_file, box, year, month):
         if wish_vals:
             parts.append(f"<b>希望日（{len(wish_vals)}名分）</b>")
         with st.container(key="csv_ng_ask"):
-            st.markdown(f"<div class='csvng-h'><span class='badge'>確認</span><span>このCSVには {'と'.join(parts)}が入っています。どうしますか？</span></div>"
-                        "<div class='csvng-sub'>CSVには日にちしか入っていないため、先月のCSVだと先月のNG日・希望日が今月の同じ日に入ってしまいます。</div>",
+            st.markdown(f"<div class='csvng-h'><span class='badge'>確認</span><span>このファイルには {'と'.join(parts)}が入っています。どうしますか？</span></div>"
+                        "<div class='csvng-sub'>ファイルには日にちしか入っていないため、先月のファイルだと先月のNG日・希望日が今月の同じ日に入ってしまいます。</div>",
                         unsafe_allow_html=True)
             opts = ["use", "clear"]
-            labels = {"use": f"**今月（{year}年{month}月）のNG日・希望日として使う**　―　このCSVを今月用に作った・今月ダウンロードしたとき",
-                      "clear": "**空にする（NG日・希望日は読み込まない）**　―　先月などのCSVを使うとき。NG日は②で入れ直します"}
-            choice = st.radio("CSVのNG日・希望日", opts, index=None, format_func=lambda o: labels[o],
+            labels = {"use": f"**今月（{year}年{month}月）のNG日・希望日として使う**　―　このファイルを今月用に作った・今月ダウンロードしたとき",
+                      "clear": "**空にする（NG日・希望日は読み込まない）**　―　先月などのファイルを使うとき。NG日は②で入れ直します"}
+            choice = st.radio("ファイルのNG日・希望日", opts, index=None, format_func=lambda o: labels[o],
                               key=f"csvng_choice_{uploaded_file.file_id}", label_visibility="collapsed",
                               on_change=_csv_ng_choice_changed)
             if choice is None:
@@ -3653,7 +3728,7 @@ def csv_ng_wish_choice(df, uploaded_file, box, year, month):
                 lines.append(f"・NG日：<b>{len(ng_vals)}名・のべ{ng_days}日</b>を ② のカレンダーに入れました　<a href='#sec-ng'>→ ② NG日を見る</a>")
             if wish_vals:
                 lines.append(f"・希望日：<b>{len(wish_vals)}名</b>を ③ の表の「希望日」に入れました")
-            st.markdown(f"<div class='csvng-ok'>✅ CSV「{fname}」を読み込みました：<b>{n_doc}名</b><br>{'<br>'.join(lines)}</div>",
+            st.markdown(f"<div class='csvng-ok'>✅ ファイル「{fname}」を読み込みました：<b>{n_doc}名</b><br>{'<br>'.join(lines)}</div>",
                         unsafe_allow_html=True)
             return df
     df = df.copy()
@@ -3662,7 +3737,7 @@ def csv_ng_wish_choice(df, uploaded_file, box, year, month):
             df[col] = ""
     if choice == "clear":
         with box:
-            st.markdown(f"<div class='csvng-ok'>✅ CSV「{fname}」を読み込みました：<b>{n_doc}名</b><br>"
+            st.markdown(f"<div class='csvng-ok'>✅ ファイル「{fname}」を読み込みました：<b>{n_doc}名</b><br>"
                         "・NG日・希望日は空にしました（② のカレンダーで入れてください）　<a href='#sec-ng'>→ ② NG日を入れる</a></div>",
                         unsafe_allow_html=True)
     return df
@@ -4462,8 +4537,8 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
         if url_rows:
             st.dataframe(pd.DataFrame(url_rows), hide_index=True, use_container_width=True,
                          column_config={"専用URL": st.column_config.LinkColumn("専用URL（右上のアイコンでコピーできます）")})
-            st.download_button("📥 URL一覧をCSVでダウンロード", pd.DataFrame(url_rows).to_csv(index=False).encode("utf-8-sig"),
-                               file_name="NG日入力_専用URL一覧.csv", mime="text/csv", key="remote_url_csv")
+            st.download_button("📥 URL一覧をExcelでダウンロード", table_xlsx(pd.DataFrame(url_rows), "URL一覧"),
+                               file_name="NG日入力_専用URL一覧.xlsx", mime=XLSX_MIME, key="remote_url_csv")
             # 紙で配る用：QRコード付きの案内書類（A4・1人1枚）
             card_targets = st.multiselect("案内書類を作る先生（URLを作り直した先生だけ印刷する場合などは絞り込めます）",
                                           [r["先生"] for r in url_rows], default=[r["先生"] for r in url_rows], key="remote_card_targets")
@@ -4542,7 +4617,7 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
                 st.button(f"⬇️ 選んだ先生のNG日を取り込む（{len(targets)}名分）", key="remote_import", type="primary",
                           disabled=not targets,
                           on_click=import_remote_ng, args=(year, month, {n: importable[n] for n in targets}, mode))
-                st.caption("取り込むと、その先生のNG日は提出内容に置き換わります（CSVなどで入れていたNGは消えます）。"
+                st.caption("取り込むと、その先生のNG日は提出内容に置き換わります（ファイルなどで入れていたNGは消えます）。"
                            "選ばなかった先生や、提出していない先生のNG日は変わりません。取り込んだあとも、下のカレンダーで個別に直せます。")
             else:
                 st.caption("提出内容は、すべてアプリに取り込み済みです。")
@@ -4551,7 +4626,7 @@ def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_spe
         if undoable:
             with st.container(border=True):
                 st.markdown("**↩️ 取り込みを取り消す**")
-                st.caption("URLから取り込んだNG日を取り消して、取り込む前のNG日（CSVや手入力の分）に戻します。"
+                st.caption("URLから取り込んだNG日を取り消して、取り込む前のNG日（ファイルや手入力の分）に戻します。"
                            "取り込んだあとにカレンダーで手直しした分も元に戻ります。先生の提出内容そのものは消えないので、もう一度取り込めます。")
                 cu1, cu2 = st.columns([3, 2])
                 undo_target = cu1.selectbox("取り消す先生", undoable, key="remote_undo_target", label_visibility="collapsed")
@@ -5254,7 +5329,7 @@ def period_validate_staff_inputs(df, P):
     df = df.copy()
     errors = []
     if '先生の名前' not in df:
-        return df, ['医師条件CSVに「先生の名前」の列がありません。']
+        return df, ['医師条件のファイルに「先生の名前」の列がありません。']
     df['先生の名前'] = df['先生の名前'].map(clean_text)
     blank = df['先生の名前'].eq('')
     for i, row in df[blank].iterrows():
@@ -5334,7 +5409,7 @@ def period_validate_fixed_inputs(df, doctors, P, holidays=None):
         return None, errors
     df = df.copy()
     if '日付' not in df:
-        return df, ['確定当直CSVに「日付」の列がありません。']
+        return df, ['確定当直のファイルに「日付」の列がありません。']
     unknown = [c for c in df if c not in ['日付', '平日/休日', FIXED_KUBUN_COLUMN] + ALL_SHIFT_TYPES]
     for c in unknown:
         if df[c].map(clean_text).ne('').any():
@@ -6093,7 +6168,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 3. **人数を増やす枠（任意）**：1つの枠を2名以上にする日があれば、行を足して設定します。
 4. **確定当直（任意）**：「📅 先月今月来月の確定当直」の欄に、すでに決まっている当直や、先月末・来月初めの当直を入れます。勤務間隔の計算に使われます。
 5. **先生の名簿と医師条件**（「先生ごとの条件」の①）：以前の医師条件を、方法1か方法2のどちらかで取り込みます。新しい月なら、方法1の「📋 先月の医師条件を引き継ぐ」を押すと、先月の医師条件から始められます。先月分の途中保存にある医師条件（回数・間隔・翌日PM duty・備考など）が入り、NG日・希望日・先生のコメントは空になります。
-   手元のCSVを使う場合や初めての場合は、方法2の緑の点線の枠にCSVファイルをドラッグ＆ドロップします（ひな形は、2つの枠の下の「📥 ひな形（CSV）をダウンロード」から入手できます）。CSVにNG日・希望日が入っているときは、「今月の分として使う」か「空にする」かを選びます（先月のCSVなら「空にする」を選びます）。
+   手元のファイル（Excel・以前のCSV）を使う場合や初めての場合は、方法2の緑の点線の枠にファイルをドラッグ＆ドロップします（ひな形は、2つの枠の下の「📥 ひな形（Excel）をダウンロード」から入手できます）。ファイルにNG日・希望日が入っているときは、「今月の分として使う」か「空にする」かを選びます（先月のファイルなら「空にする」を選びます）。
    読み込むと、①に「今の名簿」と「読み込んだ医師条件」（見るだけの表）が出るので、正しく読み込めたかをここで確認します。
    新しく来た先生は「➕ 先生を追加する」で、名前・入れる位置（○○先生の下）・条件のもと（ほかの先生と同じ条件、または型）を選んで追加します。いなくなった先生は「➖ 先生を外す」で外します。
 6. **NG日**（②）：先生を選んでカレンダーでNG日を入れ、「NG日を反映する」を押します（紙やメールで集めたNG日を入力します）。先生方に専用URLから入力してもらう場合は、ここで受付・取り込みを行います（「NG日の集め方」のタブを参照）。
@@ -6174,7 +6249,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 **📅 作成した当直案**（日付ごとの表）
 
 名前にカーソルを合わせると、同じ先生の当直が強調されます。
-「🔍 特定の医師の当直を色別でハイライト」を開くと、選んだ先生を色分けできます。CSVでもダウンロードできます。
+「🔍 特定の医師の当直を色別でハイライト」を開くと、選んだ先生を色分けできます。Excelでもダウンロードできます。
         """)
     with tab_trouble:
         st.markdown("""
@@ -6572,10 +6647,10 @@ with st.container(key="fixed_section"):
         st.markdown("""
 - 掲示用Excel（手直ししたものでも可）・CSVのアップロードと、下の表への直接入力のどれでも入力できます。掲示用ExcelのICU病棟の列は読みません。
 - 表には、先月末7日分・今月・翌月はじめ7日分の日付が最初から並んでいます。「区分」の列に ◀先月／今月／翌月▶ を表示します。
-- それ以外の日付（先月1か月分など）は、表の下の「＋」で行を足して `月/日`（例：`11/1`）または `年/月/日` の形で入力するか、CSVで読み込みます。CSVの行は、表の同じ日付のところに入ります。
+- それ以外の日付（先月1か月分など）は、表の下の「＋」で行を足して `月/日`（例：`11/1`）または `年/月/日` の形で入力するか、ファイル（Excel・CSV）で読み込みます。ファイルの行は、表の同じ日付のところに入ります。
 - 担当する先生は、枠の欄をクリックすると出る一覧（医師条件の名前）から選びます。
 - 先月だけ勤務した先生など、医師条件にいない先生は、表の上の「先月・翌月だけ勤務した先生を、ドロップダウンに入れる（記録用）」に名前を入れて「ドロップダウンに入れる」を押すと選べるようになります（先月・翌月の日付だけに使えます。当直案には入りません）。
-- 同じ日・同じ枠を2人以上で担当する場合は、同じ日付の行を追加して、もう1人を選びます。CSVで `佐藤、鈴木` のように「、」で区切って入れた場合は、読み込むと自動で2行に分かれます。
+- 同じ日・同じ枠を2人以上で担当する場合は、同じ日付の行を追加して、もう1人を選びます。ファイルで `佐藤、鈴木` のように「、」で区切って入れた場合は、読み込むと自動で2行に分かれます。
 - 未確定の枠は空欄で構いません。
 - 今月の平日に日直を入力する場合は、先に上のカレンダーでその日を「休日にする」にしてください。
 - 「別途決定」にした日（年末年始など）の当番が決まったら、ここに入れておくと、当直案と一覧に表示され、前後の勤務間隔の計算にも使われます。
@@ -6587,13 +6662,13 @@ with st.container(key="fixed_section"):
 
     fixed_columns = ["日付"] + FIXED_SLOT_COLUMNS   # 当直案と同じ並び。平日か休日かは、上のカレンダーで自動的に決まるので入力しない
     fixed_template_df = pd.DataFrame(columns=fixed_columns)
-    fixed_csv_template = fixed_template_df.to_csv(index=False).encode('utf-8-sig')
+    fixed_csv_template = table_xlsx(fixed_template_df, "確定当直", text_cols=fixed_columns, blank_rows=200)   # Excelのひな形（日付が勝手に変わらないよう「文字」の形）
 
     fixed_file = csv_upload_card(
         "fixed", "Excel・CSV", "確定当直のファイルをアップロード（任意）",
         "先月の掲示用Excel（手直ししたものでも大丈夫）を、そのまま読み込めます。CSVも読み込めます。下の表に直接入力することもできます。",
         f"fixed_csv_{st.session_state.get('uploader_gen', 0)}",
-        fixed_csv_template, "確定当直_ひな形.csv", "📥 確定当直のひな形（CSV）をダウンロード",
+        fixed_csv_template, "確定当直_ひな形.xlsx", "📥 確定当直のひな形（Excel）をダウンロード",
         file_types=("csv", "xlsx"), drop_text="📄⬇　ここに掲示用ExcelかCSVファイルをドラッグ＆ドロップ")
 
     edited_fixed_df = fixed_duty_table(fixed_file, restored_state, fixed_columns, datetime.date(year, month, 1),
@@ -6613,7 +6688,7 @@ staff_box_cap = st.container()
 staff_box_dl = st.container()
 
 with staff_box_roster:
-    step_header(1, "以前の医師条件の取り込み（引き継ぎ or CSVアップロード）、医師を追加（or外す）")
+    step_header(1, "以前の医師条件の取り込み（引き継ぎ or ファイルのアップロード）、医師を追加（or外す）")
     st.markdown("<div class='imp-choose'>📥 以前の医師条件を取り込む（どちらか1つの方法を使います）</div>", unsafe_allow_html=True)
     imp_a, imp_or, imp_b = st.columns([10, 1.4, 10])   # 方法1（引き継ぎ）・または・方法2（CSV）
     imp_or.markdown("<div class='imp-or'><span>または</span></div>", unsafe_allow_html=True)
@@ -6623,7 +6698,7 @@ with staff_box_roster:
     with imp_a, st.container(key="csvcard_carry"):
         st.markdown("<div class='csv-card-head blue'><span class='lab'>方法1</span>途中保存から先月の医師条件を引き継ぐ</div>", unsafe_allow_html=True)
         if not remote_is_configured():
-            st.caption("保存用のGoogleスプレッドシートの設定をすると使えます。今はCSVのアップロード（方法2）で読み込んでください。")
+            st.caption("保存用のGoogleスプレッドシートの設定をすると使えます。今はファイルのアップロード（方法2）で読み込んでください。")
         else:
             _co_msg = st.session_state.pop("carry_over_message", None)
             # ボタンの名前：ログイン中は、途中保存してある月を出す（ふつうは先月）
@@ -6736,19 +6811,21 @@ with staff_box_roster:
     df_template = pd.DataFrame(template_data)
     # 「➕ 先生を追加する」で型から選べるように、型の中身を覚えておく
     st.session_state["staff_templates"] = {r["先生の名前"]: r for r in df_template.to_dict("records")}
-    # 保存用CSVと同じUTF-8（BOM付き）に統一。Excelでもそのまま開ける。
-    csv_template = df_template.to_csv(index=False).encode('utf-8-sig')
+    # ひな形はExcel。数字の列以外は「文字」の形にして、NG日・希望日の「11/3」などが勝手に日付に変わらないようにする
+    xlsx_template = table_xlsx(df_template, "医師条件",
+                               text_cols=[c for c in df_template.columns if c not in NUMERIC_DEFAULTS and c not in GROUP_CAP_COLUMNS and c != DAY_GAP_COLUMN],
+                               blank_rows=60)
 
     # --- 方法2：CSVファイルをアップロード ---
     with imp_b:
         uploaded_file = csv_upload_card(
-            "staff", "方法2", "CSVファイルをアップロード",
-            "手元のCSV（以前ダウンロードした医師条件、またはひな形に入力したもの）を読み込みます。CSVにNG日・希望日が入っているときは、使うかどうかを選べます。",
+            "staff", "方法2", "ファイルをアップロード（Excel・CSV）",
+            "手元のExcel（以前ダウンロードした医師条件、またはひな形に入力したもの）を読み込みます。以前のCSVも読み込めます。NG日・希望日が入っているときは、使うかどうかを選べます。",
             f"staff_csv_{st.session_state.get('uploader_gen', 0)}_{st.session_state.get('staff_uploader_gen', 0)}",
-            None, "", "")
+            None, "", "", file_types=("xlsx", "csv"), drop_text="📄⬇　ここにExcelかCSVファイルをドラッグ＆ドロップ")
     with imp_tmpl:
         st.markdown("📝 初めての場合：")
-        st.download_button(label="📥 ひな形（CSV）をダウンロード", data=csv_template, file_name="医師条件_ひな形.csv", mime="text/csv")
+        st.download_button(label="📥 ひな形（Excel）をダウンロード", data=xlsx_template, file_name="医師条件_ひな形.xlsx", mime=XLSX_MIME)
         st.markdown("して、Excelで入力してから方法2で読み込みます。")
     staff_box_ro = st.container()   # ①のいちばん下：読み込んだ医師条件（見るだけ。中身は医師条件の表を読んだあとで入れる）
 
@@ -6759,12 +6836,12 @@ with staff_box_cond:
                 if key.startswith("ng_"):
                     del st.session_state[key]
             st.session_state['last_uploaded_file_id'] = uploaded_file.file_id
-            st.session_state["staff_source_label"] = f"CSV「{uploaded_file.name}」から"
+            st.session_state["staff_source_label"] = f"ファイル「{uploaded_file.name}」から"
             st.session_state.pop("staff_added_names", None)
         try:
             base_df = parse_staff_csv(uploaded_file.getvalue())
         except Exception as e:
-            st.error(f"医師条件CSVを読み込めませんでした。詳細: {e}")
+            st.error(f"医師条件のファイルを読み込めませんでした。詳細: {e}")
             st.stop()
         base_df = csv_ng_wish_choice(base_df, uploaded_file, imp_ask, year, month)
     elif restored_state and restored_state.get("staff_csv"):
@@ -6774,7 +6851,7 @@ with staff_box_cond:
     staff_is_template = uploaded_file is None and not (restored_state and restored_state.get("staff_csv"))
 
     if "先生の名前" not in base_df.columns:
-        st.error("医師条件CSVに「先生の名前」の列がありません。ひな形の列名を確認してください。")
+        st.error("医師条件のファイルに「先生の名前」の列がありません。ひな形の列名を確認してください。")
         st.stop()
     # 宿直上限・日直上限の列がない（以前の）CSVでも、「休日上限」の右に空欄の列を足す（空欄＝制限なし）
     for _gc in reversed(list(GROUP_CAP_COLUMNS)):
@@ -7123,17 +7200,18 @@ with staff_box_ng:
 
 with staff_box_dl:
     st.divider()
-    st.markdown("### 📂 医師条件をCSVでダウンロード（手元にファイルで残す場合）")
-    st.write("先生の名前・回数・勤務間隔・希望日・NG日・備考をCSVファイルとしてパソコンなどにダウンロードします。このファイルは「医師条件」のアップロード欄から読み込めます。")
-    st.caption("ダウンロードの前に、各先生の「NG日を反映する」を押してください。作る年月・休日と別途決定の日・増員設定・確定当直・作成した当直案・色分けとそのメモは、このCSVには含まれません。"
-               "続きから作業するだけなら、CSVではなく「💾 途中保存」を使うほうが簡単です。")
+    st.markdown("### 📂 医師条件をExcelでダウンロード（手元にファイルで残す場合）")
+    st.write("先生の名前・回数・勤務間隔・希望日・NG日・備考をExcelファイルとしてパソコンなどにダウンロードします。このファイルは「医師条件」のアップロード欄から読み込めます。")
+    st.caption("ダウンロードの前に、各先生の「NG日を反映する」を押してください。作る年月・休日と別途決定の日・増員設定・確定当直・作成した当直案・色分けとそのメモは、このファイルには含まれません。"
+               "続きから作業するだけなら、ファイルではなく「💾 途中保存」を使うほうが簡単です。")
 
-    # ダウンロードするCSVも、画面と同じく「先生の名前 → 備考 → その他」の順にそろえる（読み込みは列名で行うので、古い並びのCSVもそのまま使える）
+    # ダウンロードするExcelも、画面と同じく「先生の名前 → 備考 → その他」の順にそろえる（読み込みは列名で行うので、古い並びのファイルもそのまま使える）
     _first = ["先生の名前"] + [c for c in staff_df.columns if str(c).startswith("備考")]
-    current_csv = staff_df[_first + [c for c in staff_df.columns if c not in _first]].to_csv(index=False).encode('utf-8-sig')
+    current_xlsx = table_xlsx(staff_df[_first + [c for c in staff_df.columns if c not in _first]], "医師条件",
+                              text_cols=[c for c in staff_df.columns if c not in NUMERIC_DEFAULTS and c not in GROUP_CAP_COLUMNS and c != DAY_GAP_COLUMN])
     st.download_button(
-        label="📥 医師条件をCSVでダウンロード",
-        data=current_csv,
+        label="📥 医師条件をExcelでダウンロード",
+        data=current_xlsx,
         file_name=f"医師条件_{year}年{month}月.csv",
         mime="text/csv",
         use_container_width=True
@@ -7455,10 +7533,9 @@ if len(staff_df) > 0:
                 default=None,
             )
 
-            csv_result = df_result.to_csv(index=False).encode('utf-8-sig')
             st.download_button(
-                label="📥 表示中の当直案をCSVでダウンロード",
-                data=csv_result,
+                label="📥 表示中の当直案をExcelでダウンロード",
+                data=table_xlsx(df_result, "当直案", text_cols=list(df_result.columns)),
                 file_name=f"当直案_{year}年{month}月.csv",
                 mime="text/csv",
             )
@@ -7476,4 +7553,4 @@ if len(staff_df) > 0:
 
 
 else:
-    st.warning("☝️ 表に先生の名前を入力するか、CSVファイルをアップロードしてください。")
+    st.warning("☝️ 表に先生の名前を入力するか、医師条件のファイルをアップロードしてください。")
