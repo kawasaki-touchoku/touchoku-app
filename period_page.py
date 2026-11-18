@@ -158,8 +158,8 @@ def validate_fixed_inputs(df, doctors, year, month, holidays=None):
     return period_validate_fixed_inputs(df, doctors, P, holidays)
 
 
-def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_special_holiday=False, shortage_priority=None, locked_days=()):
-    return period_generate_shift(P, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority, locked_days)
+def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_special_holiday=False, shortage_priority=None, locked_days=(), annual_balance=None):
+    return period_generate_shift(P, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority, locked_days, annual_balance)
 
 
 def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday=False, comments=None, gap_blocked=None):
@@ -1672,6 +1672,13 @@ with staff_box_dl:
 
 
 # ==========================================
+# 年間の当直回数（任意）：掲示用Excelから先生ごとの回数を集計し、当直案に反映する
+# ==========================================
+_annual_names = [n for n in (clean_text(v) for v in staff_df.get("先生の名前", pd.Series(dtype=str)).tolist()) if n and n.lower() not in ("nan", "none")]
+annual_balance = annual_section(year, month, P.start, P.end, P.n / _REAL_MONTHRANGE(P.year, P.month)[1],
+                                restored_state, _annual_names, now_word="期間中")
+
+# ==========================================
 # 4. 実行ボタンと結果表示
 # ==========================================
 st.markdown("""
@@ -1764,6 +1771,7 @@ work_snapshot = {
     "priority": {k: int(v) for k, v in shortage_priority.items()},
     "comments": {n: list(v) for n, v in imported_comments(year, month).items()},
     "alerts": {k: int(st.session_state.get(f"alert_{k}", v) or 0) for k, v in MATRIX_COUNT_ALERTS.items()},
+    "annual": annual_snapshot(year, month),   # 年間の当直回数（月ごとの回数だけ）
 }
 # 右上の途中保存ボタンが押されていたら、ここで（全部の入力を読み終えてから）保存する
 if work_save_request:
@@ -1799,7 +1807,8 @@ if fixed_input_errors:
     if create_bar_request:
         create_bar_show("<div class='cb-res bad'>⚠ 確定当直の入力に誤りがあります。赤い表示を確認してください。</div>")
     st.stop()
-current_signature = (input_signature(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority), tuple(sorted(locked_days)))
+current_signature = (input_signature(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority), tuple(sorted(locked_days)),
+                     json.dumps(annual_balance, ensure_ascii=False, sort_keys=True))
 if 'generated_df' in st.session_state and st.session_state.get('generated_signature') != current_signature:
     for key in ['generated_df', 'past_worked_dates', 'future_worked_dates', 'generated_warnings', 'generated_signature', 'generated_year', 'generated_month']:
         st.session_state.pop(key, None)
@@ -1820,13 +1829,14 @@ if len(staff_df) > 0:
     if create_clicked:
         with st.spinner("当直案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
             try:
-                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority, locked_days)
+                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority, locked_days, annual_balance=annual_balance)
 
                 if df_result is not None:
                     st.session_state['generated_signature'] = current_signature
                     st.session_state['generated_year'] = year
                     st.session_state['generated_month'] = month
                     st.session_state['generated_warnings'] = error_reasons
+                    st.session_state['generated_at'] = remote_now()   # 掲示用Excelの作成日時（年間集計で、あとから作ったほうを使うため）
                     st.session_state['result_needs_refresh'] = False
                 if df_result is not None and not df_result.empty:
                     st.session_state['generated_df'] = df_result
@@ -1983,6 +1993,17 @@ if len(staff_df) > 0:
                 file_name=f"当直案_{P.start.isoformat()}_{P.end.isoformat()}.csv",
                 mime="text/csv",
             )
+            # 掲示用のExcel（病院に貼る形）。ICU病棟（循環器）の列と作成日は空けておき、あとから手で入れる
+            st.download_button(
+                label="🖨️ 掲示用のExcelをダウンロード",
+                data=posting_xlsx(df_result, year, month, f"内科当直表（{P.title()}）",
+                                  roster=doctors_list, created=st.session_state.get("generated_at")),
+                file_name=f"当直表_掲示用_{P.start.isoformat()}_{P.end.isoformat()}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="病院に貼る形のExcelです。ICU病棟（循環器）の列と、右上の作成日は空けてあるので、ダウンロードしたあとに入れてください。",
+            )
+            # 年間の当直回数を読み込んでいるときは、この当直案を入れた場合の年間の回数も出す
+            annual_result_view(df_result, year, month, doctors_list, None, now_word="期間中")
 
 
 else:
