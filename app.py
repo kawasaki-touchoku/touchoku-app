@@ -3422,7 +3422,7 @@ def staff_column_config(columns, as_index=False):
         if kind == "text":
             config[c] = _column(st.column_config.TextColumn, label, width, help_text, pinned=(c == "先生の名前"))
         elif kind == "group":
-            config[c] = _column(st.column_config.SelectboxColumn, label, width, help_text, options=DOC_GROUP_NAMES)
+            config[c] = _column(st.column_config.SelectboxColumn, label, width, help_text, options=doc_group_names())
         elif kind == "num0":
             config[c] = _column(st.column_config.NumberColumn, label, width, help_text, min_value=0, step=1)
         elif kind == "days":
@@ -5652,11 +5652,13 @@ def period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month
 # 先生のグループ（グループごとに、入れる枠を ◯・△・× で決める）
 # ==========================================
 DOC_GROUP_COLUMN = "グループ"   # 医師条件の列（空欄＝グループなし。今までどおりの動き）
-DOC_GROUP_NAMES = [f"グループ{i}" for i in range(1, 6)]
 DOC_GROUP_MARKS = ["◯", "△", "×"]   # ◯入れる　△できれば入れない（人が足りないときだけ）　×入れない
+DOC_GROUP_MEMO = "メモ"   # グループの設定の、いちばん右のメモ欄（計算には使わない）
 DOC_GROUP_AVOID_COLUMN = "_できれば入れない枠"   # 計算用の列（表には出さない）
 DOC_GROUP_AVOID_PENALTY = 3000   # △の枠に1回入れるごとの減点（人が足りない枠を空けておく減点より小さくして、足りないときは入れる）
 DOC_GROUP_SHEET = "グループの設定"   # 医師条件のExcelの2枚目のシート
+# 最初に並べる5つのグループ（A日直・A宿直・B日直・B宿直・外来日直・外来宿直 の順）
+DOC_GROUP_DEFAULT = ["◯◯××◯×", "◯◯△◯◯×", "△△◯◯◯◯", "××××◯×", "◯×◯×◯×"]
 
 
 def doc_group_slots():
@@ -5664,29 +5666,48 @@ def doc_group_slots():
     return list(RESULT_COLUMNS[2:])
 
 
+def doc_group_number(name):
+    m = re.fullmatch(r"グループ(\d+)", clean_text(name))
+    return int(m.group(1)) if m else None
+
+
 def default_group_rules():
-    return {g: {s: "◯" for s in doc_group_slots()} for g in DOC_GROUP_NAMES}
+    """最初のグループの設定（グループ1〜5）。{グループ名: {枠: ◯△×, "メモ": 文字}}"""
+    slots = doc_group_slots()
+    return {f"グループ{i}": {**{s: marks[j] for j, s in enumerate(slots)}, DOC_GROUP_MEMO: ""}
+            for i, marks in enumerate(DOC_GROUP_DEFAULT, 1)}
 
 
 def normalize_group_rules(rules):
-    """途中保存・Excelから読んだグループの設定を、決まった形（全グループ×全枠、◯△×のどれか）にそろえる。"""
-    out = default_group_rules()
-    for g, row in (rules or {}).items():
-        if g in out and isinstance(row, dict):
-            for s, v in row.items():
-                v = clean_text(v).replace("○", "◯").replace("〇", "◯").replace("✕", "×").replace("x", "×").replace("X", "×")
-                if s in out[g] and v in DOC_GROUP_MARKS:
-                    out[g][s] = v
+    """
+    途中保存・Excelから読んだグループの設定を、決まった形にそろえる（グループの番号の順、全部の枠、◯△×のどれか、メモ）。
+    rules が None なら最初の設定。グループが1つもない設定もそのまま（全部消した場合）。
+    """
+    if rules is None:
+        return default_group_rules()
+    out = {}
+    for g, row in sorted(((g, r) for g, r in rules.items() if doc_group_number(g)), key=lambda x: doc_group_number(x[0])):
+        row = row if isinstance(row, dict) else {}
+        marks = {}
+        for s in doc_group_slots():
+            v = clean_text(row.get(s, "")).replace("○", "◯").replace("〇", "◯").replace("✕", "×").replace("x", "×").replace("X", "×")
+            marks[s] = v if v in DOC_GROUP_MARKS else "◯"
+        memo = clean_text(row.get(DOC_GROUP_MEMO, ""))
+        out[f"グループ{doc_group_number(g)}"] = {**marks, DOC_GROUP_MEMO: "" if memo.lower() in ("nan", "none") else memo}
     return out
 
 
+def doc_group_names():
+    """今あるグループの名前（医師条件の「グループ」の列で選べるもの）。"""
+    return list((st.session_state.get("group_rules_current") or default_group_rules()).keys())
+
+
 def doc_group_of(value):
-    """医師条件の「グループ」のマスから、グループの名前を返す（空欄・そのほかは ""）。"""
-    v = clean_text(value).replace(" ", "").replace("　", "")
-    v = v.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
-    if re.fullmatch(r"[1-5]", v):
-        v = "グループ" + v
-    return v if v in DOC_GROUP_NAMES else ""
+    """医師条件の「グループ」のマスから、グループの名前を返す（「3」だけでも可。空欄・そのほかは ""）。"""
+    v = clean_text(value).replace(" ", "").replace("　", "").translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+    if re.fullmatch(r"\d+", v):
+        v = "グループ" + str(int(v))
+    return f"グループ{doc_group_number(v)}" if doc_group_number(v) else ""
 
 
 def add_group_column(df):
@@ -5706,19 +5727,33 @@ def apply_group_rules(staff_df, rules):
     計算に使う医師条件を作る（画面の表・保存する医師条件は変えない）。
     ・×の枠：その枠の上限を0にする（確定当直は、今までどおり上限より優先）
     ・△の枠：「できれば入れない枠」の列に入れる（計算で、入れるたびに減点する）
+    ・もうないグループ（消したグループ）の先生は、グループなしとして扱う
     """
     df = staff_df.copy()
     rules = normalize_group_rules(rules)
     avoid = []
     for i, row in df.iterrows():
         g = doc_group_of(row.get(DOC_GROUP_COLUMN, ""))
-        marks = rules.get(g, {}) if g else {}
+        marks = {s: m for s, m in rules.get(g, {}).items() if s != DOC_GROUP_MEMO}
         for s, mark in marks.items():
             if mark == "×" and s + "上限" in df.columns:
                 df.at[i, s + "上限"] = 0
         avoid.append(",".join(s for s, mark in marks.items() if mark == "△"))
     df[DOC_GROUP_AVOID_COLUMN] = avoid
     return df
+
+
+def group_orphan_notice(staff_df, rules):
+    """消したグループに入っている先生がいれば、画面で知らせる（その先生はグループなしとして扱う）。"""
+    rules = normalize_group_rules(rules)
+    gone = {}
+    for _, row in staff_df.iterrows():
+        g = doc_group_of(row.get(DOC_GROUP_COLUMN, ""))
+        if g and g not in rules:
+            gone.setdefault(g, []).append(clean_text(row.get("先生の名前", "")))
+    for g, names in gone.items():
+        st.warning(f"「{g}」はグループの設定にないため、{'・'.join(names)}先生は、グループなし（今までどおり）として扱います。"
+                   "表の「グループ」の列で選び直すか、グループの設定に行を足してください。")
 
 
 def group_avoid_terms(doctors, days, daily_active_shifts, shifts, staff_df):
@@ -5740,18 +5775,19 @@ def group_rules_xlsx_sheet(wb, rules):
     ws = wb.create_sheet(DOC_GROUP_SHEET)
     rules = normalize_group_rules(rules)
     slots = doc_group_slots()
-    ws.append(["グループ"] + slots)
+    ws.append(["グループ"] + slots + [DOC_GROUP_MEMO])
     for c in ws[1]:
         c.font, c.fill, c.alignment = Font(bold=True), PatternFill("solid", fgColor="DFE6EF"), Alignment(horizontal="center")
-    for g in DOC_GROUP_NAMES:
-        ws.append([g] + [rules[g][s] for s in slots])
+    for g, row in rules.items():
+        ws.append([g] + [row[s] for s in slots] + [row.get(DOC_GROUP_MEMO, "")])
+        for i in range(2, len(slots) + 2):
+            ws.cell(ws.max_row, i).alignment = Alignment(horizontal="center")
     ws.append([])
     ws.append(["◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない"])
     ws.column_dimensions["A"].width = 12
     for i in range(2, len(slots) + 2):
         ws.column_dimensions[chr(64 + i)].width = 10
-        for r in range(2, len(DOC_GROUP_NAMES) + 2):
-            ws.cell(r, i).alignment = Alignment(horizontal="center")
+    ws.column_dimensions[chr(64 + len(slots) + 2)].width = 30
 
 
 def group_rules_from_xlsx(data):
@@ -5774,11 +5810,11 @@ def group_rules_from_xlsx(data):
         g = doc_group_of(r[0] if r else "")
         if g:
             rules[g] = {head[j]: r[j] for j in range(1, min(len(head), len(r))) if head[j]}
-    return normalize_group_rules(rules) if rules else None
+    return normalize_group_rules(rules)
 
 
 def set_group_rules_base(rules):
-    """グループの設定の表を、rules で作り直す（読み込んだとき・途中保存から戻したときだけ）。"""
+    """グループの設定の表を、rules で作り直す（読み込んだとき・途中保存から戻したとき・行を足したときだけ）。"""
     st.session_state["group_rules_base"] = normalize_group_rules(rules)
     st.session_state["group_rules_current"] = normalize_group_rules(rules)
     st.session_state["group_rules_gen"] = st.session_state.get("group_rules_gen", 0) + 1
@@ -5787,29 +5823,46 @@ def set_group_rules_base(rules):
 def group_rules_ui(restored_state):
     """
     「👥 グループの設定（任意）」の表を出し、今の設定を返す。
-    表の中身は画面の裏に持っておき、途中保存から戻したとき・Excelを読み込んだときだけ作り直す（入力のたびには作り直さない）。
+    ・表の中身は画面の裏に持っておき、途中保存から戻したとき・Excelを読み込んだときだけ作り直す（入力のたびには作り直さない）
+    ・「＋」で行を足すと、次の番号のグループ（例：グループ6）にする（名前を付けるために、そのときだけ表を作り直す）
     """
     saved = (restored_state or {}).get("group_rules")
-    src = json.dumps(saved, ensure_ascii=False, sort_keys=True) if saved else ""
+    src = json.dumps(saved, ensure_ascii=False, sort_keys=True) if saved is not None else ""
     if st.session_state.get("group_rules_src") != src:
         st.session_state["group_rules_src"] = src
-        if saved or "group_rules_base" not in st.session_state:
+        if saved is not None or "group_rules_base" not in st.session_state:
             set_group_rules_base(saved)
     slots = doc_group_slots()
     base = st.session_state["group_rules_base"]
-    view = pd.DataFrame([[g] + [base[g][s] for s in slots] for g in DOC_GROUP_NAMES], columns=["グループ"] + slots)
+    view = pd.DataFrame([[g] + [r[s] for s in slots] + [r.get(DOC_GROUP_MEMO, "")] for g, r in base.items()],
+                        columns=["グループ"] + slots + [DOC_GROUP_MEMO])
     with st.container(key="group_rules_box", border=True):
         st.markdown("<div style='font-weight:800;color:#24405f;font-size:1.02rem'>👥 グループの設定（任意）</div>", unsafe_allow_html=True)
         st.caption("同じ扱いにしたい先生をグループにまとめ、グループごとに入れる枠を決めます。先生のグループは、下の表の「グループ」の列で選びます"
-                   "（空欄の先生は今までどおり）。使わないグループは、そのままで大丈夫です。")
+                   "（空欄の先生は今までどおり）。グループは表の下の「＋」で足せます（いくつでも）。いらないグループは、行を選んで消せます。")
         config = {"グループ": st.column_config.TextColumn("グループ", disabled=True, width=90)}
-        config.update({s: st.column_config.SelectboxColumn(s, options=DOC_GROUP_MARKS, required=True, width=80,
+        config.update({s: st.column_config.SelectboxColumn(s, options=DOC_GROUP_MARKS, required=True, default="◯",
+                                                           width=header_fit_width(s, 80),   # 見出しが切れない幅
                                                            help="◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない")
                        for s in slots})
-        cur = st.data_editor(view, hide_index=True, use_container_width=False, num_rows="fixed", column_config=config,
+        config[DOC_GROUP_MEMO] = st.column_config.TextColumn(DOC_GROUP_MEMO, width=240, help="自由に書けるメモです（計算には使いません）。例：上の先生")
+        cur = st.data_editor(view, hide_index=True, use_container_width=False, num_rows="dynamic", column_config=config,
                              key=f"group_rules_editor_{st.session_state.get('group_rules_gen', 0)}")
         st.caption("◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない（確定当直は、今までどおり入ります）")
-    rules = {r["グループ"]: {s: r[s] for s in slots} for _, r in cur.iterrows()}
+    rules, new_rows = {}, []
+    for _, r in cur.iterrows():
+        row = {s: r.get(s) for s in slots}
+        row[DOC_GROUP_MEMO] = r.get(DOC_GROUP_MEMO)
+        if doc_group_number(r.get("グループ")):
+            rules[clean_text(r["グループ"])] = row
+        else:
+            new_rows.append(row)
+    if new_rows:   # 足した行に、次の番号のグループ名を付けて、表を出し直す
+        nxt = max([doc_group_number(g) for g in list(base) + list(rules)] + [0]) + 1
+        for i, row in enumerate(new_rows):
+            rules[f"グループ{nxt + i}"] = row
+        set_group_rules_base(rules)
+        st.rerun()
     st.session_state["group_rules_current"] = normalize_group_rules(rules)
     return st.session_state["group_rules_current"]
 
@@ -7434,6 +7487,7 @@ with staff_box_cond:
             st.table(pd.DataFrame(_notes, columns=["先生の名前", "備考"]).set_index("先生の名前"))
     staff_df, staff_input_errors = validate_staff_inputs(staff_df, year, month)
     staff_df_calc = apply_group_rules(staff_df, group_rules)   # 計算用：グループの×の枠は上限0、△の枠は「できれば入れない」
+    group_orphan_notice(staff_df, group_rules)   # 消したグループに入っている先生がいれば知らせる
     if staff_input_errors:
         show_input_errors(staff_input_errors)
         if create_bar_request:
@@ -7847,7 +7901,7 @@ work_snapshot = {
     "comments": {n: list(v) for n, v in imported_comments(year, month).items()},
     "alerts": {k: int(st.session_state.get(f"alert_{k}", v) or 0) for k, v in MATRIX_COUNT_ALERTS.items()},
     "annual": annual_snapshot(year, month),   # 年間の当直回数（月ごとの回数だけ）
-    "group_rules": st.session_state.get("group_rules_current") or default_group_rules(),   # 👥 グループの設定
+    "group_rules": st.session_state.get("group_rules_current", default_group_rules()),   # 👥 グループの設定（メモを含む）
 }
 # 右上の途中保存ボタンが押されていたら、ここで（全部の入力を読み終えてから）保存する
 if work_save_request:
