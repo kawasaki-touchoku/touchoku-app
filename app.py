@@ -6712,6 +6712,19 @@ def staff_view_page():
     # NG日の列は、いちばん長い先生のNG日が入る幅にする（ほかの列は列名が見える最小限）
     _ng_len = max([len(clean_text(v)) for v in df.get(NG_COLUMN, pd.Series(dtype=str)).tolist()] + [10])
     staff_table(df, editable=False, show_ng=True, max_height=900, ng_width=min(900, 8 * _ng_len + 30))
+    # グループの設定（見るだけ）：グループごとに入れる枠（◯△×）とメモ
+    rules = normalize_group_rules(data.get("group_rules")) if data.get("group_rules") is not None else {}
+    if rules:
+        st.markdown("<div style='font-weight:800;color:#24405f;font-size:1.02rem;margin-top:14px'>👥 グループの設定（見るだけ）</div>",
+                    unsafe_allow_html=True)
+        slots = doc_group_slots()
+        gdf = pd.DataFrame([[g] + [r[s] for s in slots] + [r.get(DOC_GROUP_MEMO, "")] for g, r in rules.items()],
+                           columns=["グループ名"] + slots + [DOC_GROUP_MEMO])
+        gcfg = {"グループ名": st.column_config.TextColumn("グループ名", width=120)}
+        gcfg.update({s: st.column_config.TextColumn(s, width=header_fit_width(s, 0)) for s in slots})
+        gcfg[DOC_GROUP_MEMO] = st.column_config.TextColumn(DOC_GROUP_MEMO, width=240)
+        st.dataframe(gdf, hide_index=True, use_container_width=False, column_config=gcfg)
+        st.caption("◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない（確定当直は、今までどおり入ります）")
 
 
 # ==========================================
