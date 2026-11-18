@@ -125,6 +125,16 @@ def table_xlsx(df, sheet_name, text_cols=None, blank_rows=0):
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
+def staff_xlsx_with_groups(df, text_cols, rules):
+    """医師条件のExcel（1枚目：医師条件、2枚目：グループの設定）。"""
+    from openpyxl import load_workbook
+    wb = load_workbook(io.BytesIO(table_xlsx(df, "医師条件", text_cols=text_cols)))
+    group_rules_xlsx_sheet(wb, rules)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def normalize_shift_names(df):
     """以前のCSVの枠名・上限列・希望枠を現在の名称へ変換する。"""
     aliases = {"宿直A": "A宿直", "宿直B": "B宿直", "A当直": "A宿直", "B当直": "B宿直", "日直A": "A日直", "日直B": "B日直"}
@@ -2459,6 +2469,8 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
             for d, s_name in req_specific[doc]:
                 objective_terms.append(shifts[(d, doc, s_name)] * weight)
 
+    # グループの設定で△（できれば入れない）の枠は、入れるたびに減点する（人が足りないときだけ入る）
+    objective_terms += group_avoid_terms(doctors, days, daily_active_shifts, shifts, staff_df)
     # 年間の回数（1か月あたり）をそろえる（年間の当直回数を読み込み、反映するにしたときだけ）
     objective_terms += add_annual_balance_terms(model, doctors, days, daily_active_shifts, is_holiday, required_count,
                                                 worked_all, holiday_worked, shifts, annual_balance)
@@ -3206,6 +3218,8 @@ def carry_over_staff(year, month):
             del st.session_state[key]
     state = dict(st.session_state.get("restored_state") or {"year": year, "month": month})
     state["staff_csv"] = df.to_csv(index=False)
+    if data.get("group_rules"):
+        state["group_rules"] = data["group_rules"]   # グループの設定も引き継ぐ
     st.session_state["restored_state"] = state
     st.session_state["uploader_gen"] = st.session_state.get("uploader_gen", 0) + 1
     st.session_state.pop("last_uploaded_file_id", None)
@@ -3341,6 +3355,8 @@ def staff_column_specs():
         "先生の名前": ("名前", 72, "text", "先生の名前です。ほかの先生と重ならない表記にしてください。"),
         "備考（メモ・説明など自由記入）": ("備考", 110, "text",
             "管理用メモです。ここに書いた内容は計算に反映されません。セルをダブルクリックすると全文が表示され、編集できます。表の下の「備考の全文を見る」でも確認できます。"),
+        DOC_GROUP_COLUMN: ("グループ", 96, "group",
+            "グループを選ぶと、上の「👥 グループの設定」で決めた枠の決まり（◯入れる・△できれば入れない・×入れない）が使われます。空欄なら今までどおり。"),
         "翌日PM duty": ("翌日PM duty", 92, "text",
             "例：木曜PMにdutyがある場合は水。複数は水,木のように入力。翌日が休日なら宿直に入る場合があります。日直は対象外です。確実に外す日はカレンダーでNGを指定してください。"),
         REQUEST_COLUMN: ("希望日", 100, "text",
@@ -3405,6 +3421,8 @@ def staff_column_config(columns, as_index=False):
         label, width, kind, help_text = specs.get(c, (str(c), 80, "text", None))
         if kind == "text":
             config[c] = _column(st.column_config.TextColumn, label, width, help_text, pinned=(c == "先生の名前"))
+        elif kind == "group":
+            config[c] = _column(st.column_config.SelectboxColumn, label, width, help_text, options=DOC_GROUP_NAMES)
         elif kind == "num0":
             config[c] = _column(st.column_config.NumberColumn, label, width, help_text, min_value=0, step=1)
         elif kind == "days":
@@ -5238,6 +5256,8 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
             for d, s_name in req_specific[doc]:
                 objective_terms.append(shifts[(d, doc, s_name)] * weight)
 
+    # グループの設定で△（できれば入れない）の枠は、入れるたびに減点する（人が足りないときだけ入る）
+    objective_terms += group_avoid_terms(doctors, days, daily_active_shifts, shifts, staff_df)
     # 年間の回数（1か月あたり）をそろえる（年間の当直回数を読み込み、反映するにしたときだけ）
     objective_terms += add_annual_balance_terms(model, doctors, days, daily_active_shifts, is_holiday, required_count,
                                                 worked_all, holiday_worked, shifts, annual_balance)
@@ -5626,6 +5646,172 @@ def period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month
         })
     return days, rows
 
+
+
+# ==========================================
+# 先生のグループ（グループごとに、入れる枠を ◯・△・× で決める）
+# ==========================================
+DOC_GROUP_COLUMN = "グループ"   # 医師条件の列（空欄＝グループなし。今までどおりの動き）
+DOC_GROUP_NAMES = [f"グループ{i}" for i in range(1, 6)]
+DOC_GROUP_MARKS = ["◯", "△", "×"]   # ◯入れる　△できれば入れない（人が足りないときだけ）　×入れない
+DOC_GROUP_AVOID_COLUMN = "_できれば入れない枠"   # 計算用の列（表には出さない）
+DOC_GROUP_AVOID_PENALTY = 3000   # △の枠に1回入れるごとの減点（人が足りない枠を空けておく減点より小さくして、足りないときは入れる）
+DOC_GROUP_SHEET = "グループの設定"   # 医師条件のExcelの2枚目のシート
+
+
+def doc_group_slots():
+    """グループの設定の表の列（枠）。"""
+    return list(RESULT_COLUMNS[2:])
+
+
+def default_group_rules():
+    return {g: {s: "◯" for s in doc_group_slots()} for g in DOC_GROUP_NAMES}
+
+
+def normalize_group_rules(rules):
+    """途中保存・Excelから読んだグループの設定を、決まった形（全グループ×全枠、◯△×のどれか）にそろえる。"""
+    out = default_group_rules()
+    for g, row in (rules or {}).items():
+        if g in out and isinstance(row, dict):
+            for s, v in row.items():
+                v = clean_text(v).replace("○", "◯").replace("〇", "◯").replace("✕", "×").replace("x", "×").replace("X", "×")
+                if s in out[g] and v in DOC_GROUP_MARKS:
+                    out[g][s] = v
+    return out
+
+
+def doc_group_of(value):
+    """医師条件の「グループ」のマスから、グループの名前を返す（空欄・そのほかは ""）。"""
+    v = clean_text(value).replace(" ", "").replace("　", "")
+    v = v.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+    if re.fullmatch(r"[1-5]", v):
+        v = "グループ" + v
+    return v if v in DOC_GROUP_NAMES else ""
+
+
+def add_group_column(df):
+    """医師条件に「グループ」の列がなければ、備考（なければ先生の名前）の右に空欄の列を足す。中身はグループの名前にそろえる。"""
+    df = df.copy()
+    if DOC_GROUP_COLUMN not in df.columns:
+        cols = list(df.columns)
+        notes = [c for c in cols if str(c).startswith("備考")]
+        pos = cols.index(notes[-1]) + 1 if notes else (cols.index("先生の名前") + 1 if "先生の名前" in cols else 0)
+        df.insert(pos, DOC_GROUP_COLUMN, "")
+    df[DOC_GROUP_COLUMN] = df[DOC_GROUP_COLUMN].map(lambda v: doc_group_of(v) or None).astype(object)   # 空欄は None（選ぶ欄で空欄に見せる）
+    return df
+
+
+def apply_group_rules(staff_df, rules):
+    """
+    計算に使う医師条件を作る（画面の表・保存する医師条件は変えない）。
+    ・×の枠：その枠の上限を0にする（確定当直は、今までどおり上限より優先）
+    ・△の枠：「できれば入れない枠」の列に入れる（計算で、入れるたびに減点する）
+    """
+    df = staff_df.copy()
+    rules = normalize_group_rules(rules)
+    avoid = []
+    for i, row in df.iterrows():
+        g = doc_group_of(row.get(DOC_GROUP_COLUMN, ""))
+        marks = rules.get(g, {}) if g else {}
+        for s, mark in marks.items():
+            if mark == "×" and s + "上限" in df.columns:
+                df.at[i, s + "上限"] = 0
+        avoid.append(",".join(s for s, mark in marks.items() if mark == "△"))
+    df[DOC_GROUP_AVOID_COLUMN] = avoid
+    return df
+
+
+def group_avoid_terms(doctors, days, daily_active_shifts, shifts, staff_df):
+    """△（できれば入れない）の枠に入れるたびの減点（目的関数に足す項）。"""
+    terms = []
+    for _, row in staff_df.iterrows():
+        doc = str(row["先生の名前"])
+        if doc not in doctors:
+            continue
+        avoid = {s for s in clean_text(row.get(DOC_GROUP_AVOID_COLUMN, "")).split(",") if s}
+        terms += [-DOC_GROUP_AVOID_PENALTY * shifts[(d, doc, s)] for d in days for s in daily_active_shifts[d]
+                  if s in avoid and (d, doc, s) in shifts]
+    return terms
+
+
+def group_rules_xlsx_sheet(wb, rules):
+    """医師条件のExcel（wb）に「グループの設定」のシートを足す。"""
+    from openpyxl.styles import Font, PatternFill, Alignment
+    ws = wb.create_sheet(DOC_GROUP_SHEET)
+    rules = normalize_group_rules(rules)
+    slots = doc_group_slots()
+    ws.append(["グループ"] + slots)
+    for c in ws[1]:
+        c.font, c.fill, c.alignment = Font(bold=True), PatternFill("solid", fgColor="DFE6EF"), Alignment(horizontal="center")
+    for g in DOC_GROUP_NAMES:
+        ws.append([g] + [rules[g][s] for s in slots])
+    ws.append([])
+    ws.append(["◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない"])
+    ws.column_dimensions["A"].width = 12
+    for i in range(2, len(slots) + 2):
+        ws.column_dimensions[chr(64 + i)].width = 10
+        for r in range(2, len(DOC_GROUP_NAMES) + 2):
+            ws.cell(r, i).alignment = Alignment(horizontal="center")
+
+
+def group_rules_from_xlsx(data):
+    """医師条件のExcelに「グループの設定」のシートがあれば読む（なければ None）。"""
+    if not bytes(data[:4]) == b"PK\x03\x04":
+        return None
+    from openpyxl import load_workbook
+    try:
+        wb = load_workbook(io.BytesIO(data), data_only=True)
+    except Exception:
+        return None
+    if DOC_GROUP_SHEET not in wb.sheetnames:
+        return None
+    rows = [list(r) for r in wb[DOC_GROUP_SHEET].iter_rows(values_only=True)]
+    if not rows:
+        return None
+    head = [clean_text(v) for v in rows[0]]
+    rules = {}
+    for r in rows[1:]:
+        g = doc_group_of(r[0] if r else "")
+        if g:
+            rules[g] = {head[j]: r[j] for j in range(1, min(len(head), len(r))) if head[j]}
+    return normalize_group_rules(rules) if rules else None
+
+
+def set_group_rules_base(rules):
+    """グループの設定の表を、rules で作り直す（読み込んだとき・途中保存から戻したときだけ）。"""
+    st.session_state["group_rules_base"] = normalize_group_rules(rules)
+    st.session_state["group_rules_current"] = normalize_group_rules(rules)
+    st.session_state["group_rules_gen"] = st.session_state.get("group_rules_gen", 0) + 1
+
+
+def group_rules_ui(restored_state):
+    """
+    「👥 グループの設定（任意）」の表を出し、今の設定を返す。
+    表の中身は画面の裏に持っておき、途中保存から戻したとき・Excelを読み込んだときだけ作り直す（入力のたびには作り直さない）。
+    """
+    saved = (restored_state or {}).get("group_rules")
+    src = json.dumps(saved, ensure_ascii=False, sort_keys=True) if saved else ""
+    if st.session_state.get("group_rules_src") != src:
+        st.session_state["group_rules_src"] = src
+        if saved or "group_rules_base" not in st.session_state:
+            set_group_rules_base(saved)
+    slots = doc_group_slots()
+    base = st.session_state["group_rules_base"]
+    view = pd.DataFrame([[g] + [base[g][s] for s in slots] for g in DOC_GROUP_NAMES], columns=["グループ"] + slots)
+    with st.container(key="group_rules_box", border=True):
+        st.markdown("<div style='font-weight:800;color:#24405f;font-size:1.02rem'>👥 グループの設定（任意）</div>", unsafe_allow_html=True)
+        st.caption("同じ扱いにしたい先生をグループにまとめ、グループごとに入れる枠を決めます。先生のグループは、下の表の「グループ」の列で選びます"
+                   "（空欄の先生は今までどおり）。使わないグループは、そのままで大丈夫です。")
+        config = {"グループ": st.column_config.TextColumn("グループ", disabled=True, width=90)}
+        config.update({s: st.column_config.SelectboxColumn(s, options=DOC_GROUP_MARKS, required=True, width=80,
+                                                           help="◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない")
+                       for s in slots})
+        cur = st.data_editor(view, hide_index=True, use_container_width=False, num_rows="fixed", column_config=config,
+                             key=f"group_rules_editor_{st.session_state.get('group_rules_gen', 0)}")
+        st.caption("◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない（確定当直は、今までどおり入ります）")
+    rules = {r["グループ"]: {s: r[s] for s in slots} for _, r in cur.iterrows()}
+    st.session_state["group_rules_current"] = normalize_group_rules(rules)
+    return st.session_state["group_rules_current"]
 
 
 # ==========================================
@@ -6481,7 +6667,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
    読み込むと、①に「今の名簿」と「読み込んだ医師条件」（見るだけの表）が出るので、正しく読み込めたかをここで確認します。
    新しく来た先生は「➕ 先生を追加する」で、名前・入れる位置（○○先生の下）・条件のもと（ほかの先生と同じ条件、または型）を選んで追加します。いなくなった先生は「➖ 先生を外す」で外します。
 6. **NG日**（②）：先生を選んでカレンダーでNG日を入れ、「NG日を反映する」を押します（紙やメールで集めたNG日を入力します）。先生方に専用URLから入力してもらう場合は、ここで受付・取り込みを行います（「NG日の集め方」のタブを参照）。
-7. **医師条件の調整**（③・④）：当直案の枠ができるだけ埋まるように、③の表で回数・上限・勤務間隔・希望日を調整します（①の表は見るだけなので、直すのは③です）。④の「⚖️ 当直の枠は足りそう？」で、全体と枠の種類ごとに足りているか（赤い棒がないか）を確認します。
+7. **医師条件の調整**（③・④）：当直案の枠ができるだけ埋まるように、③の表で回数・上限・勤務間隔・希望日を調整します（①の表は見るだけなので、直すのは③です）。同じ扱いにしたい先生がいるときは、③の表の上の「👥 グループの設定」でグループごとに入れる枠（◯入れる・△できれば入れない・×入れない）を決め、表の「グループ」の列で先生のグループを選びます。④の「⚖️ 当直の枠は足りそう？」で、全体と枠の種類ごとに足りているか（赤い棒がないか）を確認します。
 8. **年間の当直回数（任意）**：「📊 年間の当直回数」に、これまでの月の掲示用Excelをまとめて読み込むと（当直表が見つからない月は、右の「📋 集計だけのファイル」に、ひな形で期間と先生ごとの回数を書いて読み込みます）、先生ごとの回数（合計と1か月あたり）（病棟・外来、平日・休日、宿直・日直、合計）が出ます。「年間の回数を、今月の当直案に反映する」にチェックすると、当直合計・休日（平日）・宿直（日直）・外来（病棟）のそれぞれを、選んだ強さでそろえて作ります。
 9. **不足時の優先順位（任意）**：人数が足りない月に、どの枠から埋めるかを決めます。
 10. **当直案を作る**：下の帯の「🚀 当直案を作成」を押します（計算に最大1分少々かかります）。押すたびに違うパターンの案ができるので、気に入るまで押し直して構いません。
@@ -6489,7 +6675,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 11. **確認してダウンロード**：「医師別の当直一覧」のExcelと、表の下の「掲示用のExcel（A3）」をダウンロードします（「結果の見方・Excel」のタブを参照）。掲示用Excelは手直しして掲示し、手元に残しておきます。
 12. **途中保存**：最後に上の帯の「💾 作業を途中保存する」を押しておくと、翌月は「📋 前月の医師条件を引き継ぐ」で、この医師条件から始められます。
 
-途中保存には、年月・休日・別途決定の日・増員設定・確定当直・医師条件（NG日を含む）・取り込んだ先生のコメント・不足時の優先順位・アラートの基準・年間の当直回数（先生ごと・月ごとの回数だけ。Excelそのものは入りません）が入ります。
+途中保存には、年月・休日・別途決定の日・増員設定・確定当直・医師条件（NG日・グループの設定を含む）・取り込んだ先生のコメント・不足時の優先順位・アラートの基準・年間の当直回数（先生ごと・月ごとの回数だけ。Excelそのものは入りません）が入ります。
 途中保存は、保存した回ごとに新しいものから20回分まで残ります（それより古いものは自動で消えます）。「📂 前回の作業の続きから始める」で、どの回から再開するかを選べます。
         """)
     with tab_ng:
@@ -7173,6 +7359,9 @@ with staff_box_cond:
                     del st.session_state[key]
             st.session_state['last_uploaded_file_id'] = uploaded_file.file_id
             st.session_state["staff_source_label"] = f"ファイル「{uploaded_file.name}」から"
+            _gr = group_rules_from_xlsx(uploaded_file.getvalue())
+            if _gr:
+                set_group_rules_base(_gr)   # 医師条件のExcelに「グループの設定」のシートがあれば、その設定にする
             st.session_state.pop("staff_added_names", None)
         try:
             base_df = parse_staff_csv(uploaded_file.getvalue())
@@ -7197,6 +7386,7 @@ with staff_box_cond:
         base_df[_gc] = pd.to_numeric(base_df[_gc], errors="coerce")
     # 宿⇔日・日⇔日 間隔下限の列がない（以前の）CSV・途中保存でも、「宿⇔宿 間隔下限」の右に、宿⇔宿 間隔下限と同じ値で列を足す
     base_df = add_day_gap_column(base_df.loc[:, ~base_df.columns.duplicated()])   # 同じ名前の列が2つあると表が出せないので1つにする
+    base_df = add_group_column(base_df.drop(columns=[DOC_GROUP_AVOID_COLUMN], errors="ignore"))   # 「グループ」の列（ないファイルでは空欄で足す）
     if DAY_GAP_COLUMN in base_df.columns:
         base_df[DAY_GAP_COLUMN] = pd.to_numeric(base_df[DAY_GAP_COLUMN], errors="coerce")
     base_df = base_df.set_index("先生の名前")
@@ -7209,6 +7399,7 @@ with staff_box_cond:
         if c in base_df.columns:
             base_df[c] = base_df[c].apply(lambda x: "" if pd.isna(x) or str(x).lower() in ["nan", "none", "<na>"] else str(x))
 
+    group_rules = group_rules_ui(restored_state)   # 👥 グループの設定（任意）
     st.caption("先生の名前は、ほかの先生と重ならない表記にしてください。")
 
     st.session_state["staff_table_ym"] = (year, month)   # 「列の幅」を動かしたときに、直しかけの表を引き継ぐため
@@ -7242,6 +7433,7 @@ with staff_box_cond:
             # st.table は長い文章を折り返して全部表示する
             st.table(pd.DataFrame(_notes, columns=["先生の名前", "備考"]).set_index("先生の名前"))
     staff_df, staff_input_errors = validate_staff_inputs(staff_df, year, month)
+    staff_df_calc = apply_group_rules(staff_df, group_rules)   # 計算用：グループの×の枠は上限0、△の枠は「できれば入れない」
     if staff_input_errors:
         show_input_errors(staff_input_errors)
         if create_bar_request:
@@ -7256,7 +7448,7 @@ with staff_box_cap:
 
     st.markdown(CAPACITY_CSS, unsafe_allow_html=True)
     cap_needs = slot_needs(year, month, num_days, custom_holidays, locked_days, multi_slots_dict)
-    cap_rows, total_max_capacity = capacity_rows(staff_df, cap_needs)
+    cap_rows, total_max_capacity = capacity_rows(staff_df_calc, cap_needs)
     margin = total_max_capacity - total_slots
     c1, c2, c3 = st.columns(3)
     c1.metric("🏥 埋める必要がある枠", f"{total_slots} 枠")
@@ -7543,8 +7735,9 @@ with staff_box_dl:
 
     # ダウンロードするExcelも、画面と同じく「先生の名前 → 備考 → その他」の順にそろえる（読み込みは列名で行うので、古い並びのファイルもそのまま使える）
     _first = ["先生の名前"] + [c for c in staff_df.columns if str(c).startswith("備考")]
-    current_xlsx = table_xlsx(staff_df[_first + [c for c in staff_df.columns if c not in _first]], "医師条件",
-                              text_cols=[c for c in staff_df.columns if c not in NUMERIC_DEFAULTS and c not in GROUP_CAP_COLUMNS and c != DAY_GAP_COLUMN])
+    current_xlsx = staff_xlsx_with_groups(staff_df[_first + [c for c in staff_df.columns if c not in _first and not str(c).startswith("_")]],
+                                          [c for c in staff_df.columns if c not in NUMERIC_DEFAULTS and c not in GROUP_CAP_COLUMNS and c != DAY_GAP_COLUMN],
+                                          st.session_state.get("group_rules_current"))
     st.download_button(
         label="📥 医師条件をExcelでダウンロード",
         data=current_xlsx,
@@ -7654,6 +7847,7 @@ work_snapshot = {
     "comments": {n: list(v) for n, v in imported_comments(year, month).items()},
     "alerts": {k: int(st.session_state.get(f"alert_{k}", v) or 0) for k, v in MATRIX_COUNT_ALERTS.items()},
     "annual": annual_snapshot(year, month),   # 年間の当直回数（月ごとの回数だけ）
+    "group_rules": st.session_state.get("group_rules_current") or default_group_rules(),   # 👥 グループの設定
 }
 # 右上の途中保存ボタンが押されていたら、ここで（全部の入力を読み終えてから）保存する
 if work_save_request:
@@ -7689,7 +7883,7 @@ if fixed_input_errors:
     if create_bar_request:
         create_bar_show("<div class='cb-res bad'>⚠ 確定当直の入力に誤りがあります。赤い表示を確認してください。</div>")
     st.stop()
-current_signature = (input_signature(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority), tuple(sorted(locked_days)),
+current_signature = (input_signature(year, month, staff_df_calc, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority), tuple(sorted(locked_days)),
                      json.dumps(annual_balance, ensure_ascii=False, sort_keys=True))
 if 'generated_df' in st.session_state and st.session_state.get('generated_signature') != current_signature:
     for key in ['generated_df', 'past_worked_dates', 'future_worked_dates', 'generated_warnings', 'generated_signature', 'generated_year', 'generated_month']:
@@ -7711,7 +7905,7 @@ if len(staff_df) > 0:
     if create_clicked:
         with st.spinner("当直案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
             try:
-                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority, locked_days, annual_balance=annual_balance)
+                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df_calc, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority, locked_days, annual_balance=annual_balance)
 
                 if df_result is not None:
                     st.session_state['generated_signature'] = current_signature
