@@ -3402,9 +3402,10 @@ def _column(maker, label, width, help_text, pinned=False, **kw):
     return maker(label, width=width, help=help_text, **kw)
 
 
-def staff_column_config(columns, as_index=False, show_ng=False):
+def staff_column_config(columns, as_index=False, show_ng=False, ng_width=None):
     """st.data_editor / st.dataframe に渡す column_config。as_index=True なら「先生の名前」は表の見出し列（index）。
-    NG日の列はふつう出さない（NG日はカレンダーで入れるため）。show_ng=True（閲覧用の画面）のときだけ出す。"""
+    NG日の列はふつう出さない（NG日はカレンダーで入れるため）。show_ng=True（閲覧用の画面）のときだけ出す。
+    ng_width を渡すと（閲覧用の画面）、NG日の列をその幅にし、ほかの列は列名が見える最小限の幅にする（名前の列はそのまま）。"""
     specs = staff_column_specs()
     config = {}
     for c in columns:
@@ -3412,6 +3413,8 @@ def staff_column_config(columns, as_index=False, show_ng=False):
             config[c] = None
             continue
         label, width, kind, help_text = specs.get(c, (str(c), 80, "text", None))
+        if ng_width is not None and c != "先生の名前":
+            width = ng_width if c == NG_COLUMN else 0   # 0 → 列名が見える最小限の幅（_column で列名に合わせる）
         if kind == "text":
             config[c] = _column(st.column_config.TextColumn, label, width, help_text, pinned=(c == "先生の名前"))
         elif kind == "group":
@@ -3448,9 +3451,10 @@ STAFF_COLUMN_HINT_HTML = (
     "<small>（例：「宿⇔日・日⇔日」に合わせると、どの組み合わせに使うかが出ます）</small></div>")
 
 
-def staff_table(df, editable, show_ng=False, max_height=300):
+def staff_table(df, editable, show_ng=False, max_height=300, ng_width=None):
     """医師条件の表。③（編集用）と①（見るだけ）で、列名・幅・行の高さ・並びを同じにする。
-    show_ng=True なら、見るだけの表にNG日の列も出す（閲覧用の画面）。max_height は見るだけの表の高さの上限。"""
+    show_ng=True なら、見るだけの表にNG日の列も出す（閲覧用の画面）。max_height は見るだけの表の高さの上限。
+    ng_width を渡すと、NG日の列をその幅にし、ほかの列は列名が見える最小限の幅にする（閲覧用の画面）。"""
     st.markdown(STAFF_COLUMN_HINT_HTML, unsafe_allow_html=True)
     if editable:
         cols = [c for c in df.columns if str(c).startswith("備考")] + [c for c in df.columns if not str(c).startswith("備考")]
@@ -3475,7 +3479,7 @@ def staff_table(df, editable, show_ng=False, max_height=300):
             if c != "先生の名前" and num.notna().any() and num.notna().sum() == view[c].replace("", None).notna().sum() \
                     and (num.dropna() % 1 == 0).all():
                 view[c] = num.astype("Int64")
-        kwargs = dict(hide_index=True, use_container_width=True, column_config=staff_column_config(view.columns, show_ng=show_ng),
+        kwargs = dict(hide_index=True, use_container_width=True, column_config=staff_column_config(view.columns, show_ng=show_ng, ng_width=ng_width),
                       height=min(max_height, 38 + (STAFF_ROW_HEIGHT + 1) * max(len(view), 1)))
         try:
             out = st.dataframe(view, row_height=STAFF_ROW_HEIGHT, **kwargs)
@@ -6705,7 +6709,9 @@ def staff_view_page():
     for c in (NG_COLUMN, REQUEST_COLUMN, "翌日PM duty", DOC_GROUP_COLUMN):
         if c in df.columns:
             df[c] = df[c].map(lambda v: "" if clean_text(v).lower() in ("nan", "none", "<na>") else clean_text(v))
-    staff_table(df, editable=False, show_ng=True, max_height=900)
+    # NG日の列は、いちばん長い先生のNG日が入る幅にする（ほかの列は列名が見える最小限）
+    _ng_len = max([len(clean_text(v)) for v in df.get(NG_COLUMN, pd.Series(dtype=str)).tolist()] + [10])
+    staff_table(df, editable=False, show_ng=True, max_height=900, ng_width=min(900, 8 * _ng_len + 30))
 
 
 # ==========================================
