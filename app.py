@@ -6673,8 +6673,8 @@ def staff_view_page():
     閲覧専用の画面（…/?mode=view）。閲覧用パスワード（view_password）を入れた人だけが、
     管理者が途中保存した医師条件を見られる（通常版・期間指定版の途中保存から選ぶ）。備考は出さない。ここでは何も直せない・保存しない。
     """
-    st.title("📋 医師条件（閲覧用）")
-    st.caption("見るだけの画面です。ここでは直せません。")
+    st.title("📋 当直の条件と回数（閲覧用）")
+    st.caption("医師条件・グループの設定・年間の当直回数を見られます。ここでは直せません。")
     if not remote_is_configured():
         st.error("保存用のGoogleスプレッドシートが設定されていないため、表示できません。管理者に連絡してください。")
         return
@@ -6725,6 +6725,24 @@ def staff_view_page():
         gcfg[DOC_GROUP_MEMO] = st.column_config.TextColumn(DOC_GROUP_MEMO, width=240)
         st.dataframe(gdf, hide_index=True, use_container_width=False, column_config=gcfg)
         st.caption("◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない（確定当直は、今までどおり入ります）")
+    # 年間の当直回数（見るだけ）：途中保存に入っている回数（先生ごと・月ごとの回数と、集計だけのファイルの回数）を、その保存の集計の区切りで合計する
+    annual = data.get("annual") or {}
+    a_pieces, a_sums = list(annual.get("pieces") or []), list(annual.get("summaries") or [])
+    if a_pieces or a_sums:
+        y, m = int(data.get("year", 0)), int(data.get("month", 0))
+        months = annual_fy_months(y, m, 1 if int(annual.get("fy", 4) or 4) == 1 else 4)
+        tot = annual_totals(a_pieces, months, summaries=a_sums)
+        if tot:
+            _, sum_months = annual_summary_months(a_sums, months)
+            got = sorted({p["month"] for p in a_pieces if p["month"] in months} | set(sum_months))
+            span = f"{got[0][:4]}年{int(got[0][5:])}月〜{got[-1][:4]}年{int(got[-1][5:])}月" if got else ""
+            names = [clean_text(n) for n in df["先生の名前"].tolist() if clean_text(n)]
+            rows, avg = annual_rows(tot, names)
+            st.markdown(f"<div style='font-weight:800;color:#24405f;font-size:1.02rem;margin-top:14px'>📊 年間の当直回数（{span}・見るだけ）</div>"
+                        "<span style='font-size:.8rem;opacity:.7'>上段：合計　下段：1か月あたり</span>", unsafe_allow_html=True)
+            st.markdown(annual_table_html(rows), unsafe_allow_html=True)
+            st.caption(f"在籍月数：その先生の名前がのっている月の数です（日数の割合で数えます）。平均（1か月あたり{avg:.1f}回）とくらべます。"
+                       "「―」は分からない回数です。途中保存したときの集計なので、作成中の当直案の分は入っていません。")
 
 
 # ==========================================
