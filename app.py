@@ -3357,6 +3357,8 @@ def staff_column_specs():
             "管理用メモです。ここに書いた内容は計算に反映されません。セルをダブルクリックすると全文が表示され、編集できます。表の下の「備考の全文を見る」でも確認できます。"),
         DOC_GROUP_COLUMN: ("グループ", 96, "group",
             "グループを選ぶと、上の「👥 グループの設定」で決めた枠の決まり（◯入れる・△できれば入れない・×入れない）が使われます。空欄なら今までどおり。"),
+        NG_COLUMN: ("NG日", 150, "text",
+            "当直に入れない日です（例：3,10:宿NG）。日にちだけなら日直・宿直ともNG、「:宿NG」は宿直だけNG、「:日NG」は日直だけNGです。"),
         "翌日PM duty": ("翌日PM duty", 92, "text",
             "例：木曜PMにdutyがある場合は水。複数は水,木のように入力。翌日が休日なら宿直に入る場合があります。日直は対象外です。確実に外す日はカレンダーでNGを指定してください。"),
         REQUEST_COLUMN: ("希望日", 100, "text",
@@ -3410,12 +3412,13 @@ def _column(maker, label, width, help_text, pinned=False, **kw):
     return maker(label, width=width, help=help_text, **kw)
 
 
-def staff_column_config(columns, as_index=False):
-    """st.data_editor / st.dataframe に渡す column_config。as_index=True なら「先生の名前」は表の見出し列（index）。"""
+def staff_column_config(columns, as_index=False, show_ng=False):
+    """st.data_editor / st.dataframe に渡す column_config。as_index=True なら「先生の名前」は表の見出し列（index）。
+    NG日の列はふつう出さない（NG日はカレンダーで入れるため）。show_ng=True（閲覧用の画面）のときだけ出す。"""
     specs = staff_column_specs()
     config = {}
     for c in columns:
-        if c == NG_COLUMN:
+        if c == NG_COLUMN and not show_ng:
             config[c] = None
             continue
         label, width, kind, help_text = specs.get(c, (str(c), 80, "text", None))
@@ -3472,8 +3475,9 @@ def _staff_keep_edits_for_width(base_df):
     _staff_apply_new_table(parse_staff_csv(current.encode("utf-8")), year, month, None)
 
 
-def staff_table(df, editable):
-    """医師条件の表。③（編集用）と①（見るだけ）で、列名・幅・行の高さ・並びを同じにする。"""
+def staff_table(df, editable, show_ng=False, max_height=300):
+    """医師条件の表。③（編集用）と①（見るだけ）で、列名・幅・行の高さ・並びを同じにする。
+    show_ng=True なら、見るだけの表にNG日の列も出す（閲覧用の画面）。max_height は見るだけの表の高さの上限。"""
     st.markdown(STAFF_COLUMN_HINT_HTML, unsafe_allow_html=True)
     if editable:
         # 表の右上に「列の幅」のつまみ。動かすと表が作り直されるので、直しかけの内容を先に引き継いでおく
@@ -3496,7 +3500,7 @@ def staff_table(df, editable):
             st.stop()
     else:
         cols = ["先生の名前"] + [c for c in df.columns if str(c).startswith("備考")] \
-            + [c for c in df.columns if c != "先生の名前" and not str(c).startswith("備考") and c != NG_COLUMN]
+            + [c for c in df.columns if c != "先生の名前" and not str(c).startswith("備考") and (show_ng or c != NG_COLUMN)]
         view = df[[c for c in cols if c in df.columns]].copy()
         # 「5.0」ではなく「5」と見せる（整数だけの列は整数にする。空欄は空欄のまま）
         for c in view.columns:
@@ -3504,8 +3508,8 @@ def staff_table(df, editable):
             if c != "先生の名前" and num.notna().any() and num.notna().sum() == view[c].replace("", None).notna().sum() \
                     and (num.dropna() % 1 == 0).all():
                 view[c] = num.astype("Int64")
-        kwargs = dict(hide_index=True, use_container_width=True, column_config=staff_column_config(view.columns),
-                      height=min(300, 38 + (STAFF_ROW_HEIGHT + 1) * max(len(view), 1)))
+        kwargs = dict(hide_index=True, use_container_width=True, column_config=staff_column_config(view.columns, show_ng=show_ng),
+                      height=min(max_height, 38 + (STAFF_ROW_HEIGHT + 1) * max(len(view), 1)))
         try:
             out = st.dataframe(view, row_height=STAFF_ROW_HEIGHT, **kwargs)
         except TypeError:
@@ -6689,6 +6693,58 @@ def annual_result_view(df_result, year, month, staff_names, created, now_word="�
     st.markdown(ANNUAL_TABLE_CSS + f"<table class='an-t'>{head}{body}</table>", unsafe_allow_html=True)
 
 
+# 期間指定版の途中保存のシート（閲覧用の画面で、通常版の途中保存と一緒に選べるようにする）
+WORK_STATE_SHEETS_PERIOD = {"legacy": "saved_state_period", "history": "saved_history_period"}
+
+
+def staff_view_page():
+    """
+    閲覧専用の画面（…/?mode=view）。閲覧用パスワード（view_password）を入れた人だけが、
+    管理者が途中保存した医師条件を見られる（通常版・期間指定版の途中保存から選ぶ）。備考は出さない。ここでは何も直せない・保存しない。
+    """
+    st.title("📋 医師条件（閲覧用）")
+    st.caption("見るだけの画面です。ここでは直せません。")
+    if not remote_is_configured():
+        st.error("保存用のGoogleスプレッドシートが設定されていないため、表示できません。管理者に連絡してください。")
+        return
+    view_password = remote_secret("view_password")
+    if not view_password:
+        st.warning("閲覧用パスワード（view_password）が設定されていません。管理者に連絡してください。")
+        return
+    if not st.session_state.get("view_ok"):
+        with st.form("view_login"):
+            pw = st.text_input("閲覧用パスワード", type="password")
+            ok = st.form_submit_button("開く")
+        if ok:
+            if pw == str(view_password):
+                st.session_state["view_ok"] = True
+                st.rerun()
+            st.error("パスワードが違います。")
+        st.caption("管理用パスワードとは別のパスワードです。")
+        return
+    entries = [("", e) for e in work_state_entries(WORK_STATE_SHEETS)] + [("・期間指定版", e) for e in work_state_entries(WORK_STATE_SHEETS_PERIOD)]
+    entries = [(kind, e) for kind, e in entries if e[2].get("staff_csv")]
+    if not entries:
+        st.info("まだ途中保存された医師条件がありません。")
+        return
+    entries.sort(key=lambda x: str(x[1][1]), reverse=True)
+    labels = [f"{work_state_title(e[2])}{kind}（{e[1]} の途中保存）" for kind, e in entries]
+    pick = st.selectbox("どの保存を見るか", range(len(entries)), format_func=lambda i: labels[i], key="view_pick")
+    data = entries[pick][1][2]
+    st.info("管理者が途中保存した医師条件です（備考は表示しません）。最新の内容は、管理者が途中保存したときに変わります。")
+    df = parse_staff_csv(str(data["staff_csv"]).encode("utf-8"))
+    df = df[[c for c in df.columns if not str(c).startswith("備考") and not str(c).startswith("_")]]
+    df = add_day_gap_column(df.loc[:, ~df.columns.duplicated()])
+    for c in (NG_COLUMN, REQUEST_COLUMN, "翌日PM duty", DOC_GROUP_COLUMN):
+        if c in df.columns:
+            df[c] = df[c].map(lambda v: "" if clean_text(v).lower() in ("nan", "none", "<na>") else clean_text(v))
+    _sp, _sl = st.columns([5, 2])
+    with _sl:
+        st.slider("列の幅", min_value=70, max_value=150, value=100, step=10, format="%d%%", key=STAFF_COL_SCALE_KEY,
+                  help="表の列の幅を、全部の列そろって広げたり、せばめたりします（名前の列はそのまま）。100％がふつうの幅です。")
+    staff_table(df, editable=False, show_ng=True, max_height=900)
+
+
 # ==========================================
 # ページ設定
 # ==========================================
@@ -6708,6 +6764,10 @@ try:
     _mode = st.query_params.get("mode")
 except AttributeError:
     _mode = None
+# 閲覧用の画面：…/?mode=view（閲覧用パスワードで、医師条件だけを見られる）
+if _mode == "view":
+    staff_view_page()
+    st.stop()
 if _mode == "period":
     _pp = pathlib.Path(__file__).resolve().parent / "period_page.py"
     if _pp.exists():
