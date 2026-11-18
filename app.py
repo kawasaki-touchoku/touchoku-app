@@ -3663,9 +3663,12 @@ CSV_UPLOAD_CSS = """<style>
 .fx-table-h{font-weight:800;color:#1d4e89;font-size:1.05rem;margin:10px 0 0}.fx-table-h span{font-weight:400;color:#566174;font-size:.82rem;margin-left:10px}
 .st-key-fixed_table_box [data-testid="stDataFrame"], .st-key-fixed_table_box [data-testid="stDataFrameResizable"]{border:2px solid #2f6db5;border-radius:8px}
 /* 確定当直の項目：見出しの帯と左の太い線だけオレンジにする（医師条件の項目と、ぱっと見で見分けるため） */
-.st-key-fixed_section{border-left:6px solid #e08a1e;padding-left:14px;margin-top:2.6rem}
+.st-key-fixed_section{border-left:6px solid #e08a1e;background:#fff3e2;border-radius:0 12px 12px 0;padding:14px 16px 14px 14px;margin-top:2.6rem}
+/* 方法1の白い枠は下まで伸ばして、説明との間にすき間ができないようにする（文字は枠の上下の真ん中） */
+.st-key-csvcard_fixedhand [data-testid="stLayoutWrapper"]:has(> .st-key-fixedhand_act){flex:1 1 auto;display:flex;flex-direction:column;margin-top:0 !important}
+.st-key-csvcard_fixedhand .st-key-fixedhand_act{flex:1 1 auto;margin-top:0 !important}
 .st-key-fixed_section .sec-banner{margin-top:0;background:linear-gradient(90deg,#b5651d 0%,#e08a1e 100%) !important;box-shadow:0 2px 6px rgba(150,80,20,.2)}
-@media (max-width:600px){.st-key-fixed_section{border-left-width:4px;padding-left:8px}}
+@media (max-width:600px){.st-key-fixed_section{border-left-width:4px;padding:10px 8px 10px 8px}}
 </style>
 """
 
