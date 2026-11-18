@@ -263,7 +263,7 @@ def fixed_kubun(date_text, start, end, year, month, labels):
 def commit_fixed_current():
     """
     確定当直の表の今の内容（画面で入力した分）を、もとの表として確定し、表を出し直す。
-    先生の名前の一覧が変わったときや、「一覧に足す」を押したときだけ使う（入力のたびには表を作り直さない）。
+    先生の名前の一覧が変わったときや、「ドロップダウンに入れる」を押したときだけ使う（入力のたびには表を作り直さない）。
     """
     cur = st.session_state.get("fixed_current")
     args = st.session_state.get("fixed_window_args")
@@ -273,7 +273,7 @@ def commit_fixed_current():
 
 
 def add_fixed_extra_name():
-    """「➕ 一覧に足す」を押したとき：入力した名前を、確定当直の表で選べる名前に加える。"""
+    """「ドロップダウンに入れる」を押したとき：入力した名前を、確定当直の表で選べる名前に加える。"""
     name = clean_text(st.session_state.get("fixed_extra_input", ""))
     if not name:
         return
@@ -325,7 +325,7 @@ def fixed_duty_table(fixed_file, restored_state, fixed_columns, start, end, year
         commit_fixed_current()
     base = st.session_state["fixed_rows"]
 
-    # 担当医師は、医師条件の名前（と「一覧に足す」で足した名前）から選ぶ
+    # 担当医師は、医師条件の名前（と「ドロップダウンに入れる」で入れた名前）から選ぶ
     names = list(dict.fromkeys(
         list(st.session_state.get("fixed_name_options", []))
         + list(st.session_state.get("fixed_extra_names", []))
@@ -334,13 +334,18 @@ def fixed_duty_table(fixed_file, restored_state, fixed_columns, start, end, year
              f"ほかの日付は、表の下の「＋」で行を足して日付（例：{example}）を入力します。")
     if not st.session_state.get("fixed_name_options"):
         st.caption("先に下の「医師条件」に先生の名前を入れると、ここで名前を選べるようになります。")
-    c_in, c_btn = st.columns([4, 1], vertical_alignment="bottom")
-    with c_in:
-        st.text_input(f"一覧にない先生を足す（{labels[0].strip('◀▶')}・{labels[2].strip('◀▶')}の日付だけに使えます）",
-                      key="fixed_extra_input", placeholder="例：山田",
-                      help="先月だけ勤務した先生など、医師条件にいない先生の名前を入れて「一覧に足す」を押すと、枠の欄の一覧から選べるようになります。")
-    with c_btn:
-        st.button("➕ 一覧に足す", key="fixed_extra_add", on_click=add_fixed_extra_name, use_container_width=True)
+    # 先月・翌月（期間の前後）だけ勤務した先生の名前：医師条件の「➕ 先生を追加する」と別物とわかるよう、枠で囲み、「➕」は付けない
+    rng = "先月・翌月" if labels[1] == "今月" else "期間の前後"
+    with st.container(border=True):
+        st.markdown(f"{rng}だけ勤務した先生を、ドロップダウンに入れる（記録用）")
+        c_in, c_btn = st.columns([3, 1], vertical_alignment="center")
+        with c_in:
+            st.text_input("先生の名前（記録用）", key="fixed_extra_input", placeholder="例：佐藤", label_visibility="collapsed",
+                          help="医師条件にいない先生の名前を入れて「ドロップダウンに入れる」を押すと、枠の欄をクリックしたときに出る名前の中から選べるようになります。")
+        with c_btn:
+            st.button("ドロップダウンに入れる", key="fixed_extra_add", on_click=add_fixed_extra_name, use_container_width=True)
+        st.caption(f"{rng}の日付だけに使えます。当直案には入りません。"
+                   f"**{labels[1]}の先生を増やすときは、下の医師条件の「➕ 先生を追加する」**を使います。")
 
     view = base.copy()
     view.insert(1, FIXED_KUBUN_COLUMN, [fixed_kubun(v, start, end, year, month, labels) for v in view["日付"]])
@@ -5905,7 +5910,7 @@ with st.container(key="fixed_section"):
 - 表には、先月末7日分・今月・翌月はじめ7日分の日付が最初から並んでいます。「区分」の列に ◀先月／今月／翌月▶ を表示します。
 - それ以外の日付（先月1か月分など）は、表の下の「＋」で行を足して `月/日`（例：`11/1`）または `年/月/日` の形で入力するか、CSVで読み込みます。CSVの行は、表の同じ日付のところに入ります。
 - 担当する先生は、枠の欄をクリックすると出る一覧（医師条件の名前）から選びます。
-- 先月だけ勤務した先生など、医師条件にいない先生は、表の上の「一覧にない先生を足す」に名前を入れて「➕ 一覧に足す」を押すと選べるようになります（先月・翌月の日付だけに使えます）。
+- 先月だけ勤務した先生など、医師条件にいない先生は、表の上の「先月・翌月だけ勤務した先生を、ドロップダウンに入れる（記録用）」に名前を入れて「ドロップダウンに入れる」を押すと選べるようになります（先月・翌月の日付だけに使えます。当直案には入りません）。
 - 同じ日・同じ枠を2人以上で担当する場合は、同じ日付の行を追加して、もう1人を選びます。CSVで `佐藤、鈴木` のように「、」で区切って入れた場合は、読み込むと自動で2行に分かれます。
 - 未確定の枠は空欄で構いません。
 - 今月の平日に日直を入力する場合は、先に上のカレンダーでその日を「休日にする」にしてください。
