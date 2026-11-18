@@ -5631,12 +5631,16 @@ def period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month
 # ==========================================
 # 年間の当直回数（掲示用Excelから集計する。Excelそのものは保存しない）
 # ==========================================
-ANNUAL_KINDS = ["total", "night", "day", "hol"]   # 当直合計・宿直・日直・休日
+ANNUAL_KINDS = ["total", "night", "day", "hol", "ward", "out", "weekday"]   # 当直合計・宿直・日直・休日・病棟（A・B）・外来・平日（回数のリストはこの順）
+ANNUAL_WARD_SLOTS = [s for s in ALL_SHIFT_TYPES if s[:1] in ("A", "B")]   # 病棟（A・B）
+ANNUAL_OUT_SLOTS = [s for s in ALL_SHIFT_TYPES if s.startswith("外来")]   # 外来
 ANNUAL_STRENGTHS = ["しない", "弱め", "ふつう", "強め"]
 ANNUAL_STRENGTH_WEIGHT = {"しない": 0, "弱め": 100, "ふつう": 300, "強め": 1000}   # 当直1回分のずれに付ける減点
-ANNUAL_BALANCE_ITEMS = [("total", "当直合計（1か月あたり）", "すべての当直"),
-                        ("hol", "休日の回数（1か月あたり）", "土日祝・休日にした日の当直"),
-                        ("night", "宿直の回数（1か月あたり）", "A宿直・B宿直・外来宿直（夜に寝られない）")]
+# 当直案に反映して「そろえる」回数。組（休日と平日など）は足すと当直合計になるので、片方をそろえればもう片方もそろう
+ANNUAL_BALANCE_ITEMS = [("total", "当直合計", "すべての当直"),
+                        ("hol", "休日・平日", "土日祝・休日にした日の当直"),
+                        ("night", "宿直・日直", "A宿直・B宿直・外来宿直（夜に寝られない）"),
+                        ("out", "外来・病棟", "外来日直・外来宿直")]
 ANNUAL_KEEP_MONTHS = 24   # 途中保存に残す月の数（これより古い月は、保存のときに消す）
 
 
@@ -5715,16 +5719,170 @@ def annual_read_posting(data, file_label):
     return {"label": file_label, "created": created, "roster": roster, "days": days}
 
 
+# 集計だけのファイル（当直表が見つからない月の分）の列：見出し → 回数のリストの番号
+ANNUAL_SUMMARY_COLUMNS = {"合計": 0, "当直合計": 0, "宿直": 1, "日直": 2, "休日": 3, "病棟（A・B）": 4, "病棟": 4, "外来": 5, "平日": 6}
+ANNUAL_SUMMARY_PAIRS = [(4, 5), (6, 3), (1, 2)]   # 足すと合計になる組（病棟・外来、平日・休日、宿直・日直）
+
+
+def annual_month_key(value):
+    """「2026/4」「2026年4月」「2026-04」や日付のマスを "2026-04" にする。読めなければ None。"""
+    if isinstance(value, (datetime.datetime, datetime.date)):
+        return f"{value.year}-{value.month:02d}"
+    m = re.search(r"(\d{4})\s*[年/.-]\s*(\d{1,2})", clean_text(value).translate(str.maketrans("０１２３４５６７８９／－", "0123456789/-")))
+    if not m or not 1 <= int(m.group(2)) <= 12:
+        return None
+    return f"{int(m.group(1))}-{int(m.group(2)):02d}"
+
+
+def annual_month_span(start_key, end_key):
+    """"2026-04"〜"2026-09" の月の一覧。"""
+    y, m = int(start_key[:4]), int(start_key[5:])
+    ey, em = int(end_key[:4]), int(end_key[5:])
+    out = []
+    while (y, m) <= (ey, em) and len(out) < 60:
+        out.append(f"{y}-{m:02d}")
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
+
+
+def annual_fill_pairs(c):
+    """分かっている回数から、分かっていない回数を補う（例：合計と休日が分かれば、平日は 合計−休日）。"""
+    c = list(c)
+    for _ in range(2):
+        if c[0] is None:
+            for a, b in ANNUAL_SUMMARY_PAIRS:
+                if c[a] is not None and c[b] is not None:
+                    c[0] = c[a] + c[b]
+                    break
+        if c[0] is not None:
+            for a, b in ANNUAL_SUMMARY_PAIRS:
+                if c[a] is None and c[b] is not None:
+                    c[a] = c[0] - c[b]
+                elif c[b] is None and c[a] is not None:
+                    c[b] = c[0] - c[a]
+    return c
+
+
+def annual_read_summary(data, file_label):
+    """
+    集計だけのファイル（Excel・CSV）を読む。読めないときは ValueError（画面に出す文）。
+    ・いちばん上の「集計の期間（はじめ）」「集計の期間（おわり）」の右のマスから期間を読む
+      （アプリでダウンロードした「年間の当直回数」のExcelは、題名の「2026年4月〜2026年10月」から読む）
+    ・「先生」の見出しの行から下を、先生ごとの回数として読む。「1か月あたり」の列は読まない
+    ・空欄の回数は None（分からない）。在籍月数が空欄なら、あとで期間の月数にする
+    戻り値：{"label", "start", "end"（"YYYY-MM" または None）, "docs": {先生: {"m": 在籍月数 or None, "c": 回数のリスト}}}
+    """
+    rows = []
+    if bytes(data[:4]) == b"PK\x03\x04":
+        from openpyxl import load_workbook
+        try:
+            wb = load_workbook(io.BytesIO(data), data_only=True)
+        except Exception:
+            raise ValueError(f"「{file_label}」はExcelファイルとして読めませんでした。")
+        rows = [list(r) for r in wb.worksheets[0].iter_rows(values_only=True)]
+    else:
+        import csv
+        for enc in ("utf-8-sig", "cp932"):
+            try:
+                rows = list(csv.reader(io.StringIO(bytes(data).decode(enc))))
+                break
+            except UnicodeDecodeError:
+                continue
+    start = end = None
+    head_i = None
+    for i, r in enumerate(rows[:15]):
+        cells = [clean_text(v) for v in r]
+        for j, v in enumerate(cells):
+            if "集計の期間" in v and "はじめ" in v and j + 1 < len(r):
+                start = annual_month_key(r[j + 1]) or start
+            if "集計の期間" in v and "おわり" in v and j + 1 < len(r):
+                end = annual_month_key(r[j + 1]) or end
+            t = re.search(r"(\d{4})年(\d{1,2})月〜(\d{4})年(\d{1,2})月", v)
+            if t and start is None:
+                start, end = f"{t.group(1)}-{int(t.group(2)):02d}", f"{t.group(3)}-{int(t.group(4)):02d}"
+        if head_i is None and "先生" in cells:
+            head_i = i
+    if head_i is None:
+        raise ValueError(f"「{file_label}」に「先生」の見出しが見つかりません。集計のひな形の形で書いてください。")
+    head = [clean_text(v) for v in rows[head_i]]
+    name_col = head.index("先生")
+    month_col = head.index("在籍月数") if "在籍月数" in head else None
+    cols = {j: ANNUAL_SUMMARY_COLUMNS[h] for j, h in enumerate(head) if h in ANNUAL_SUMMARY_COLUMNS and "あたり" not in h}
+    if not cols:
+        raise ValueError(f"「{file_label}」に回数の列（合計・休日・宿直など）が見つかりません。")
+
+    def num(v):
+        t = clean_text(v)
+        if t in ("", "―", "-", "nan", "None"):
+            return None
+        try:
+            return float(t)
+        except ValueError:
+            return None
+    docs = {}
+    for r in rows[head_i + 1:]:
+        name = clean_text(r[name_col]) if name_col < len(r) else ""
+        if not name or name in ("平均", "合計"):
+            continue
+        c = [None] * len(ANNUAL_KINDS)
+        for j, k in cols.items():
+            v = num(r[j]) if j < len(r) else None
+            if v is not None:
+                c[k] = int(round(v))
+        mm = num(r[month_col]) if (month_col is not None and month_col < len(r)) else None
+        docs[name] = {"m": mm, "c": annual_fill_pairs(c)}
+    if not docs:
+        raise ValueError(f"「{file_label}」に先生の行がありません。")
+    if start and end and start > end:
+        start, end = end, start
+    return {"label": file_label, "start": start, "end": end, "docs": docs}
+
+
+def annual_summary_template_xlsx():
+    """集計だけのファイルのひな形（期間の行・先生ごとの回数の見出し。期間のマスは「文字」の形にして、日付に変わらないようにする）。"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "集計"
+    head_fill, in_fill = PatternFill("solid", fgColor="DFE6EF"), PatternFill("solid", fgColor="FFFBE6")
+    ws["A1"], ws["C1"] = "集計の期間（はじめ）", "集計の期間（おわり）"
+    ws["E1"] = "← 年/月 で書きます（例：2026/4）"
+    for ref in ("A1", "C1"):
+        ws[ref].font, ws[ref].fill = Font(bold=True), head_fill
+    for ref in ("B1", "D1"):
+        ws[ref].number_format, ws[ref].fill = "@", in_fill
+    head = ["先生", "在籍月数", "病棟（A・B）", "外来", "平日", "休日", "宿直", "日直", "合計"]
+    for j, h in enumerate(head, 1):
+        c = ws.cell(2, j, h)
+        c.font, c.fill, c.alignment = Font(bold=True), head_fill, Alignment(horizontal="center")
+    for r in range(3, 63):
+        for j in range(1, len(head) + 1):
+            ws.cell(r, j).fill = in_fill
+    ws["K2"] = "・分かる欄だけで大丈夫です（空欄は「分からない」として扱います）"
+    ws["K3"] = "・在籍月数が空欄なら、期間の月数として数えます"
+    ws["K4"] = "・期間は、アプリの「集計の区切り」（4月〜3月など）の中に収めてください"
+    for col, w in zip("ABCDEFGHI", [20, 10, 20, 8, 8, 8, 8, 8, 8]):
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "B3"
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def annual_counts_of(day_items):
-    """日ごとの当直から、先生ごとの回数 [当直合計, 宿直, 日直, 休日] を数える。"""
+    """日ごとの当直から、先生ごとの回数 [当直合計, 宿直, 日直, 休日, 病棟, 外来, 平日] を数える。"""
     counts = {}
     for info in day_items:
         for name, slot in info["duties"]:
-            c = counts.setdefault(name, [0, 0, 0, 0])
+            c = counts.setdefault(name, [0] * len(ANNUAL_KINDS))
             c[0] += 1
             c[1] += int(slot in NIGHT_SHIFTS)
             c[2] += int(slot in DAY_SHIFTS)
             c[3] += int(bool(info["hol"]))
+            c[4] += int(slot in ANNUAL_WARD_SLOTS)
+            c[5] += int(slot in ANNUAL_OUT_SLOTS)
+            c[6] += int(not info["hol"])
     return counts
 
 
@@ -5780,15 +5938,41 @@ def annual_fy_months(year, month, fy_start):
     return out
 
 
-def annual_totals(pieces, months, exclude=None):
+def annual_summary_months(summaries, months):
+    """集計だけのファイルのうち、期間がすべて months（集計の区切り）に入っているものと、その月の一覧。"""
+    used, covered = [], set()
+    for sm in summaries or []:
+        if not (sm.get("start") and sm.get("end")):
+            continue
+        span = annual_month_span(sm["start"], sm["end"])
+        if span and all(m in months for m in span):
+            used.append((sm, span))
+            covered |= set(span)
+    return used, covered
+
+
+def annual_totals(pieces, months, exclude=None, summaries=()):
     """
     months の月の分を、先生ごとに合計する。
-    戻り値：{先生: {"m": 在籍月数（日数の割合で数える）, "c": [当直合計, 宿直, 日直, 休日]}}
+    集計だけのファイル（summaries）の期間に入る月は、そのファイルの回数を使い、掲示用Excelの分は使わない（二重に数えないため）。
+    戻り値：{先生: {"m": 在籍月数（日数の割合で数える）, "c": [当直合計, 宿直, 日直, 休日, 病棟, 外来, 平日]}}
+    以前の途中保存（回数が4つだけ）の月がある先生は、病棟・外来が分からないので None にする。
     exclude=(開始日, 終了日) を渡すと、その期間と重なる分は数えない（これから作る月の分）。
     """
     out = {}
+    used, covered = annual_summary_months(summaries, months)
+    for sm, span in used:
+        s = datetime.date(int(span[0][:4]), int(span[0][5:]), 1)
+        e = datetime.date(int(span[-1][:4]), int(span[-1][5:]), _REAL_MONTHRANGE(int(span[-1][:4]), int(span[-1][5:]))[1])
+        if exclude and not (e < exclude[0] or s > exclude[1]):
+            continue
+        for name, d in sm.get("docs", {}).items():
+            o = out.setdefault(name, {"m": 0.0, "c": [0] * len(ANNUAL_KINDS)})
+            o["m"] += float(d.get("m") if d.get("m") is not None else len(span))
+            for i, x in enumerate(list(d.get("c", []))[:len(ANNUAL_KINDS)]):
+                o["c"][i] = None if (x is None or o["c"][i] is None) else o["c"][i] + int(x)
     for p in pieces:
-        if p["month"] not in months:
+        if p["month"] not in months or p["month"] in covered:
             continue
         s, e = datetime.date.fromisoformat(p["start"]), datetime.date.fromisoformat(p["end"])
         if exclude and not (e < exclude[0] or s > exclude[1]):
@@ -5796,10 +5980,13 @@ def annual_totals(pieces, months, exclude=None):
         y, m = int(p["month"][:4]), int(p["month"][5:])
         frac = int(p.get("ndays", 0)) / _REAL_MONTHRANGE(y, m)[1]
         for name in list(dict.fromkeys(list(p.get("roster", [])) + list(p.get("counts", {}).keys()))):
-            o = out.setdefault(name, {"m": 0.0, "c": [0, 0, 0, 0]})
+            o = out.setdefault(name, {"m": 0.0, "c": [0] * len(ANNUAL_KINDS)})
             o["m"] += frac
-            for i, v in enumerate(p.get("counts", {}).get(name, [0, 0, 0, 0])):
-                o["c"][i] += int(v)
+            v = list(p.get("counts", {}).get(name, [0] * len(ANNUAL_KINDS)))
+            if len(v) < len(ANNUAL_KINDS):   # 以前の形（当直合計・宿直・日直・休日の4つ）
+                v = v[:4] + [None, None, int(v[0]) - int(v[3])]
+            for i, x in enumerate(v):
+                o["c"][i] = None if (x is None or o["c"][i] is None) else o["c"][i] + int(x)
     return out
 
 
@@ -5815,18 +6002,23 @@ def annual_result_file(df_result, year, month, roster, created):
     return {"label": "作成した当直案", "created": created or "9999", "roster": list(roster), "days": days}
 
 
-def annual_balance_info(pieces, months, target_start, target_end, frac, weights, doctors):
+def annual_balance_info(pieces, months, target_start, target_end, frac, weights, doctors, summaries=()):
     """
     当直案の計算に渡す、年間の回数（これから作る期間を除く）。weights がすべて0なら None。
     frac：これから作る期間が何か月分か（通常は1、期間指定は 日数÷その月の日数）
     """
-    if not pieces or not any(weights.values()):
+    if not (pieces or summaries) or not any(weights.values()):
         return None
-    tot = annual_totals(pieces, months, exclude=(target_start, target_end))
+    tot = annual_totals(pieces, months, exclude=(target_start, target_end), summaries=summaries)
     if not tot:
         return None
-    docs = {d: {"m": round(tot.get(d, {}).get("m", 0.0), 4), "c": list(tot.get(d, {}).get("c", [0, 0, 0, 0]))} for d in doctors}
-    return {"weights": dict(weights), "frac": round(frac, 4), "docs": docs}
+    docs = {d: {"m": round(tot.get(d, {}).get("m", 0.0), 4), "c": list(tot.get(d, {}).get("c", [0] * len(ANNUAL_KINDS)))} for d in doctors}
+    weights = dict(weights)
+    # 回数が分からない先生がいる種類は、そろえない（以前の途中保存や、空欄のある集計だけのファイル）
+    for kind, i in {"total": 0, "night": 1, "hol": 3, "out": 5}.items():
+        if any(docs[d]["c"][i] is None for d in doctors):
+            weights[kind] = 0
+    return {"weights": weights, "frac": round(frac, 4), "docs": docs}
 
 
 def add_annual_balance_terms(model, doctors, days, daily_active_shifts, is_holiday, required_count, worked_all, holiday_worked, shifts, info):
@@ -5840,26 +6032,29 @@ def add_annual_balance_terms(model, doctors, days, daily_active_shifts, is_holid
     terms = []
     frac = float(info.get("frac", 1.0)) or 1.0
     docs = info.get("docs", {})
-    slot_need = {"total": 0, "hol": 0, "night": 0}
+    slot_need = {"total": 0, "hol": 0, "night": 0, "out": 0}
     for d in days:
         for s in daily_active_shifts[d]:
             need = required_count(d, s)
             slot_need["total"] += need
             slot_need["night"] += need if s in NIGHT_SHIFTS else 0
             slot_need["hol"] += need if is_holiday(d) else 0
-    idx = {"total": 0, "night": 1, "hol": 3}
+            slot_need["out"] += need if s in ANNUAL_OUT_SLOTS else 0
+    idx = {"total": 0, "night": 1, "hol": 3, "out": 5}
     months_sum = sum(float(docs.get(doc, {}).get("m", 0.0)) + frac for doc in doctors)
     for kind, weight in info.get("weights", {}).items():
         weight = int(weight)
         if weight <= 0 or kind not in idx or months_sum <= 0:
             continue
-        past = {doc: int(docs.get(doc, {}).get("c", [0, 0, 0, 0])[idx[kind]]) for doc in doctors}
+        past = {doc: int((docs.get(doc, {}).get("c") or [0] * len(ANNUAL_KINDS))[idx[kind]] or 0) for doc in doctors}
         rate = (sum(past.values()) + slot_need[kind]) / months_sum
         for doc in doctors:
             if kind == "total":
                 now = worked_all[doc]
             elif kind == "hol":
                 now = holiday_worked[doc]
+            elif kind == "out":
+                now = [shifts[(d, doc, s)] for d in days for s in daily_active_shifts[d] if s in ANNUAL_OUT_SLOTS]
             else:
                 now = [shifts[(d, doc, s)] for d in days for s in daily_active_shifts[d] if s in NIGHT_SHIFTS]
             target10 = int(round(10 * rate * (float(docs.get(doc, {}).get("m", 0.0)) + frac)))
@@ -5884,12 +6079,12 @@ def annual_rows(tot, staff_names):
     平均との差は、今月の先生のうち在籍月数のある先生の「1か月あたりの当直合計」の平均とくらべる。
     """
     now = [n for n in staff_names if n in tot]
-    rates = [tot[n]["c"][0] / tot[n]["m"] for n in now if tot[n]["m"] > 0]
+    rates = [tot[n]["c"][0] / tot[n]["m"] for n in now if tot[n]["m"] > 0 and tot[n]["c"][0] is not None]
     avg = sum(rates) / len(rates) if rates else 0.0
     rows = []
     for n in now + [n for n in tot if n not in staff_names]:
         o = tot[n]
-        rate = o["c"][0] / o["m"] if o["m"] > 0 else None
+        rate = o["c"][0] / o["m"] if (o["m"] > 0 and o["c"][0] is not None) else None
         diff = (rate - avg) if (rate is not None and n in staff_names and rates) else None
         rows.append({"name": n, "here": n in staff_names, "m": o["m"], "c": o["c"], "diff": diff})
     return rows, avg
@@ -5903,10 +6098,13 @@ ANNUAL_TABLE_CSS = (
     ".an-t tr.gone td{opacity:.45}.an-t .l{text-align:left}"
     ".an-m{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0}.an-m div{border-radius:8px;padding:4px 0;width:66px;text-align:center;font-size:.8rem;border:1px solid rgba(128,144,160,.35)}"
     ".an-m .ok{background:#e9f6ee;border-color:#9fd3b0;color:#1d6b3a;font-weight:700}.an-m .sv{background:#eaf0f7;border-color:#b7c7dc;color:#24405f;font-weight:700}"
-    ".an-m .no{opacity:.45}</style>")
+    ".an-m .no{opacity:.45}.an-m .sm{background:#f1ecfb;border-color:#c9b9ee;color:#4f3a8c;font-weight:700}.an-t th.grp{text-align:center;border-left:1px solid rgba(128,144,160,.3)}.an-t .gl{border-left:1px solid rgba(128,144,160,.3)}"
+    ".an-t th.grp.l{text-align:left}</style>")
 
 
 def annual_cell(v, m, bold=False):
+    if v is None:   # 以前の途中保存で、内訳が分からない
+        return "―"
     pm = f"{v / m:.1f}回/月" if m > 0 else "―"
     return (f"<b>{v}回</b><span class='pm'><b>{pm}</b></span>" if bold else f"{v}回<span class='pm'>{pm}</span>")
 
@@ -5918,29 +6116,49 @@ def annual_diff_html(diff):
     return f"<td class='l {cls}'>{diff:+.1f}回/月{tag}</td>"
 
 
+# 集計の表の列（回数のリストの番号, 見出し）。区切りごとに足すと当直合計になる
+ANNUAL_TABLE_GROUPS = [("枠の種類", [(4, "病棟（A・B）"), (5, "外来")]),
+                       ("平日・休日", [(6, "平日"), (3, "休日")]),
+                       ("宿直・日直", [(1, "宿直"), (2, "日直")])]
+
+
+def annual_head_html(first_cols, suffix=""):
+    """集計の表の見出し（2段）。first_cols は左の列の見出し、suffix は「（年間）」など。"""
+    top = "".join(f"<th rowspan=2>{c}</th>" for c in first_cols)
+    top += "".join(f"<th class='grp' colspan={len(cols)}>{g}{suffix}</th>" for g, cols in ANNUAL_TABLE_GROUPS)
+    top += (f"<th class='grp' rowspan=2>合計{suffix}</th>"
+            "<th class='grp l' rowspan=2>平均との差<br><span style='font-weight:400;font-size:.72rem'>（1か月あたりの合計）</span></th>")
+    sub = "".join(f"<th class='{'gl' if i == 0 else ''}'>{label}</th>" for _, cols in ANNUAL_TABLE_GROUPS for i, (_, label) in enumerate(cols))
+    return f"<tr>{top}</tr><tr>{sub}</tr>"
+
+
+def annual_body_cells(r):
+    """1人分の回数のマス（区切りごとの列・合計・平均との差）。"""
+    cells = "".join(f"<td class='{'gl' if i == 0 else ''}'>{annual_cell(r['c'][k], r['m'])}</td>"
+                    for _, cols in ANNUAL_TABLE_GROUPS for i, (k, _) in enumerate(cols))
+    return cells + f"<td class='gl'>{annual_cell(r['c'][0], r['m'], True)}</td>" + annual_diff_html(r["diff"])
+
+
 def annual_table_html(rows):
-    head = ("<tr><th>先生</th><th>在籍月数</th><th>当直合計</th><th>宿直</th><th>日直</th><th>休日</th>"
-            "<th class='l'>平均との差<br><span style='font-weight:400;font-size:.75rem'>（1か月あたりの当直合計）</span></th></tr>")
     body = ""
     for r in rows:
         name = html_escape(r["name"]) + ("" if r["here"] else "（今月はいない先生）")
-        body += (f"<tr class='{'' if r['here'] else 'gone'}'><td>{name}</td><td>{annual_fmt_months(r['m'])}</td>"
-                 f"<td>{annual_cell(r['c'][0], r['m'], True)}</td><td>{annual_cell(r['c'][1], r['m'])}</td>"
-                 f"<td>{annual_cell(r['c'][2], r['m'])}</td><td>{annual_cell(r['c'][3], r['m'])}</td>{annual_diff_html(r['diff'])}</tr>")
-    return ANNUAL_TABLE_CSS + f"<table class='an-t'>{head}{body}</table>"
+        body += f"<tr class='{'' if r['here'] else 'gone'}'><td>{name}</td><td>{annual_fmt_months(r['m'])}</td>{annual_body_cells(r)}</tr>"
+    return ANNUAL_TABLE_CSS + f"<table class='an-t'>{annual_head_html(['先生', '在籍月数'])}{body}</table>"
 
 
 def annual_totals_xlsx(rows, title):
     """集計の表をExcelにする（合計と1か月あたり）。"""
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment
+    from openpyxl.utils import get_column_letter
     wb = Workbook()
     ws = wb.active
     ws.title = "年間の当直回数"
     ws["A1"] = title
     ws["A1"].font = Font(size=14, bold=True)
-    head = ["先生", "在籍月数", "当直合計", "当直合計（1か月あたり）", "宿直", "宿直（1か月あたり）", "日直", "日直（1か月あたり）",
-            "休日", "休日（1か月あたり）", "平均との差（1か月あたりの当直合計）", "備考"]
+    items = [(k, label) for _, cols in ANNUAL_TABLE_GROUPS for k, label in cols] + [(0, "合計")]
+    head = ["先生", "在籍月数"] + [h for _, label in items for h in (label, f"{label}（1か月あたり）")] + ["平均との差（1か月あたりの合計）", "備考"]
     ws.append([])
     ws.append(head)
     for c in ws[3]:
@@ -5948,12 +6166,14 @@ def annual_totals_xlsx(rows, title):
         c.alignment = Alignment(wrap_text=True, vertical="center")
     for r in rows:
         m = r["m"]
-        per = [round(v / m, 1) if m > 0 else None for v in r["c"]]
-        ws.append([r["name"], round(m, 1), r["c"][0], per[0], r["c"][1], per[1], r["c"][2], per[2], r["c"][3], per[3],
-                   None if r["diff"] is None else round(r["diff"], 1), "" if r["here"] else "今月はいない先生"])
-    widths = [16, 9, 9, 11, 8, 11, 8, 11, 8, 11, 14, 16]
-    for i, w in enumerate(widths, 1):
-        ws.column_dimensions[chr(64 + i)].width = w
+        vals = []
+        for k, _ in items:
+            v = r["c"][k]
+            vals += [v, round(v / m, 1) if (v is not None and m > 0) else None]
+        ws.append([r["name"], round(m, 1)] + vals + [None if r["diff"] is None else round(r["diff"], 1), "" if r["here"] else "今月はいない先生"])
+    for i in range(1, len(head) + 1):
+        ws.column_dimensions[get_column_letter(i)].width = 16 if i == 1 else 11
+    ws.row_dimensions[3].height = 32
     ws.freeze_panes = "B4"
     buf = io.BytesIO()
     wb.save(buf)
@@ -5963,6 +6183,7 @@ def annual_totals_xlsx(rows, title):
 def annual_clear_saved():
     """「🗑 保存した集計を消す」：途中保存から戻した分を消す（次に途中保存すると、保存の中からも消える）。"""
     st.session_state["annual_saved"] = []
+    st.session_state["annual_summaries_saved"] = []
 
 
 def annual_section(year, month, target_start, target_end, frac, restored_state, staff_names, now_word="今月"):
@@ -5977,6 +6198,7 @@ def annual_section(year, month, target_start, target_end, frac, restored_state, 
     if st.session_state.get("annual_src") != src:
         st.session_state["annual_src"] = src
         st.session_state["annual_saved"] = list(saved.get("pieces", []))
+        st.session_state["annual_summaries_saved"] = list(saved.get("summaries", []))
         if saved:
             st.session_state["annual_fy"] = "1月〜12月" if int(saved.get("fy", 4)) == 1 else "4月〜3月（年度）"
             st.session_state["annual_on"] = bool(saved.get("on", True))
@@ -5984,19 +6206,36 @@ def annual_section(year, month, target_start, target_end, frac, restored_state, 
                 v = (saved.get("w") or {}).get(k, "ふつう")
                 st.session_state[f"annual_w_{k}"] = v if v in ANNUAL_STRENGTHS else "ふつう"
     st.session_state.setdefault("annual_saved", [])
+    st.session_state.setdefault("annual_summaries_saved", [])
     st.session_state.setdefault("annual_fy", "4月〜3月（年度）")
     st.session_state.setdefault("annual_on", True)
     for k, _, _ in ANNUAL_BALANCE_ITEMS:
         st.session_state.setdefault(f"annual_w_{k}", "ふつう")
 
-    section_banner("📊", "年間の当直回数", "毎月ダウンロードした掲示用Excelから、先生ごとの回数を集計します", "任意", anchor="sec-annual")
-    st.info("アプリからダウンロードした「当直表_掲示用_〇年〇月.xlsx」を、まとめて読み込んでください（手で直したあとのファイルでも大丈夫です）。\n\n"
-            "**Excelのファイルそのものは、どこにも保存しません。**「💾 途中保存」を押したときだけ、先生ごと・月ごとの**回数**を保存します（どの日に誰が当直したかは保存しません）。")
-    with st.container(key="annual_upbox"):
-        st.markdown("<style>.st-key-annual_upbox [data-testid='stFileUploaderDropzone']::before{content:'📄⬇　ここに掲示用Excelをドラッグ＆ドロップ（何か月分でも）'}</style>",
-                    unsafe_allow_html=True)
+    section_banner("📊", "年間の当直回数", "毎月の掲示用Excel、または集計だけのファイルから、先生ごとの回数を集計します", "任意", anchor="sec-annual")
+    st.info("アプリからダウンロードした「当直表_掲示用_〇年〇月.xlsx」を、まとめて読み込んでください（手で直したあとのファイルでも大丈夫です）。"
+            "当直表が見つからない月は、右の「集計だけのファイル」で先生ごとの回数を入れられます。\n\n"
+            "**ファイルそのものは、どこにも保存しません。**「💾 途中保存」を押したときだけ、先生ごとの**回数**を保存します（どの日に誰が当直したかは保存しません）。")
+    st.markdown("<style>.st-key-annual_upbox [data-testid='stFileUploaderDropzone']::before{content:'📄⬇　ここに掲示用Excelをドラッグ＆ドロップ（何か月分でも）'}"
+                ".st-key-annual_sumbox [data-testid='stFileUploaderDropzone']{border-color:#7b5cc4 !important}"
+                ".st-key-annual_sumbox [data-testid='stFileUploaderDropzone']::before{content:'📋⬇　ここに集計のファイルをドラッグ＆ドロップ';color:#4f3a8c}"
+                ".st-key-annual_sumbox [data-testid='stFileUploaderDropzone'] button{background:#7b5cc4 !important}"
+                ".st-key-annual_sumbox [data-testid='stDownloadButton'] button{border:1.5px solid #7b5cc4 !important;color:#4f3a8c !important;background:#fff !important;font-weight:700}"
+                ".an-up-h{font-weight:800;color:#24405f;font-size:1rem;margin-bottom:2px}</style>", unsafe_allow_html=True)
+    up_a, up_b = st.columns(2)
+    with up_a, st.container(key="annual_upbox", border=True):
+        st.markdown("<div class='an-up-h'>📄 掲示用Excel（日ごとの当直がわかる月）</div>", unsafe_allow_html=True)
+        st.caption("アプリでダウンロードした掲示用Excel。何か月分でもまとめて読み込めます。")
         files = st.file_uploader("掲示用Excel（何か月分でも、まとめて選べます）", type=["xlsx"], accept_multiple_files=True,
-                                 key=f"annual_upload_{st.session_state.get('uploader_gen', 0)}")
+                                 key=f"annual_upload_{st.session_state.get('uploader_gen', 0)}", label_visibility="collapsed")
+    with up_b, st.container(key="annual_sumbox", border=True):
+        st.markdown("<div class='an-up-h'>📋 集計だけのファイル（当直表が見つからない月）</div>", unsafe_allow_html=True)
+        st.caption("先生ごとの回数だけが分かる場合は、ひな形に期間と回数を書いて読み込みます。分からない欄は空欄で大丈夫です。"
+                   "アプリでダウンロードした「年間の当直回数」のExcelも読み込めます。")
+        sum_files = st.file_uploader("集計だけのファイル", type=["xlsx", "csv"], accept_multiple_files=True,
+                                     key=f"annual_sum_upload_{st.session_state.get('uploader_gen', 0)}", label_visibility="collapsed")
+        st.download_button("📥 集計のひな形（Excel）をダウンロード", annual_summary_template_xlsx(), file_name="年間の当直回数_集計のひな形.xlsx",
+                           mime=XLSX_MIME, key="annual_sum_template")
     cache = st.session_state.setdefault("annual_parsed", {})
     parsed = []
     for f in files or []:
@@ -6019,40 +6258,92 @@ def annual_section(year, month, target_start, target_end, frac, restored_state, 
     c_fy, c_del = st.columns([2, 1], vertical_alignment="bottom")
     with c_fy:
         fy_label = st.selectbox("集計の区切り", ["4月〜3月（年度）", "1月〜12月"], key="annual_fy")
-    with c_del:
-        if st.session_state["annual_saved"]:
-            st.button("🗑 保存した集計を消す", key="annual_clear", on_click=annual_clear_saved, use_container_width=True,
-                      help="途中保存から戻した回数を消します。消したあとに途中保存すると、保存の中からも消えます。")
     fy_start = 1 if fy_label.startswith("1月") else 4
     months = annual_fy_months(year, month, fy_start)
+
+    # 集計だけのファイル：期間が書いていなければ、ここで選んでもらう
+    sum_cache = st.session_state.setdefault("annual_sum_parsed", {})
+    loaded_sums = []
+    month_choices = annual_month_span(f"{year - 3}-{month:02d}", f"{year}-{month:02d}")
+    month_label = lambda k: f"{k[:4]}年{int(k[5:])}月"
+    for f in sum_files or []:
+        data = f.getvalue()
+        key = hashlib.sha256(data).hexdigest()
+        if key not in sum_cache:
+            try:
+                sum_cache[key] = annual_read_summary(data, f.name)
+            except ValueError as e:
+                sum_cache[key] = str(e)
+        got = sum_cache[key]
+        if isinstance(got, str):
+            st.warning(got)
+            continue
+        sm = dict(got)
+        if not (sm.get("start") and sm.get("end")):
+            st.warning(f"「{f.name}」に集計の期間が書かれていません。下で、はじめの月とおわりの月を選んでください。")
+            c1, c2 = st.columns(2)
+            with c1:
+                sm["start"] = st.selectbox(f"「{f.name}」の集計の期間（はじめ）", [None] + month_choices, format_func=lambda k: "選んでください" if k is None else month_label(k),
+                                           key=f"annual_sum_start_{key[:12]}")
+            with c2:
+                sm["end"] = st.selectbox(f"「{f.name}」の集計の期間（おわり）", [None] + month_choices, format_func=lambda k: "選んでください" if k is None else month_label(k),
+                                         key=f"annual_sum_end_{key[:12]}")
+            if not (sm["start"] and sm["end"]):
+                continue
+            if sm["start"] > sm["end"]:
+                sm["start"], sm["end"] = sm["end"], sm["start"]
+        span = annual_month_span(sm["start"], sm["end"])
+        if not all(m in months for m in span):
+            st.warning(f"「{f.name}」の期間（{month_label(sm['start'])}〜{month_label(sm['end'])}）が、集計の区切り（{month_label(months[0])}〜{month_label(months[-1])}）からはみ出しています。"
+                       "期間を区切りの中に収めてください（はみ出しているあいだは、集計に入れません）。")
+        sm["created"] = remote_now()
+        loaded_sums.append(sm)
+    # 途中保存から戻した分と合わせる（同じ期間なら、今回読み込んだほうを使う）
+    spans = {(sm["start"], sm["end"]) for sm in loaded_sums}
+    summaries = [sm for sm in st.session_state["annual_summaries_saved"] if (sm.get("start"), sm.get("end")) not in spans] + loaded_sums
+    st.session_state["annual_summaries"] = summaries
+    used_sums, sum_months = annual_summary_months(summaries, months)
+
+    with c_del:
+        if st.session_state["annual_saved"] or st.session_state["annual_summaries_saved"]:
+            st.button("🗑 保存した集計を消す", key="annual_clear", on_click=annual_clear_saved, use_container_width=True,
+                      help="途中保存から戻した回数を消します。消したあとに途中保存すると、保存の中からも消えます。")
     status = {}
     for p in pieces:
         if p["month"] in months:
             status[p["month"]] = "ok" if p.get("loaded") or status.get(p["month"]) == "ok" else "sv"
-    chips = "".join(f"<div class='{status.get(m, 'no')}'>{annual_month_label(m)}{' ✓' if status.get(m) == 'ok' else ' 💾' if status.get(m) == 'sv' else ''}</div>"
-                    for m in months)
+    hidden = sorted(m for m in sum_months if status.get(m) == "ok")   # 集計だけのファイルを優先したため、使わなかった掲示用Excelの月
+    for m in sum_months:
+        status[m] = "sm"
+    marks = {"ok": " ✓", "sv": " 💾", "sm": " 📋"}
+    chips = "".join(f"<div class='{status.get(m, 'no')}'>{annual_month_label(m)}{marks.get(status.get(m), '')}</div>" for m in months)
     st.markdown(ANNUAL_TABLE_CSS + f"<div class='an-m'>{chips}</div>", unsafe_allow_html=True)
-    st.caption("💾 途中保存から戻した月　✓ 今回Excelを読み込んだ月。同じ日が重なったときは、あとから作ったほうのExcelを使います（二重には数えません）。")
+    st.caption("📋 集計だけのファイルから入れた月　✓ 今回掲示用Excelを読み込んだ月　💾 途中保存から戻した月。"
+               "同じ日が重なったときは、あとから作ったほうのExcelを使います。集計だけのファイルの期間に入る月は、その月の掲示用Excelを使いません（二重には数えません）。")
+    if hidden:
+        st.caption("・" + "・".join(annual_month_label(m) for m in hidden) + "は、集計だけのファイルの回数を使いました（その月の掲示用Excelは使っていません）。")
     for n in notes:
         st.warning(n)
 
-    tot = annual_totals(pieces, months)
+    tot = annual_totals(pieces, months, summaries=summaries)
     if not tot:
-        st.caption("まだ集計する回数がありません。掲示用Excelを読み込むと、ここに先生ごとの回数が出ます。")
+        st.caption("まだ集計する回数がありません。掲示用Excelか集計だけのファイルを読み込むと、ここに先生ごとの回数が出ます。")
         return None
     got = [m for m in months if m in status]
     span = f"{got[0][:4]}年{int(got[0][5:])}月〜{got[-1][:4]}年{int(got[-1][5:])}月" if got else ""
     rows, avg = annual_rows(tot, staff_names)
     st.markdown(f"**先生ごとの回数（{span}）**　<span style='font-size:.8rem;opacity:.7'>上段：合計　下段：1か月あたり</span>", unsafe_allow_html=True)
     st.markdown(annual_table_html(rows), unsafe_allow_html=True)
-    st.caption(f"在籍月数：読み込んだ月のうち、その先生の名前がのっている月の数です（日数の割合で数えます）。平均（1か月あたり{avg:.1f}回）とくらべます。")
+    st.caption(f"在籍月数：読み込んだ月のうち、その先生の名前がのっている月の数です（日数の割合で数えます。集計だけのファイルの月は、そのファイルの在籍月数）。"
+               f"平均（1か月あたり{avg:.1f}回）とくらべます。「―」は分からない回数です（その回数は、当直案の「そろえる」に使いません）。")
     st.download_button("📥 集計をExcelでダウンロード", annual_totals_xlsx(rows, f"年間の当直回数（{span}）"),
                        file_name=f"年間の当直回数_{span}.xlsx", key="annual_xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     with st.container(border=True):
         on = st.checkbox(f"年間の回数を、{now_word}の当直案に反映する（少ない先生に多めに入れる）", key="annual_on")
-        st.caption("回数ごとに、どれくらいそろえるかを選びます（1か月あたりの回数でくらべます）：")
+        st.caption("回数ごとに、どれくらいそろえるかを選びます（1か月あたりの回数でくらべます）。"
+                   "組になっている回数は、片方をそろえると、もう片方も自然にそろいます（例：休日をそろえると、合計との差の平日もそろう）。")
         weights = {}
         for k, label, desc in ANNUAL_BALANCE_ITEMS:
             c1, c2 = st.columns([1, 2], vertical_alignment="center")
@@ -6064,45 +6355,45 @@ def annual_section(year, month, target_start, target_end, frac, restored_state, 
             weights[k] = ANNUAL_STRENGTH_WEIGHT.get(v or "しない", 0) if on else 0
         st.caption("月上限・月下限・NG日・間隔下限など、医師条件の決まりは今までどおり守ります。その範囲の中で、1か月あたりの回数が少ない先生を多めに、多い先生を少なめにします。"
                    f"{now_word}の分（これから作る期間）のExcelを読み込んでいても、反映には使いません。")
-    return annual_balance_info(pieces, months, target_start, target_end, frac, weights, staff_names) if on else None
+    return annual_balance_info(pieces, months, target_start, target_end, frac, weights, staff_names, summaries) if on else None
 
 
 def annual_snapshot(year, month):
-    """途中保存に入れる年間の回数（月ごとの回数だけ。日ごとの当直は入れない）。古い月は消す。"""
+    """途中保存に入れる年間の回数（月ごとの回数と、集計だけのファイルの回数。日ごとの当直は入れない）。古い月は消す。"""
     oldest = (year * 12 + month - 1) - ANNUAL_KEEP_MONTHS
     pieces = []
     for p in st.session_state.get("annual_pieces", []):
         y, m = int(p["month"][:4]), int(p["month"][5:])
         if y * 12 + m - 1 >= oldest:
             pieces.append({k: p[k] for k in ("month", "start", "end", "ndays", "created", "roster", "counts")})
-    return {"pieces": pieces, "fy": 1 if str(st.session_state.get("annual_fy", "")).startswith("1月") else 4,
+    sums = [{k: sm.get(k) for k in ("label", "start", "end", "created", "docs")}
+            for sm in st.session_state.get("annual_summaries", []) if sm.get("start") and sm.get("end")
+            and int(sm["end"][:4]) * 12 + int(sm["end"][5:]) - 1 >= oldest]
+    return {"pieces": pieces, "summaries": sums, "fy": 1 if str(st.session_state.get("annual_fy", "")).startswith("1月") else 4,
             "on": bool(st.session_state.get("annual_on", True)),
             "w": {k: st.session_state.get(f"annual_w_{k}") or "しない" for k, _, _ in ANNUAL_BALANCE_ITEMS}}
 
 
 def annual_result_view(df_result, year, month, staff_names, created, now_word="今月"):
     """作成した当直案の下に、先生ごとの「年間（今月込み）」の回数を出す（年間の回数を読み込んでいるときだけ）。"""
-    if not st.session_state.get("annual_pieces"):
+    if not (st.session_state.get("annual_pieces") or st.session_state.get("annual_summaries")):
         return
     fy_start = 1 if str(st.session_state.get("annual_fy", "")).startswith("1月") else 4
     months = annual_fy_months(year, month, fy_start)
     result_file = annual_result_file(df_result, year, month, staff_names, created)
     pieces, _ = annual_merge(st.session_state.get("annual_saved", []), st.session_state.get("annual_loaded", []) + [result_file])
     months = sorted(set(months) | {f"{d.year}-{d.month:02d}" for d in result_file["days"]})
-    tot = annual_totals(pieces, months)
+    tot = annual_totals(pieces, months, summaries=st.session_state.get("annual_summaries", []))
     if not tot:
         return
     now_counts = annual_counts_of(result_file["days"].values())
     rows, _ = annual_rows(tot, staff_names)
-    head = ("<tr><th>先生</th><th>" + now_word + "の当直</th><th>当直合計（年間）</th><th>休日（年間）</th><th>宿直（年間）</th>"
-            "<th class='l'>平均との差（当直合計）</th></tr>")
     body = ""
     for r in rows:
         if not r["here"]:
             continue
-        body += (f"<tr><td>{html_escape(r['name'])}</td><td>{now_counts.get(r['name'], [0])[0]}回</td>"
-                 f"<td>{annual_cell(r['c'][0], r['m'], True)}</td><td>{annual_cell(r['c'][3], r['m'])}</td>"
-                 f"<td>{annual_cell(r['c'][1], r['m'])}</td>{annual_diff_html(r['diff'])}</tr>")
+        body += f"<tr><td>{html_escape(r['name'])}</td><td>{now_counts.get(r['name'], [0])[0]}回</td>{annual_body_cells(r)}</tr>"
+    head = annual_head_html(["先生", f"{now_word}の当直"], "（年間）")
     st.subheader(f"📊 年間の回数（{now_word}込み）")
     st.caption("上段：合計　下段：1か月あたり。この当直案を入れた場合の、年間の回数です。")
     st.markdown(ANNUAL_TABLE_CSS + f"<table class='an-t'>{head}{body}</table>", unsafe_allow_html=True)
@@ -6191,7 +6482,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
    新しく来た先生は「➕ 先生を追加する」で、名前・入れる位置（○○先生の下）・条件のもと（ほかの先生と同じ条件、または型）を選んで追加します。いなくなった先生は「➖ 先生を外す」で外します。
 6. **NG日**（②）：先生を選んでカレンダーでNG日を入れ、「NG日を反映する」を押します（紙やメールで集めたNG日を入力します）。先生方に専用URLから入力してもらう場合は、ここで受付・取り込みを行います（「NG日の集め方」のタブを参照）。
 7. **医師条件の調整**（③・④）：当直案の枠ができるだけ埋まるように、③の表で回数・上限・勤務間隔・希望日を調整します（①の表は見るだけなので、直すのは③です）。④の「⚖️ 当直の枠は足りそう？」で、全体と枠の種類ごとに足りているか（赤い棒がないか）を確認します。
-8. **年間の当直回数（任意）**：「📊 年間の当直回数」に、これまでの月の掲示用Excelをまとめて読み込むと、先生ごとの回数（合計と1か月あたり）が出ます。「年間の回数を、今月の当直案に反映する」にチェックすると、当直合計・休日・宿直のそれぞれを、選んだ強さでそろえて作ります。
+8. **年間の当直回数（任意）**：「📊 年間の当直回数」に、これまでの月の掲示用Excelをまとめて読み込むと（当直表が見つからない月は、右の「📋 集計だけのファイル」に、ひな形で期間と先生ごとの回数を書いて読み込みます）、先生ごとの回数（合計と1か月あたり）（病棟・外来、平日・休日、宿直・日直、合計）が出ます。「年間の回数を、今月の当直案に反映する」にチェックすると、当直合計・休日（平日）・宿直（日直）・外来（病棟）のそれぞれを、選んだ強さでそろえて作ります。
 9. **不足時の優先順位（任意）**：人数が足りない月に、どの枠から埋めるかを決めます。
 10. **当直案を作る**：下の帯の「🚀 当直案を作成」を押します（計算に最大1分少々かかります）。押すたびに違うパターンの案ができるので、気に入るまで押し直して構いません。
    未決定の枠が出たら、条件を直して作り直します。下の帯の移動ボタンで、条件と結果を行き来できます。
@@ -6281,7 +6572,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 
 **📊 年間の回数（今月込み）**
 
-「📊 年間の当直回数」で掲示用Excelを読み込んでいるときだけ、表の下に出ます。この当直案を入れた場合の、先生ごとの年間の回数（当直合計・休日・宿直）と、平均との差（1か月あたり）です。
+「📊 年間の当直回数」で掲示用Excelを読み込んでいるときだけ、表の下に出ます。この当直案を入れた場合の、先生ごとの年間の回数（病棟・外来、平日・休日、宿直・日直、合計）と、平均との差（1か月あたり）です。
         """)
     with tab_trouble:
         st.markdown("""
