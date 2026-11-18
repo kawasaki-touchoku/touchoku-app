@@ -1363,7 +1363,7 @@ with staff_box_cond:
         if c in base_df.columns:
             base_df[c] = base_df[c].apply(lambda x: "" if pd.isna(x) or str(x).lower() in ["nan", "none", "<na>"] else str(x))
 
-    group_rules = group_rules_ui(restored_state)   # 👥 グループの設定（任意）
+    group_rules = group_rules_ui(restored_state, year, month, staff_is_template)   # 👥 グループの設定（任意）
     st.caption("先生の名前は、ほかの先生と重ならない表記にしてください。")
 
     st.session_state["staff_table_ym"] = (year, month)   # 「列の幅」を動かしたときに、直しかけの表を引き継ぐため
