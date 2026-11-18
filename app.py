@@ -285,6 +285,25 @@ def add_fixed_extra_name():
     commit_fixed_current()
 
 
+def fixed_from_posting_xlsx(data, file_label):
+    """
+    掲示用Excel（手で直したものでもよい）を、確定当直の表の形にする。読めないときは ValueError。
+    ・ICU病棟の列は読まない（当直案の計算には使わないため）。「未定」のマスは空欄にする
+    ・戻り値：(確定当直の表, 画面に出す知らせの文)
+    """
+    got = annual_read_posting(data, file_label)
+    rows = []
+    for dt in sorted(got["days"]):
+        row = {"日付": f"{dt.year}/{dt.month}/{dt.day}"}
+        for s in FIXED_SLOT_COLUMNS:
+            row[s] = "、".join(n for n, slot in got["days"][dt]["duties"] if slot == s)
+        rows.append(row)
+    first, last = min(got["days"]), max(got["days"])
+    note = (f"✅ 掲示用Excel「{file_label}」を読み込みました：{first.month}/{first.day}〜{last.month}/{last.day}の{len(got['days'])}日分"
+            "（確定当直の表の同じ日付のところに入れました。ICU病棟の列は読みません）")
+    return pd.DataFrame(rows, columns=["日付"] + FIXED_SLOT_COLUMNS), note
+
+
 def fixed_duty_table(fixed_file, restored_state, fixed_columns, start, end, year, month, labels, example):
     """
     確定当直の表を出し、入力した内容（「区分」の列を除く）を返す。
@@ -301,7 +320,15 @@ def fixed_duty_table(fixed_file, restored_state, fixed_columns, start, end, year
         src = ("empty",)
     args = (start, end, year, month)
     if st.session_state.get("fixed_src") != src or "fixed_rows" not in st.session_state:
-        if src[0] == "file":
+        st.session_state.pop("fixed_load_note", None)
+        if src[0] == "file" and str(fixed_file.name).lower().endswith(".xlsx"):
+            try:
+                base, note = fixed_from_posting_xlsx(fixed_file.getvalue(), fixed_file.name)
+            except ValueError as e:
+                st.error(f"確定当直ファイルの読み込みに失敗しました。{e}")
+                st.stop()
+            st.session_state["fixed_load_note"] = note
+        elif src[0] == "file":
             try:
                 base = parse_fixed_csv(fixed_file.getvalue())
             except Exception as e:
@@ -324,6 +351,8 @@ def fixed_duty_table(fixed_file, restored_state, fixed_columns, start, end, year
         st.session_state["fixed_window_args"] = args
         commit_fixed_current()
     base = st.session_state["fixed_rows"]
+    if st.session_state.get("fixed_load_note") and src[0] == "file":
+        st.success(st.session_state["fixed_load_note"])
 
     # 担当医師は、医師条件の名前（と「ドロップダウンに入れる」で入れた名前）から選ぶ
     names = list(dict.fromkeys(
@@ -3555,14 +3584,18 @@ CSV_UPLOAD_CSS = """<style>
 </style>"""
 
 
-def csv_upload_card(card_key, tag, title, desc, uploader_key, template_bytes, template_name, template_label, template_note=""):
+def csv_upload_card(card_key, tag, title, desc, uploader_key, template_bytes, template_name, template_label, template_note="",
+                    file_types=("csv",), drop_text=None):
     """CSVのアップロード欄（見出し・説明・ドラッグ＆ドロップの枠・ひな形のダウンロード）。読み込んだファイルを返す。
-    見た目の指定（CSV_UPLOAD_CSS）は、画面の最初に1回だけ入れる（ここで入れると、枠の上に余白ができて高さがずれるため）。"""
+    見た目の指定（CSV_UPLOAD_CSS）は、画面の最初に1回だけ入れる（ここで入れると、枠の上に余白ができて高さがずれるため）。
+    file_types で読み込めるファイルの種類を、drop_text で枠の中の文字（CSV以外も読めるとき）を変えられる。"""
     with st.container(key=f"csvcard_{card_key}"):
-        st.markdown(f"<div class='csv-card-head green'><span class='lab'>{tag}</span>{title}</div>", unsafe_allow_html=True)
+        drop_css = (f"<style>.st-key-csvcard_{card_key} [data-testid='stFileUploaderDropzone']::before{{content:'{drop_text}'}}</style>"
+                    if drop_text else "")
+        st.markdown(f"{drop_css}<div class='csv-card-head green'><span class='lab'>{tag}</span>{title}</div>", unsafe_allow_html=True)
         if desc:
             st.caption(desc)
-        up = st.file_uploader(title, type="csv", key=uploader_key, label_visibility="collapsed")
+        up = st.file_uploader(title, type=list(file_types), key=uploader_key, label_visibility="collapsed")
         if template_note:
             st.caption(template_note)
         if template_bytes is not None:   # 方法2（医師条件）は、ひな形のダウンロードを枠の下に出すので、ここには出さない
@@ -5869,8 +5902,11 @@ def annual_section(year, month, target_start, target_end, frac, restored_state, 
     section_banner("📊", "年間の当直回数", "毎月ダウンロードした掲示用Excelから、先生ごとの回数を集計します", "任意", anchor="sec-annual")
     st.info("アプリからダウンロードした「当直表_掲示用_〇年〇月.xlsx」を、まとめて読み込んでください（手で直したあとのファイルでも大丈夫です）。\n\n"
             "**Excelのファイルそのものは、どこにも保存しません。**「💾 途中保存」を押したときだけ、先生ごと・月ごとの**回数**を保存します（どの日に誰が当直したかは保存しません）。")
-    files = st.file_uploader("掲示用Excel（何か月分でも、まとめて選べます）", type=["xlsx"], accept_multiple_files=True,
-                             key=f"annual_upload_{st.session_state.get('uploader_gen', 0)}")
+    with st.container(key="annual_upbox"):
+        st.markdown("<style>.st-key-annual_upbox [data-testid='stFileUploaderDropzone']::before{content:'📄⬇　ここに掲示用Excelをドラッグ＆ドロップ（何か月分でも）'}</style>",
+                    unsafe_allow_html=True)
+        files = st.file_uploader("掲示用Excel（何か月分でも、まとめて選べます）", type=["xlsx"], accept_multiple_files=True,
+                                 key=f"annual_upload_{st.session_state.get('uploader_gen', 0)}")
     cache = st.session_state.setdefault("annual_parsed", {})
     parsed = []
     for f in files or []:
@@ -6534,7 +6570,7 @@ with st.container(key="fixed_section"):
     st.info("先月・今月・来月の、担当者が決まっている当直を入力してください。先月末の勤務は、月初の勤務間隔の確認に使います。入力がなければ、この項目は飛ばせます。")
     with st.expander("入力例：確定当直の書き方と扱い", expanded=False):
         st.markdown("""
-- CSVのアップロードと、下の表への直接入力のどちらでも入力できます。
+- 掲示用Excel（手直ししたものでも可）・CSVのアップロードと、下の表への直接入力のどれでも入力できます。掲示用ExcelのICU病棟の列は読みません。
 - 表には、先月末7日分・今月・翌月はじめ7日分の日付が最初から並んでいます。「区分」の列に ◀先月／今月／翌月▶ を表示します。
 - それ以外の日付（先月1か月分など）は、表の下の「＋」で行を足して `月/日`（例：`11/1`）または `年/月/日` の形で入力するか、CSVで読み込みます。CSVの行は、表の同じ日付のところに入ります。
 - 担当する先生は、枠の欄をクリックすると出る一覧（医師条件の名前）から選びます。
@@ -6554,10 +6590,11 @@ with st.container(key="fixed_section"):
     fixed_csv_template = fixed_template_df.to_csv(index=False).encode('utf-8-sig')
 
     fixed_file = csv_upload_card(
-        "fixed", "CSV", "確定当直のCSVファイルをアップロード（任意）",
-        "下の表に直接入力することもできます。たくさんある場合は、ひな形に入力して読み込むと便利です。",
+        "fixed", "Excel・CSV", "確定当直のファイルをアップロード（任意）",
+        "先月の掲示用Excel（手直ししたものでも大丈夫）を、そのまま読み込めます。CSVも読み込めます。下の表に直接入力することもできます。",
         f"fixed_csv_{st.session_state.get('uploader_gen', 0)}",
-        fixed_csv_template, "確定当直_ひな形.csv", "📥 確定当直のひな形（CSV）をダウンロード")
+        fixed_csv_template, "確定当直_ひな形.csv", "📥 確定当直のひな形（CSV）をダウンロード",
+        file_types=("csv", "xlsx"), drop_text="📄⬇　ここに掲示用ExcelかCSVファイルをドラッグ＆ドロップ")
 
     edited_fixed_df = fixed_duty_table(fixed_file, restored_state, fixed_columns, datetime.date(year, month, 1),
                                        datetime.date(year, month, calendar.monthrange(year, month)[1]), year, month,
