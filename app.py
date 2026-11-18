@@ -6249,7 +6249,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 **📅 作成した当直案**（日付ごとの表）
 
 名前にカーソルを合わせると、同じ先生の当直が強調されます。
-「🔍 特定の医師の当直を色別でハイライト」を開くと、選んだ先生を色分けできます。Excelでもダウンロードできます。
+「🔍 特定の医師の当直を色別でハイライト」を開くと、選んだ先生を色分けできます。掲示用のExcelでもダウンロードできます。
         """)
     with tab_trouble:
         st.markdown("""
@@ -7533,21 +7533,20 @@ if len(staff_df) > 0:
                 default=None,
             )
 
-            st.download_button(
-                label="📥 表示中の当直案をExcelでダウンロード",
-                data=table_xlsx(df_result, "当直案", text_cols=list(df_result.columns)),
-                file_name=f"当直案_{year}年{month}月.csv",
-                mime="text/csv",
-            )
             # 掲示用のExcel（病院に貼る形）。ICU病棟（循環器）の列と作成日は空けておき、あとから手で入れる
-            st.download_button(
-                label="🖨️ 掲示用のExcelをダウンロード",
-                data=posting_xlsx(df_result, year, month, f"内科当直表（{year}年{month}月）",
-                                  roster=doctors_list, created=st.session_state.get("generated_at")),
-                file_name=f"当直表_掲示用_{year}年{month}月.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                help="病院に貼る形のExcelです。ICU病棟（循環器）の列と、右上の作成日は空けてあるので、ダウンロードしたあとに入れてください。",
-            )
+            # 医師別の当直一覧のExcelボタンと同じ緑のボタンにする
+            st.markdown("<style>.st-key-posting_download button{background:#1d6f42 !important;border:1px solid #1d6f42 !important;color:#fff !important;font-weight:700}"
+                        ".st-key-posting_download button:hover{background:#155a35 !important;border-color:#155a35 !important}"
+                        ".st-key-posting_download button p{color:#fff !important}</style>", unsafe_allow_html=True)
+            with st.container(key="posting_download"):
+                st.download_button(
+                    label="📥 この当直案を掲示用のExcelでダウンロード（A3・印刷用）",
+                    data=posting_xlsx(df_result, year, month, f"内科当直表（{year}年{month}月）",
+                                      roster=doctors_list, created=st.session_state.get("generated_at")),
+                    file_name=f"当直表_掲示用_{year}年{month}月.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            st.caption("ICU病棟（循環器）の列と、右上の作成日は空けてあります。ダウンロードしたあとに入れてください。")
             # 年間の当直回数を読み込んでいるときは、この当直案を入れた場合の年間の回数も出す
             annual_result_view(df_result, year, month, doctors_list, None, now_word="今月")
 
