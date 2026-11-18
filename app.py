@@ -1449,7 +1449,7 @@ def _posting_color(slot):
 
 POSTING_GROUPS = [
     ("病棟", "14階、13階、12階、8階病棟", [("A日直", "A日直", *_posting_color("A日直")), ("A宿直", "A宿直", *_posting_color("A宿直"))]),
-    ("病棟", "11階、10階、9階・救急病棟", [("B日直", "B日直", *_posting_color("B日直")), ("B宿直", "B宿直", *_posting_color("B宿直"))]),
+    ("病棟", "11階、10階、9階、救急病棟", [("B日直", "B日直", *_posting_color("B日直")), ("B宿直", "B宿直", *_posting_color("B宿直"))]),
     ("外来", "", [("外来日直", "外来日直", *_posting_color("外来日直")), ("外来宿直", "外来宿直", *_posting_color("外来宿直"))]),
     ("循環器", "ICU病棟", [(None, "ICU日直", "FFFFFF", "000000"), (None, "ICU宿直", "FFFFFF", "000000")]),
 ]
