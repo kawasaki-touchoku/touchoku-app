@@ -1102,7 +1102,7 @@ with st.container(key="fixed_section"):
     st.info("期間の前（先月末など）・期間中・期間の後の、担当者が決まっている当直を入力してください。期間の前後の勤務は、勤務間隔の確認に使います。入力がなければ、この項目は飛ばせます。")
     with st.expander("入力例：確定当直の書き方と扱い", expanded=False):
         st.markdown("""
-- CSVのアップロードと、下の表への直接入力のどちらでも入力できます。
+- 掲示用Excel（手直ししたものでも可）・CSVのアップロードと、下の表への直接入力のどれでも入力できます。掲示用ExcelのICU病棟の列は読みません。
 - 表には、期間の前7日分・期間中・期間の後7日分の日付が最初から並んでいます。「区分」の列に ◀期間前／期間中／期間後▶ を表示します。
 - それ以外の日付（先月1か月分など）は、表の下の「＋」で行を足して `12/30` や `1/2` のように月から入力するか、CSVで読み込みます。CSVの行は、表の同じ日付のところに入ります。
 - 担当する先生は、枠の欄をクリックすると出る一覧（医師条件の名前）から選びます。
@@ -1122,10 +1122,11 @@ with st.container(key="fixed_section"):
     fixed_csv_template = fixed_template_df.to_csv(index=False).encode('utf-8-sig')
 
     fixed_file = csv_upload_card(
-        "fixed", "CSV", "確定当直のCSVファイルをアップロード（任意）",
-        "下の表に直接入力することもできます。たくさんある場合は、ひな形に入力して読み込むと便利です。",
+        "fixed", "Excel・CSV", "確定当直のファイルをアップロード（任意）",
+        "期間の前（先月など）の掲示用Excel（手直ししたものでも大丈夫）を、そのまま読み込めます。CSVも読み込めます。下の表に直接入力することもできます。",
         f"fixed_csv_{st.session_state.get('uploader_gen', 0)}",
-        fixed_csv_template, "確定当直_ひな形.csv", "📥 確定当直のひな形（CSV）をダウンロード")
+        fixed_csv_template, "確定当直_ひな形.csv", "📥 確定当直のひな形（CSV）をダウンロード",
+        file_types=("csv", "xlsx"), drop_text="📄⬇　ここに掲示用ExcelかCSVファイルをドラッグ＆ドロップ")
 
     edited_fixed_df = fixed_duty_table(fixed_file, restored_state, fixed_columns, P.start, P.end, year, month,
                                        ("◀期間前", "期間中", "期間後▶"), P.example())
