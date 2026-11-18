@@ -5657,8 +5657,8 @@ DOC_GROUP_MEMO = "メモ"   # グループの設定の、いちばん右のメ�
 DOC_GROUP_AVOID_COLUMN = "_できれば入れない枠"   # 計算用の列（表には出さない）
 DOC_GROUP_AVOID_PENALTY = 3000   # △の枠に1回入れるごとの減点（人が足りない枠を空けておく減点より小さくして、足りないときは入れる）
 DOC_GROUP_SHEET = "グループの設定"   # 医師条件のExcelの2枚目のシート
-# 最初に並べる5つのグループ（A日直・A宿直・B日直・B宿直・外来日直・外来宿直 の順）
-DOC_GROUP_DEFAULT = ["◯◯××◯×", "◯◯△◯◯×", "△△◯◯◯◯", "××××◯×", "◯×◯×◯×"]
+# 最初に並べる5つのグループ（名前, A日直・A宿直・B日直・B宿直・外来日直・外来宿直 の順の◯△×）
+DOC_GROUP_DEFAULT = [("上級", "◯◯××◯×"), ("中堅", "◯◯△◯◯×"), ("若手", "△△◯◯◯◯"), ("外来日直のみ", "××××◯×"), ("日直のみ", "◯×◯×◯×")]
 
 
 def doc_group_slots():
@@ -5666,34 +5666,39 @@ def doc_group_slots():
     return list(RESULT_COLUMNS[2:])
 
 
-def doc_group_number(name):
-    m = re.fullmatch(r"グループ(\d+)", clean_text(name))
-    return int(m.group(1)) if m else None
+def doc_group_next_name(used):
+    """足した行に付ける名前（グループ6 のように、まだ使っていない番号）。"""
+    n = 1
+    while f"グループ{n}" in used:
+        n += 1
+    return f"グループ{n}"
 
 
 def default_group_rules():
-    """最初のグループの設定（グループ1〜5）。{グループ名: {枠: ◯△×, "メモ": 文字}}"""
+    """最初のグループの設定（上級・中堅・若手・外来日直のみ・日直のみ）。{グループ名: {枠: ◯△×, "メモ": 文字}}"""
     slots = doc_group_slots()
-    return {f"グループ{i}": {**{s: marks[j] for j, s in enumerate(slots)}, DOC_GROUP_MEMO: ""}
-            for i, marks in enumerate(DOC_GROUP_DEFAULT, 1)}
+    return {name: {**{s: marks[j] for j, s in enumerate(slots)}, DOC_GROUP_MEMO: ""} for name, marks in DOC_GROUP_DEFAULT}
 
 
 def normalize_group_rules(rules):
     """
-    途中保存・Excelから読んだグループの設定を、決まった形にそろえる（グループの番号の順、全部の枠、◯△×のどれか、メモ）。
-    rules が None なら最初の設定。グループが1つもない設定もそのまま（全部消した場合）。
+    途中保存・Excelから読んだグループの設定を、決まった形にそろえる（並び順はそのまま、全部の枠、◯△×のどれか、メモ）。
+    rules が None なら最初の設定。グループが1つもない設定もそのまま（全部消した場合）。名前が空欄・重なる行は使わない。
     """
     if rules is None:
         return default_group_rules()
     out = {}
-    for g, row in sorted(((g, r) for g, r in rules.items() if doc_group_number(g)), key=lambda x: doc_group_number(x[0])):
+    for g, row in rules.items():
+        g = doc_group_of(g)
+        if not g or g in out:
+            continue
         row = row if isinstance(row, dict) else {}
         marks = {}
         for s in doc_group_slots():
             v = clean_text(row.get(s, "")).replace("○", "◯").replace("〇", "◯").replace("✕", "×").replace("x", "×").replace("X", "×")
             marks[s] = v if v in DOC_GROUP_MARKS else "◯"
         memo = clean_text(row.get(DOC_GROUP_MEMO, ""))
-        out[f"グループ{doc_group_number(g)}"] = {**marks, DOC_GROUP_MEMO: "" if memo.lower() in ("nan", "none") else memo}
+        out[g] = {**marks, DOC_GROUP_MEMO: "" if memo.lower() in ("nan", "none") else memo}
     return out
 
 
@@ -5703,11 +5708,9 @@ def doc_group_names():
 
 
 def doc_group_of(value):
-    """医師条件の「グループ」のマスから、グループの名前を返す（「3」だけでも可。空欄・そのほかは ""）。"""
-    v = clean_text(value).replace(" ", "").replace("　", "").translate(str.maketrans("０１２３４５６７８９", "0123456789"))
-    if re.fullmatch(r"\d+", v):
-        v = "グループ" + str(int(v))
-    return f"グループ{doc_group_number(v)}" if doc_group_number(v) else ""
+    """医師条件の「グループ」のマス・グループ名から、グループの名前を返す（前後の空白は除く。空欄は ""）。"""
+    v = clean_text(value)
+    return "" if v.lower() in ("nan", "none", "<na>") else v
 
 
 def add_group_column(df):
@@ -5775,7 +5778,7 @@ def group_rules_xlsx_sheet(wb, rules):
     ws = wb.create_sheet(DOC_GROUP_SHEET)
     rules = normalize_group_rules(rules)
     slots = doc_group_slots()
-    ws.append(["グループ"] + slots + [DOC_GROUP_MEMO])
+    ws.append(["グループ名"] + slots + [DOC_GROUP_MEMO])
     for c in ws[1]:
         c.font, c.fill, c.alignment = Font(bold=True), PatternFill("solid", fgColor="DFE6EF"), Alignment(horizontal="center")
     for g, row in rules.items():
@@ -5784,14 +5787,14 @@ def group_rules_xlsx_sheet(wb, rules):
             ws.cell(ws.max_row, i).alignment = Alignment(horizontal="center")
     ws.append([])
     ws.append(["◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない"])
-    ws.column_dimensions["A"].width = 12
+    ws.column_dimensions["A"].width = 16
     for i in range(2, len(slots) + 2):
         ws.column_dimensions[chr(64 + i)].width = 10
     ws.column_dimensions[chr(64 + len(slots) + 2)].width = 30
 
 
 def group_rules_from_xlsx(data):
-    """医師条件のExcelに「グループの設定」のシートがあれば読む（なければ None）。"""
+    """医師条件のExcelに「グループの設定」のシートがあれば読む（なければ None）。空の行のところで読むのをやめる（下の説明の行は読まない）。"""
     if not bytes(data[:4]) == b"PK\x03\x04":
         return None
     from openpyxl import load_workbook
@@ -5807,61 +5810,109 @@ def group_rules_from_xlsx(data):
     head = [clean_text(v) for v in rows[0]]
     rules = {}
     for r in rows[1:]:
+        if not any(clean_text(v) for v in r):
+            break
         g = doc_group_of(r[0] if r else "")
         if g:
             rules[g] = {head[j]: r[j] for j in range(1, min(len(head), len(r))) if head[j]}
     return normalize_group_rules(rules)
 
 
-def set_group_rules_base(rules):
-    """グループの設定の表を、rules で作り直す（読み込んだとき・途中保存から戻したとき・行を足したときだけ）。"""
-    st.session_state["group_rules_base"] = normalize_group_rules(rules)
-    st.session_state["group_rules_current"] = normalize_group_rules(rules)
+def set_group_rules_base(rules, ids=None):
+    """
+    グループの設定の表を、rules で作り直す（読み込んだとき・途中保存から戻したとき・名前を変えた／行を足し引きしたときだけ）。
+    行ごとに見えない番号（_id）を付けておき、名前を変えたときに、どのグループの名前が変わったかを分かるようにする。
+    """
+    rules = normalize_group_rules(rules)
+    nxt = st.session_state.get("group_rules_next_id", 0)
+    base = []
+    for i, (g, row) in enumerate(rules.items()):
+        rid = ids[i] if ids and i < len(ids) and ids[i] is not None else None
+        if rid is None:
+            rid, nxt = nxt, nxt + 1
+        base.append({"_id": rid, "name": g, **row})
+    st.session_state["group_rules_next_id"] = max([nxt] + [b["_id"] + 1 for b in base])
+    st.session_state["group_rules_base"] = base
+    st.session_state["group_rules_current"] = rules
     st.session_state["group_rules_gen"] = st.session_state.get("group_rules_gen", 0) + 1
 
 
-def group_rules_ui(restored_state):
+def group_rules_ui(restored_state, year, month, staff_is_template=False):
     """
     「👥 グループの設定（任意）」の表を出し、今の設定を返す。
     ・表の中身は画面の裏に持っておき、途中保存から戻したとき・Excelを読み込んだときだけ作り直す（入力のたびには作り直さない）
-    ・「＋」で行を足すと、次の番号のグループ（例：グループ6）にする（名前を付けるために、そのときだけ表を作り直す）
+    ・グループ名を変えたときは、そのグループの先生の「グループ」の列も新しい名前にする
+    ・名前を変えた・行を足した・消したときは、医師条件の表で選べるグループが変わるので、医師条件の表を今の内容のまま出し直す
+    ・名前が空欄・ほかのグループと同じになったときは、元の名前（足した行は「グループ6」など）にして知らせる
     """
     saved = (restored_state or {}).get("group_rules")
-    src = json.dumps(saved, ensure_ascii=False, sort_keys=True) if saved is not None else ""
+    src = json.dumps(saved, ensure_ascii=False) if saved is not None else ""
     if st.session_state.get("group_rules_src") != src:
         st.session_state["group_rules_src"] = src
         if saved is not None or "group_rules_base" not in st.session_state:
             set_group_rules_base(saved)
     slots = doc_group_slots()
     base = st.session_state["group_rules_base"]
-    view = pd.DataFrame([[g] + [r[s] for s in slots] + [r.get(DOC_GROUP_MEMO, "")] for g, r in base.items()],
-                        columns=["グループ"] + slots + [DOC_GROUP_MEMO])
+    view = pd.DataFrame([[b["_id"], b["name"]] + [b[s] for s in slots] + [b.get(DOC_GROUP_MEMO, "")] for b in base],
+                        columns=["_id", "グループ名"] + slots + [DOC_GROUP_MEMO])
     with st.container(key="group_rules_box", border=True):
         st.markdown("<div style='font-weight:800;color:#24405f;font-size:1.02rem'>👥 グループの設定（任意）</div>", unsafe_allow_html=True)
-        st.caption("同じ扱いにしたい先生をグループにまとめ、グループごとに入れる枠を決めます。先生のグループは、下の表の「グループ」の列で選びます"
-                   "（空欄の先生は今までどおり）。グループは表の下の「＋」で足せます（いくつでも）。いらないグループは、行を選んで消せます。")
-        config = {"グループ": st.column_config.TextColumn("グループ", disabled=True, width=90)}
+        st.caption("同じ扱いにしたい先生をグループにまとめ、グループごとに入れる枠を決めます。**グループ名はマスをダブルクリックして変えられます**"
+                   "（変えると、そのグループの先生の「グループ」の列も自動で変わります）。先生のグループは、下の表の「グループ」の列で選びます（空欄の先生は今までどおり）。"
+                   "グループは表の下の「＋」で足せます（いくつでも）。いらないグループは、行を選んで消せます。")
+        for msg in st.session_state.pop("group_rules_notes", []):
+            st.warning(msg)
+        config = {"グループ名": st.column_config.TextColumn("グループ名", width=120, help="ダブルクリックで名前を変えられます。例：上級")}
         config.update({s: st.column_config.SelectboxColumn(s, options=DOC_GROUP_MARKS, required=True, default="◯",
                                                            width=header_fit_width(s, 80),   # 見出しが切れない幅
                                                            help="◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない")
                        for s in slots})
-        config[DOC_GROUP_MEMO] = st.column_config.TextColumn(DOC_GROUP_MEMO, width=240, help="自由に書けるメモです（計算には使いません）。例：上の先生")
+        config[DOC_GROUP_MEMO] = st.column_config.TextColumn(DOC_GROUP_MEMO, width=240, help="自由に書けるメモです（計算には使いません）。")
         cur = st.data_editor(view, hide_index=True, use_container_width=False, num_rows="dynamic", column_config=config,
+                             column_order=["グループ名"] + slots + [DOC_GROUP_MEMO],   # 見えない番号（_id）は出さない
                              key=f"group_rules_editor_{st.session_state.get('group_rules_gen', 0)}")
         st.caption("◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない（確定当直は、今までどおり入ります）")
-    rules, new_rows = {}, []
+
+    old_name = {b["_id"]: b["name"] for b in base}
+    all_names = set(old_name.values())
+    items = []
     for _, r in cur.iterrows():
+        rid = r.get("_id")
+        rid = int(rid) if rid is not None and not pd.isna(rid) and int(rid) in old_name else None
+        items.append((rid, doc_group_of(r.get("グループ名")), r))
+    # 名前を変えていないグループの名前は、先に確保しておく（変えた側を元に戻す）
+    kept = {name for rid, name, _ in items if rid is not None and name == old_name[rid]}
+    rows, ids, used, notes, renames = [], [], set(), [], {}
+    for rid, name, r in items:
+        old = old_name.get(rid)
+        if name and old and name == old:
+            pass
+        elif not name:
+            name = old or doc_group_next_name(used | kept | all_names)
+            if old:
+                notes.append(f"グループ名を空欄にはできないので、「{old}」のままにしました。")
+        elif name in used or name in kept:
+            fallback = old if (old and old not in used and old not in kept) else doc_group_next_name(used | kept | all_names)
+            notes.append(f"「{name}」はほかのグループと同じ名前なので、" + (f"元の名前「{fallback}」に戻しました。" if fallback == old else f"「{fallback}」にしました。"))
+            name = fallback
+        used.add(name)
+        if old and name != old:
+            renames[old] = name
         row = {s: r.get(s) for s in slots}
         row[DOC_GROUP_MEMO] = r.get(DOC_GROUP_MEMO)
-        if doc_group_number(r.get("グループ")):
-            rules[clean_text(r["グループ"])] = row
-        else:
-            new_rows.append(row)
-    if new_rows:   # 足した行に、次の番号のグループ名を付けて、表を出し直す
-        nxt = max([doc_group_number(g) for g in list(base) + list(rules)] + [0]) + 1
-        for i, row in enumerate(new_rows):
-            rules[f"グループ{nxt + i}"] = row
-        set_group_rules_base(rules)
+        rows.append((name, row))
+        ids.append(rid)
+    rules = {name: row for name, row in rows}
+    if [n for n, _ in rows] != [b["name"] for b in base] or notes:
+        # 名前を変えた・行を足した・消した：グループの表と、医師条件の表（今の内容のまま）を出し直す
+        set_group_rules_base(rules, ids)
+        st.session_state["group_rules_notes"] = notes
+        csv_text = st.session_state.get("staff_current_csv")
+        if csv_text and not staff_is_template:
+            df = parse_staff_csv(csv_text.encode("utf-8"))
+            if DOC_GROUP_COLUMN in df.columns and renames:
+                df[DOC_GROUP_COLUMN] = df[DOC_GROUP_COLUMN].map(lambda v: renames.get(doc_group_of(v), doc_group_of(v)) or None)
+            _staff_apply_new_table(df, year, month, None)
         st.rerun()
     st.session_state["group_rules_current"] = normalize_group_rules(rules)
     return st.session_state["group_rules_current"]
@@ -7452,7 +7503,7 @@ with staff_box_cond:
         if c in base_df.columns:
             base_df[c] = base_df[c].apply(lambda x: "" if pd.isna(x) or str(x).lower() in ["nan", "none", "<na>"] else str(x))
 
-    group_rules = group_rules_ui(restored_state)   # 👥 グループの設定（任意）
+    group_rules = group_rules_ui(restored_state, year, month, staff_is_template)   # 👥 グループの設定（任意）
     st.caption("先生の名前は、ほかの先生と重ならない表記にしてください。")
 
     st.session_state["staff_table_ym"] = (year, month)   # 「列の幅」を動かしたときに、直しかけの表を引き継ぐため
