@@ -1398,6 +1398,7 @@ with staff_box_cond:
             st.table(pd.DataFrame(_notes, columns=["先生の名前", "備考"]).set_index("先生の名前"))
     staff_df, staff_input_errors = validate_staff_inputs(staff_df, year, month)
     staff_df_calc = apply_group_rules(staff_df, group_rules)   # 計算用：グループの×の枠は上限0、△の枠は「できれば入れない」
+    group_orphan_notice(staff_df, group_rules)   # 消したグループに入っている先生がいれば知らせる
     if staff_input_errors:
         show_input_errors(staff_input_errors)
         if create_bar_request:
@@ -1813,7 +1814,7 @@ work_snapshot = {
     "comments": {n: list(v) for n, v in imported_comments(year, month).items()},
     "alerts": {k: int(st.session_state.get(f"alert_{k}", v) or 0) for k, v in MATRIX_COUNT_ALERTS.items()},
     "annual": annual_snapshot(year, month),   # 年間の当直回数（月ごとの回数だけ）
-    "group_rules": st.session_state.get("group_rules_current") or default_group_rules(),   # 👥 グループの設定
+    "group_rules": st.session_state.get("group_rules_current", default_group_rules()),   # 👥 グループの設定（メモを含む）
 }
 # 右上の途中保存ボタンが押されていたら、ここで（全部の入力を読み終えてから）保存する
 if work_save_request:
