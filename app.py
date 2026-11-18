@@ -3658,10 +3658,11 @@ CSV_UPLOAD_CSS = """<style>
 .csvng-ok{margin-top:10px;background:#e8f5ec;border:1px solid #9fd0ad;border-radius:10px;padding:9px 14px;line-height:1.8;color:#1f4d33}
 .csvng-ok a{color:#1d4e89 !important;text-decoration:underline;margin-left:6px;font-weight:700}
 .st-key-imp_tmpl [data-testid="stDownloadButton"] button{border:1.5px solid #2e8a5b !important;color:#1f6b45 !important;background:#fff !important;font-weight:700}
-</style>/* 確定当直：方法1（表に直接入力）の「下の表へ」と、表の見出し・青い枠 */
+/* 確定当直：方法1（表に直接入力）の「下の表へ」と、表の見出し・青い枠 */
 .fx-go{font-weight:800;color:#1d4e89;font-size:1rem}.fx-go small{display:block;font-weight:400;color:#566174;font-size:.8rem;margin-top:2px}
 .fx-table-h{font-weight:800;color:#1d4e89;font-size:1.05rem;margin:10px 0 0}.fx-table-h span{font-weight:400;color:#566174;font-size:.82rem;margin-left:10px}
 .st-key-fixed_table_box [data-testid="stDataFrame"], .st-key-fixed_table_box [data-testid="stDataFrameResizable"]{border:2px solid #2f6db5;border-radius:8px}
+</style>
 """
 
 
