@@ -279,7 +279,7 @@ def fixed_merge_into_days(df, start, end, year, month, pad=FIXED_PAD_DAYS):
     確定当直の表に、start の pad 日前〜 end の pad 日後の日付を最初から並べ、そこへ df の内容を入れる。
     ・df は fixed_rows_for_editor でそろえた表（1マス1人）
     ・名前は、同じ日付の行の空いている枠に入れる。空いていなければ、その日付の行を増やす
-    ・並べた範囲の外の日付（先月1か月分など）の行も、日付順に残す
+    ・並べた範囲の外の日付（前月1か月分など）の行も、日付順に残す
     ・日付が読めない行は、入力チェックで知らせるため、いちばん下に残す
     ・名前の入っていない行（日付だけの行）は、並べた範囲の外なら消す
     """
@@ -337,7 +337,7 @@ def fixed_kubun(date_text, start, end, year, month, labels):
 def commit_fixed_current():
     """
     確定当直の表の今の内容（画面で入力した分）を、もとの表として確定し、表を出し直す。
-    先生の名前の一覧が変わったときや、「ドロップダウンに入れる」を押したときだけ使う（入力のたびには表を作り直さない）。
+    先生の名前の一覧が変わったときや、「表で選べるようにする」を押したときだけ使う（入力のたびには表を作り直さない）。
     """
     cur = st.session_state.get("fixed_current")
     args = st.session_state.get("fixed_window_args")
@@ -347,7 +347,7 @@ def commit_fixed_current():
 
 
 def add_fixed_extra_name():
-    """「ドロップダウンに入れる」を押したとき：入力した名前を、確定当直の表で選べる名前に加える。"""
+    """「表で選べるようにする」を押したとき：入力した名前を、確定当直の表で選べる名前に加える。"""
     name = clean_text(st.session_state.get("fixed_extra_input", ""))
     if not name:
         return
@@ -428,27 +428,16 @@ def fixed_duty_table(fixed_file, restored_state, fixed_columns, start, end, year
     if st.session_state.get("fixed_load_note") and src[0] == "file":
         st.success(st.session_state["fixed_load_note"])
 
-    # 担当医師は、医師条件の名前（と「ドロップダウンに入れる」で入れた名前）から選ぶ
+    # 担当医師は、医師条件の名前（と「表で選べるようにする」で入れた名前）から選ぶ
     names = list(dict.fromkeys(
         list(st.session_state.get("fixed_name_options", []))
         + list(st.session_state.get("fixed_extra_names", []))
         + [v for s_ in FIXED_SLOT_COLUMNS for v in base[s_].tolist() if v]))
-    st.write(f"前後{FIXED_PAD_DAYS}日分の日付は最初から並んでいます。担当する先生を、枠の欄の一覧から選んでください。"
-             f"ほかの日付は、表の下の「＋」で行を足して日付（例：{example}）を入力します。")
+    st.markdown("<div class='fx-table-h'>✏️ 確定当直の表<span>方法1はここに入力します。方法2で読み込んだ内容も、ここに入ります。</span></div>",
+                unsafe_allow_html=True)
+    st.caption(f"ほかの日付は、表の下の「＋」で行を足して日付（例：{example}）を入力します。")
     if not st.session_state.get("fixed_name_options"):
         st.caption("先に下の「医師条件」に先生の名前を入れると、ここで名前を選べるようになります。")
-    # 先月・翌月（期間の前後）だけ勤務した先生の名前：医師条件の「➕ 先生を追加する」と別物とわかるよう、枠で囲み、「➕」は付けない
-    rng = "先月・翌月" if labels[1] == "今月" else "期間の前後"
-    with st.container(border=True):
-        st.markdown(f"{rng}だけ勤務した先生を、ドロップダウンに入れる（記録用）")
-        c_in, c_btn = st.columns([3, 1], vertical_alignment="center")
-        with c_in:
-            st.text_input("先生の名前（記録用）", key="fixed_extra_input", placeholder="例：佐藤", label_visibility="collapsed",
-                          help="医師条件にいない先生の名前を入れて「ドロップダウンに入れる」を押すと、枠の欄をクリックしたときに出る名前の中から選べるようになります。")
-        with c_btn:
-            st.button("ドロップダウンに入れる", key="fixed_extra_add", on_click=add_fixed_extra_name, use_container_width=True)
-        st.caption(f"{rng}の日付だけに使えます。当直案には入りません。"
-                   f"**{labels[1]}の先生を増やすときは、下の医師条件の「➕ 先生を追加する」**を使います。")
 
     view = base.copy()
     view.insert(1, FIXED_KUBUN_COLUMN, [fixed_kubun(v, start, end, year, month, labels) for v in view["日付"]])
@@ -462,11 +451,25 @@ def fixed_duty_table(fixed_file, restored_state, fixed_columns, start, end, year
     config.update({s_: st.column_config.SelectboxColumn(s_, options=names, help="担当する先生を一覧から選びます。消すときはマスを選んで Delete キー。")
                    for s_ in FIXED_SLOT_COLUMNS})
     config.update({c: st.column_config.TextColumn(c) for c in view.columns if c not in config})
-    cur = st.data_editor(
-        view, num_rows="dynamic", use_container_width=True, height=420, hide_index=True,
-        column_config=config, key=f"fixed_editor_{st.session_state.get('fixed_editor_gen', 0)}",
-    )
-    st.caption("同じ日・同じ枠を2人以上で担当する場合は、同じ日付の行をもう1行追加して、もう1人を選んでください。")
+    with st.container(key="fixed_table_box"):   # 方法1と同じ青い枠で囲む（手で入れる場所だと分かるように）
+        cur = st.data_editor(
+            view, num_rows="dynamic", use_container_width=True, height=420, hide_index=True,
+            column_config=config, key=f"fixed_editor_{st.session_state.get('fixed_editor_gen', 0)}",
+        )
+    st.caption("同じ日・同じ枠を2人以上で担当する場合は、表の下の「＋」で同じ日付の行を足して、もう1人を選んでください。")
+
+    # 前月・翌月（期間の前後）だけ勤務した先生：困ったときに開く欄にする（医師条件の「➕ 先生を追加する」と混ざらないように）
+    rng = "前月・翌月" if labels[1] == "今月" else "期間の前後"
+    who = "前月だけ勤務した先生など" if labels[1] == "今月" else "期間の前だけ勤務した先生など"
+    with st.expander(f"選びたい先生が、名前の一覧に出てこないとき（{who}）", expanded=False):
+        st.caption(f"医師条件にいない先生の名前を入れると、表で選べるようになります。**{rng}の日付だけ**に使えます（{labels[1]}の当直案には入りません）。")
+        c_in, c_btn = st.columns([3, 2], vertical_alignment="center")
+        with c_in:
+            st.text_input("先生の名前", key="fixed_extra_input", placeholder="例：佐藤", label_visibility="collapsed")
+        with c_btn:
+            st.button("表で選べるようにする", key="fixed_extra_add", on_click=add_fixed_extra_name, use_container_width=True)
+        st.caption(f"{labels[1]}の先生を増やすときは、下の医師条件の「➕ 先生を追加する」を使います。")
+
     cur = cur.drop(columns=[FIXED_KUBUN_COLUMN], errors="ignore").reset_index(drop=True)
     for c in cur.columns:
         cur[c] = cur[c].map(lambda v: "" if v is None or (not isinstance(v, str) and pd.isna(v)) else str(v).strip())
@@ -1100,7 +1103,7 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
                 continue
             kind = ng.get(d)
             pm = pm_duty_restricted(datetime.date(year, month, d), pm_days, year, month, custom_holidays, next_month_special_holiday)
-            # 先月末・来月初めの確定当直との勤務間隔のため入れない日：マスを薄紫にする（×の表示はそのまま）
+            # 前月末・翌月初めの確定当直との勤務間隔のため入れない日：マスを薄紫にする（×の表示はそのまま）
             # （今月の確定当直の前後は、色を付けない）
             gday, gnight = gap_marks(gap_blocked, name, d, info['holiday'])
             if info['holiday'] and gday != gnight:
@@ -1259,7 +1262,7 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
 .dm .pmcol{padding:0 3px;color:#566174;font-size:11px;min-width:34px}
 .dm thead .pmcol{line-height:1.2}
 .dm td.hol{background:#fdf1f1}
-/* 先月末・来月初めの確定当直との勤務間隔のため入れない日 */
+/* 前月末・翌月初めの確定当直との勤務間隔のため入れない日 */
 .dm td.gap{background-color:#e2daf2}
 .dm .cell{display:flex;align-items:center;justify-content:center;height:100%;min-height:26px;font-weight:700;font-size:10px;padding:1px 2px;width:38px;margin:0 auto;white-space:normal;line-height:1.15;text-align:center;word-break:keep-all}
 .dm .ng{color:#c0392b;font-size:14px}
@@ -1321,7 +1324,7 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
         legend.append(f'<span><i style="background:{bg};color:{fg}">{s}</i></span>')
     legend.append(f'<span><i style="box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME}">&nbsp;&nbsp;&nbsp;</i>茶色の枠：希望日が通った当直</span>')
     legend.append('<span><i style="background:#fdf1f1">&nbsp;</i>薄い赤の列：土日祝・休日にした日</span>')
-    legend.append('<span><i style="background:#e2daf2">&nbsp;</i>薄紫：前後の月（先月末・来月初めなど）の確定当直との勤務間隔のため、入れない日</span>')
+    legend.append('<span><i style="background:#e2daf2">&nbsp;</i>薄紫：前後の月（前月末・翌月初めなど）の確定当直との勤務間隔のため、入れない日</span>')
     legend.append('<span><i style="background:linear-gradient(#e2daf2,#e2daf2) left top/100% 50% no-repeat,#fdf1f1;line-height:1">&nbsp;<br>&nbsp;</i>'
                   '上半分だけ薄紫：休日の日直だけ入れない日（下半分だけ薄紫＝宿直だけ入れない日）。日直がからむ組み合わせは「宿⇔日・日⇔日 間隔下限」で空けるため</span>')
     legend.append('<span><i style="color:#c0392b">×</i>当直NG（平日は宿直NG）</span>')
@@ -1758,7 +1761,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
             elif info['holiday']:
                 c.fill = fill('#FDF1F1')
             if cell.get('gap'):
-                c.fill = fill('#E2DAF2')   # 先月末・来月初めの確定当直との勤務間隔のため入れない日
+                c.fill = fill('#E2DAF2')   # 前月末・翌月初めの確定当直との勤務間隔のため入れない日
             elif cell.get('gap_top') or cell.get('gap_bottom'):
                 # 休日の、日直か宿直の片方だけ入れない日：入れない側（上＝日直、下＝宿直）の半分だけ薄紫にする
                 other = PM_COLOR if cell['type'] == 'pmhalf' else 'FDF1F1'
@@ -1910,7 +1913,7 @@ def duty_matrix_xlsx(days, rows, year, month, alerts=None, title=None):
     s6.value = '💬📝'; s6.border = Border()
     s8 = legend_line(8, 'NG人数の行（見出しのすぐ下）：その日にNGの先生の数（翌日PM dutyで宿直を外す先生・薄紫のマスの先生を含む）。休日は「日直NG／宿直NG」の人数')
     s8.value = 3; s8.fill = fill('#FFD2A1'); s8.font = Font(bold=True, color='7A3A00')
-    legend_line(10, '薄紫：前後の月（先月末・来月初めなど）の確定当直との勤務間隔のため、入れない日').fill = fill('#E2DAF2')
+    legend_line(10, '薄紫：前後の月（前月末・翌月初めなど）の確定当直との勤務間隔のため、入れない日').fill = fill('#E2DAF2')
     legend_line(11, '上半分だけ薄紫：休日の日直だけ入れない日（下半分だけ薄紫＝宿直だけ入れない日）。日直がからむ組み合わせは「宿⇔日・日⇔日 間隔下限」で空けるため').fill = half_fill('E2DAF2', 'FDF1F1')
     legend_line(3, '下半分だけ黄色：休日の翌日PM dutyの日。宿直は外し、日直には入れる（×の意味は休日のマスと同じ）').fill = PM_HALF_FILL
     if count_alert_text(alerts):
@@ -2078,7 +2081,7 @@ def validate_fixed_inputs(df, doctors, year, month, holidays=None):
                 errors.append(f'確定当直 {dt.month}/{dt.day} {s}：平日には日直がありません。この日に日直を設ける場合は、上のカレンダーで「休日にする」にチェックを入れてください。')
             names = list(dict.fromkeys(n.strip() for n in re.split('[、,]', val)))
             for name in names:
-                # 先月・翌月の日付は、医師条件にいない先生（先月だけ勤務した先生など）でもよい（勤務間隔の計算には使わない）
+                # 前月・翌月の日付は、医師条件にいない先生（前月だけ勤務した先生など）でもよい（勤務間隔の計算には使わない）
                 if name not in doctors and (dt.year, dt.month) == (year, month):
                     errors.append(f'確定当直 {dt.month}/{dt.day} {s}：先生の名前「{name}」が医師条件の名前と一致しません。今月の日付には、医師条件の先生を入れてください。')
             df.at[i, s] = '、'.join(names)
@@ -2238,7 +2241,7 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
     past_worked_dates = {doc: [] for doc in doctors}
     future_worked_dates = {doc: [] for doc in doctors}
 
-    # --- 確定当直（先月・今月・来月）の読み取り ---
+    # --- 確定当直（前月・今月・翌月）の読み取り ---
     fixed_specific = {doc: set() for doc in doctors}
     if fixed_df is not None:
         for _, row in fixed_df.iterrows():
@@ -3128,7 +3131,7 @@ def work_state_info(sheets=None):
 
 
 def work_state_for_carry(year, month, sheets=None):
-    """医師条件の引き継ぎに使う途中保存：先月の分があればその最新、なければいちばん新しいもの。"""
+    """医師条件の引き継ぎに使う途中保存：前月の分があればその最新、なければいちばん新しいもの。"""
     entries = [e for e in work_state_entries(sheets) if e[2].get("staff_csv")]
     if not entries:
         return None, None
@@ -3517,7 +3520,7 @@ def staff_add_remove_ui(staff_df, year, month, is_template=False):
     if is_template:
         st.markdown(staff_roster_html(names, "入力例の型1〜型9を表示中"), unsafe_allow_html=True)
         st.warning("まだ先生の名簿が読み込まれていません。"
-                   + ("上の「📋 先月の医師条件を引き継ぐ」か、" if remote_is_configured() else "")
+                   + ("上の「📋 前月の医師条件を引き継ぐ」か、" if remote_is_configured() else "")
                    + "下のファイルのアップロードで読み込んでください。「➕ 先生を追加する」で1人ずつ足すこともできます。")
     else:
         st.markdown(staff_roster_html(names, st.session_state.get("staff_source_label", ""),
@@ -3597,33 +3600,33 @@ CSV_UPLOAD_CSS = """<style>
 [data-testid="stColumn"]:has(.imp-or) [data-testid="stMarkdownContainer"] > *{margin:0 !important;padding:0 !important}
 /* 中くらいの画面幅でも、方法1・または・方法2 を折り返さずに横1列に並べる（Streamlitは幅が足りないと列を次の行に送るため） */
 @media (min-width:641px){
-  [data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry){flex-wrap:nowrap !important}
-  [data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) > [data-testid="stColumn"]{min-width:0 !important;flex:1 1 0 !important}
-  [data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) > [data-testid="stColumn"]:has(.imp-or){flex:0 0 4.6rem !important;width:4.6rem !important}
+  [data-testid="stHorizontalBlock"]:has(:is(.st-key-csvcard_carry,.st-key-csvcard_fixedhand)){flex-wrap:nowrap !important}
+  [data-testid="stHorizontalBlock"]:has(:is(.st-key-csvcard_carry,.st-key-csvcard_fixedhand)) > [data-testid="stColumn"]{min-width:0 !important;flex:1 1 0 !important}
+  [data-testid="stHorizontalBlock"]:has(:is(.st-key-csvcard_carry,.st-key-csvcard_fixedhand)) > [data-testid="stColumn"]:has(.imp-or){flex:0 0 4.6rem !important;width:4.6rem !important}
 }
 .imp-note{background:#fff7e0;border:1px solid #f0c36d;border-radius:8px;padding:6px 10px;font-size:.85rem;color:#7a5a00;margin:10px 0 2px}
 @media (max-width:640px){.imp-or{margin:0}}
 /* 方法1（引き継ぎ）の枠は青 */
-.st-key-csvcard_carry{border-color:#2f6db5 !important;background:#eef5fd !important}
-.st-key-csvcard_carry [data-testid="stPopover"] button, .st-key-csvcard_carry [data-testid="stExpander"] summary{
+:is(.st-key-csvcard_carry,.st-key-csvcard_fixedhand){border-color:#2f6db5 !important;background:#eef5fd !important}
+:is(.st-key-csvcard_carry,.st-key-csvcard_fixedhand) [data-testid="stPopover"] button, :is(.st-key-csvcard_carry,.st-key-csvcard_fixedhand) [data-testid="stExpander"] summary{
   background:#2f6db5 !important;color:#fff !important;border:0 !important;min-height:2.8rem;font-weight:800}
-.st-key-csvcard_carry [data-testid="stPopover"] button p{font-size:1.05rem;font-weight:800;color:#fff}
-.st-key-csvcard_carry [data-testid="stPopover"] button svg{color:#fff;fill:#fff}
+:is(.st-key-csvcard_carry,.st-key-csvcard_fixedhand) [data-testid="stPopover"] button p{font-size:1.05rem;font-weight:800;color:#fff}
+:is(.st-key-csvcard_carry,.st-key-csvcard_fixedhand) [data-testid="stPopover"] button svg{color:#fff;fill:#fff}
 /* 方法1と方法2の枠の上端と高さをそろえる（横に並んだ列を同じ高さにして、枠を列いっぱいに伸ばす） */
-[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry){align-items:stretch !important}
-[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) > [data-testid="stColumn"] > [data-testid="stVerticalBlock"],
-[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) > [data-testid="column"] > div > [data-testid="stVerticalBlock"]{height:100%}
-[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) [data-testid="stLayoutWrapper"]:has(> [class*="st-key-csvcard_"]){
+[data-testid="stHorizontalBlock"]:has(:is(.st-key-csvcard_carry,.st-key-csvcard_fixedhand)){align-items:stretch !important}
+[data-testid="stHorizontalBlock"]:has(:is(.st-key-csvcard_carry,.st-key-csvcard_fixedhand)) > [data-testid="stColumn"] > [data-testid="stVerticalBlock"],
+[data-testid="stHorizontalBlock"]:has(:is(.st-key-csvcard_carry,.st-key-csvcard_fixedhand)) > [data-testid="column"] > div > [data-testid="stVerticalBlock"]{height:100%}
+[data-testid="stHorizontalBlock"]:has(:is(.st-key-csvcard_carry,.st-key-csvcard_fixedhand)) [data-testid="stLayoutWrapper"]:has(> [class*="st-key-csvcard_"]){
   flex:1 1 auto;display:flex;flex-direction:column}
-[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) [class*="st-key-csvcard_"]{flex:1 1 auto;box-sizing:border-box}
-@media (max-width:640px){[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) [class*="st-key-csvcard_"]{flex:0 0 auto}}
+[data-testid="stHorizontalBlock"]:has(:is(.st-key-csvcard_carry,.st-key-csvcard_fixedhand)) [class*="st-key-csvcard_"]{flex:1 1 auto;box-sizing:border-box}
+@media (max-width:640px){[data-testid="stHorizontalBlock"]:has(:is(.st-key-csvcard_carry,.st-key-csvcard_fixedhand)) [class*="st-key-csvcard_"]{flex:0 0 auto}}
 /* 「または」は2つの枠の上下の真ん中に置く */
-[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) > [data-testid="stColumn"]:has(.imp-or) > [data-testid="stVerticalBlock"],
-[data-testid="stHorizontalBlock"]:has(.st-key-csvcard_carry) > [data-testid="column"]:has(.imp-or) > div > [data-testid="stVerticalBlock"]{justify-content:center}
+[data-testid="stHorizontalBlock"]:has(:is(.st-key-csvcard_carry,.st-key-csvcard_fixedhand)) > [data-testid="stColumn"]:has(.imp-or) > [data-testid="stVerticalBlock"],
+[data-testid="stHorizontalBlock"]:has(:is(.st-key-csvcard_carry,.st-key-csvcard_fixedhand)) > [data-testid="column"]:has(.imp-or) > div > [data-testid="stVerticalBlock"]{justify-content:center}
 /* 見出しと説明は上でそろえ、操作する場所（方法1の白い枠・方法2のドロップ枠）は枠の下でそろえる */
-.st-key-carry_act{background:#fff;border:2.5px solid #b9cfee;border-radius:12px;min-height:7.5rem;padding:1rem;box-sizing:border-box;
+:is(.st-key-carry_act,.st-key-fixedhand_act){background:#fff;border:2.5px solid #b9cfee;border-radius:12px;min-height:7.5rem;padding:1rem;box-sizing:border-box;
   justify-content:center;align-items:center;text-align:center;gap:.45rem}
-[class*="st-key-csvcard_"] [data-testid="stLayoutWrapper"]:has(> .st-key-carry_act), [class*="st-key-csvcard_"] > .st-key-carry_act{margin-top:auto}
+[class*="st-key-csvcard_"] [data-testid="stLayoutWrapper"]:has(> :is(.st-key-carry_act,.st-key-fixedhand_act)), [class*="st-key-csvcard_"] > :is(.st-key-carry_act,.st-key-fixedhand_act){margin-top:auto}
 .st-key-csvcard_staff [data-testid="stElementContainer"]:has([data-testid="stFileUploader"]),
 .st-key-csvcard_staff .element-container:has([data-testid="stFileUploader"]){margin-top:auto}
 /* 「初めての場合：ひな形をダウンロード」は2つの枠の下に1行で出す */
@@ -3655,7 +3658,11 @@ CSV_UPLOAD_CSS = """<style>
 .csvng-ok{margin-top:10px;background:#e8f5ec;border:1px solid #9fd0ad;border-radius:10px;padding:9px 14px;line-height:1.8;color:#1f4d33}
 .csvng-ok a{color:#1d4e89 !important;text-decoration:underline;margin-left:6px;font-weight:700}
 .st-key-imp_tmpl [data-testid="stDownloadButton"] button{border:1.5px solid #2e8a5b !important;color:#1f6b45 !important;background:#fff !important;font-weight:700}
-</style>"""
+</style>/* 確定当直：方法1（表に直接入力）の「下の表へ」と、表の見出し・青い枠 */
+.fx-go{font-weight:800;color:#1d4e89;font-size:1rem}.fx-go small{display:block;font-weight:400;color:#566174;font-size:.8rem;margin-top:2px}
+.fx-table-h{font-weight:800;color:#1d4e89;font-size:1.05rem;margin:10px 0 0}.fx-table-h span{font-weight:400;color:#566174;font-size:.82rem;margin-left:10px}
+.st-key-fixed_table_box [data-testid="stDataFrame"], .st-key-fixed_table_box [data-testid="stDataFrameResizable"]{border:2px solid #2f6db5;border-radius:8px}
+"""
 
 
 def csv_upload_card(card_key, tag, title, desc, uploader_key, template_bytes, template_name, template_label, template_note="",
@@ -3695,7 +3702,7 @@ def _csv_ng_choice_changed():
 
 def csv_ng_wish_choice(df, uploaded_file, box, year, month):
     """①方法2：CSVにNG日・希望日が入っているときは、今月の分として使うか空にするかを選んでもらう。
-    CSVには日にちしか入っていないため、先月のCSVだと先月のNG日が今月の同じ日に入ってしまうため。読み込んだ結果も表示する。"""
+    CSVには日にちしか入っていないため、前月のCSVだと前月のNG日が今月の同じ日に入ってしまうため。読み込んだ結果も表示する。"""
     ng_vals, wish_vals = _csv_cells(df, NG_COLUMN), _csv_cells(df, REQUEST_COLUMN)
     ng_days = sum(len([t for t in str(v).replace("、", ",").split(",") if t.strip()]) for v in ng_vals)
     n_doc = len(df)
@@ -3711,11 +3718,11 @@ def csv_ng_wish_choice(df, uploaded_file, box, year, month):
             parts.append(f"<b>希望日（{len(wish_vals)}名分）</b>")
         with st.container(key="csv_ng_ask"):
             st.markdown(f"<div class='csvng-h'><span class='badge'>確認</span><span>このファイルには {'と'.join(parts)}が入っています。どうしますか？</span></div>"
-                        "<div class='csvng-sub'>ファイルには日にちしか入っていないため、先月のファイルだと先月のNG日・希望日が今月の同じ日に入ってしまいます。</div>",
+                        "<div class='csvng-sub'>ファイルには日にちしか入っていないため、前月のファイルだと前月のNG日・希望日が今月の同じ日に入ってしまいます。</div>",
                         unsafe_allow_html=True)
             opts = ["use", "clear"]
             labels = {"use": f"**今月（{year}年{month}月）のNG日・希望日として使う**　―　このファイルを今月用に作った・今月ダウンロードしたとき",
-                      "clear": "**空にする（NG日・希望日は読み込まない）**　―　先月などのファイルを使うとき。NG日は②で入れ直します"}
+                      "clear": "**空にする（NG日・希望日は読み込まない）**　―　前月などのファイルを使うとき。NG日は②で入れ直します"}
             choice = st.radio("ファイルのNG日・希望日", opts, index=None, format_func=lambda o: labels[o],
                               key=f"csvng_choice_{uploaded_file.file_id}", label_visibility="collapsed",
                               on_change=_csv_ng_choice_changed)
@@ -5005,7 +5012,7 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
     past_worked_dates = {doc: [] for doc in doctors}
     future_worked_dates = {doc: [] for doc in doctors}
 
-    # --- 確定当直（先月・今月・来月）の読み取り ---
+    # --- 確定当直（前月・今月・翌月）の読み取り ---
     fixed_specific = {doc: set() for doc in doctors}
     if fixed_df is not None:
         for _, row in fixed_df.iterrows():
@@ -5433,7 +5440,7 @@ def period_validate_fixed_inputs(df, doctors, P, holidays=None):
                 errors.append(f'確定当直 {dt.month}/{dt.day} {s}：平日には日直がありません。この日に日直を設ける場合は、上のカレンダーで「休日にする」にチェックを入れてください。')
             names = list(dict.fromkeys(n.strip() for n in re.split('[、,]', val)))
             for name in names:
-                # 期間の前後の日付は、医師条件にいない先生（先月だけ勤務した先生など）でもよい（勤務間隔の計算には使わない）
+                # 期間の前後の日付は、医師条件にいない先生（前月だけ勤務した先生など）でもよい（勤務間隔の計算には使わない）
                 if name not in doctors and P.index(dt) is not None:
                     errors.append(f'確定当直 {dt.month}/{dt.day} {s}：先生の名前「{name}」が医師条件の名前と一致しません。期間中の日付には、医師条件の先生を入れてください。')
             df.at[i, s] = '、'.join(names)
@@ -5565,7 +5572,7 @@ def period_build_duty_matrix(df_result, staff_df, P, custom_holidays, next_month
                 continue
             kind = ng.get(d)
             pm = period_pm_restricted(P, d, pm_days, custom_holidays, next_month_special_holiday)
-            # 先月末・来月初めの確定当直との勤務間隔のため入れない日：マスを薄紫にする（×の表示はそのまま）
+            # 前月末・翌月初めの確定当直との勤務間隔のため入れない日：マスを薄紫にする（×の表示はそのまま）
             # （今月の確定当直の前後は、色を付けない）
             gday, gnight = gap_marks(gap_blocked, name, d, info['holiday'])
             if info['holiday'] and gday != gnight:
@@ -6138,7 +6145,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 - **いちばん下の紺色の帯**：「🚀 当直案を作成」ボタンと、「医師条件」「NG日」「結果」へ移動するボタン、作成結果（未決定の枠の数）があります。
 - **真ん中**：上から順に、紺色の見出しの帯で4つの項目に分かれています。上から順に進めれば、1か月分の作業が終わります。
     1. 📅 年月・休日・必要人数の設定
-    2. 📅 先月今月来月の確定当直（任意）
+    2. 📅 前月・今月・翌月の確定当直（任意）
     3. 👩‍⚕️ 先生ごとの条件（① 先生の名簿と医師条件 → ② NG日 → ③ 医師条件の調整 → ④ 当直の枠は足りそう？）
     4. 🎯 当直案の作成・確認
 
@@ -6148,7 +6155,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 
 **管理用パスワード**
 
-途中保存・続きからの読み込み・先月の医師条件の引き継ぎ・専用URLの管理（受付・取り込みなど）には、管理用パスワードが必要です。
+途中保存・続きからの読み込み・前月の医師条件の引き継ぎ・専用URLの管理（受付・取り込みなど）には、管理用パスワードが必要です。
 一度入れると、画面を閉じるまでほかの場所でも入力不要です。
 
 **大事なこと**
@@ -6166,9 +6173,9 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
     - **休日にする**：病院独自の休みなど、平日でも土日祝と同じ扱いにする日。日直の枠ができます。
     - **別途決定**：年末年始など、別の方法で当番を決める日。このアプリではその日の当直を決めず、先生もNGを入力できなくなります。
 3. **人数を増やす枠（任意）**：1つの枠を2名以上にする日があれば、行を足して設定します。
-4. **確定当直（任意）**：「📅 先月今月来月の確定当直」の欄に、すでに決まっている当直や、先月末・来月初めの当直を入れます。勤務間隔の計算に使われます。
-5. **先生の名簿と医師条件**（「先生ごとの条件」の①）：以前の医師条件を、方法1か方法2のどちらかで取り込みます。新しい月なら、方法1の「📋 先月の医師条件を引き継ぐ」を押すと、先月の医師条件から始められます。先月分の途中保存にある医師条件（回数・間隔・翌日PM duty・備考など）が入り、NG日・希望日・先生のコメントは空になります。
-   手元のファイル（Excel・以前のCSV）を使う場合や初めての場合は、方法2の緑の点線の枠にファイルをドラッグ＆ドロップします（ひな形は、2つの枠の下の「📥 ひな形（Excel）をダウンロード」から入手できます）。ファイルにNG日・希望日が入っているときは、「今月の分として使う」か「空にする」かを選びます（先月のファイルなら「空にする」を選びます）。
+4. **確定当直（任意）**：「📅 前月・今月・翌月の確定当直」の欄に、すでに決まっている当直や、前月末・翌月初めの当直を入れます。勤務間隔の計算に使われます。
+5. **先生の名簿と医師条件**（「先生ごとの条件」の①）：以前の医師条件を、方法1か方法2のどちらかで取り込みます。新しい月なら、方法1の「📋 前月の医師条件を引き継ぐ」を押すと、前月の医師条件から始められます。前月分の途中保存にある医師条件（回数・間隔・翌日PM duty・備考など）が入り、NG日・希望日・先生のコメントは空になります。
+   手元のファイル（Excel・以前のCSV）を使う場合や初めての場合は、方法2の緑の点線の枠にファイルをドラッグ＆ドロップします（ひな形は、2つの枠の下の「📥 ひな形（Excel）をダウンロード」から入手できます）。ファイルにNG日・希望日が入っているときは、「今月の分として使う」か「空にする」かを選びます（前月のファイルなら「空にする」を選びます）。
    読み込むと、①に「今の名簿」と「読み込んだ医師条件」（見るだけの表）が出るので、正しく読み込めたかをここで確認します。
    新しく来た先生は「➕ 先生を追加する」で、名前・入れる位置（○○先生の下）・条件のもと（ほかの先生と同じ条件、または型）を選んで追加します。いなくなった先生は「➖ 先生を外す」で外します。
 6. **NG日**（②）：先生を選んでカレンダーでNG日を入れ、「NG日を反映する」を押します（紙やメールで集めたNG日を入力します）。先生方に専用URLから入力してもらう場合は、ここで受付・取り込みを行います（「NG日の集め方」のタブを参照）。
@@ -6177,7 +6184,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 9. **当直案を作る**：下の帯の「🚀 当直案を作成」を押します（計算に最大1分少々かかります）。押すたびに違うパターンの案ができるので、気に入るまで押し直して構いません。
    未決定の枠が出たら、条件を直して作り直します。下の帯の移動ボタンで、条件と結果を行き来できます。
 10. **確認してダウンロード**：「医師別の当直一覧」をExcelでダウンロードします（「結果の見方・Excel」のタブを参照）。
-11. **途中保存**：最後に上の帯の「💾 作業を途中保存する」を押しておくと、翌月は「📋 先月の医師条件を引き継ぐ」で、この医師条件から始められます。
+11. **途中保存**：最後に上の帯の「💾 作業を途中保存する」を押しておくと、翌月は「📋 前月の医師条件を引き継ぐ」で、この医師条件から始められます。
 
 途中保存には、年月・休日・別途決定の日・増員設定・確定当直・医師条件（NG日を含む）・取り込んだ先生のコメント・不足時の優先順位・アラートの基準が入ります。
 途中保存は、保存した回ごとに新しいものから20回分まで残ります（それより古いものは自動で消えます）。「📂 前回の作業の続きから始める」で、どの回から再開するかを選べます。
@@ -6225,7 +6232,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
 - 枠名のマス：決まった当直（色は枠の種類）
 - **茶色の太い枠**：希望日が、希望どおりに通った当直
 - **薄い赤の列**：土日祝と「休日にする」にした日
-- **薄紫のマス**：先月末・来月初めの確定当直から「宿⇔宿 間隔下限」（日直がからむ組み合わせは「宿⇔日・日⇔日 間隔下限」）以内のため、入れない日（今月の確定当直の前後には色を付けません）。休日のマスで上半分だけ薄紫＝日直だけ入れない日、下半分だけ薄紫＝宿直だけ入れない日です
+- **薄紫のマス**：前月末・翌月初めの確定当直から「宿⇔宿 間隔下限」（日直がからむ組み合わせは「宿⇔日・日⇔日 間隔下限」）以内のため、入れない日（今月の確定当直の前後には色を付けません）。休日のマスで上半分だけ薄紫＝日直だけ入れない日、下半分だけ薄紫＝宿直だけ入れない日です
 - **×**：当直NGの日（平日は宿直NG）
 - **休日のマス**：上半分＝日直、下半分＝宿直です。上に×＝日直NG、下に×＝宿直NG、上下とも×＝全NG
 - **黄色の斜線**：翌日PM dutyのため宿直を外す日。×があれば、NGも付いている日です
@@ -6641,15 +6648,16 @@ holiday_total_placeholder.metric("🏥 埋める必要がある枠", f"{total_sl
 # ==========================================
 # 確定当直：いつも開いた状態で表示する（任意の項目）
 with st.container(key="fixed_section"):
-    section_banner("📅", "先月今月来月の確定当直", "すでに決まっている当直や、先月末・来月初めの当直を入れます", "任意", anchor="sec-fixed")
-    st.info("先月・今月・来月の、担当者が決まっている当直を入力してください。先月末の勤務は、月初の勤務間隔の確認に使います。入力がなければ、この項目は飛ばせます。")
+    section_banner("📅", "前月・今月・翌月の確定当直", "すでに決まっている当直や、前月末・翌月初めの当直を入れます", "任意", anchor="sec-fixed")
+    st.info("前月・今月・翌月の、担当者が決まっている当直を入れます。入れ方は2つあります。**どちらか片方で大丈夫です**（両方使うこともできます）。"
+            "前月末の勤務は、月初の勤務間隔の確認に使います。入力がなければ、この項目は飛ばせます。")
     with st.expander("入力例：確定当直の書き方と扱い", expanded=False):
         st.markdown("""
 - 掲示用Excel（手直ししたものでも可）・CSVのアップロードと、下の表への直接入力のどれでも入力できます。掲示用ExcelのICU病棟の列は読みません。
-- 表には、先月末7日分・今月・翌月はじめ7日分の日付が最初から並んでいます。「区分」の列に ◀先月／今月／翌月▶ を表示します。
-- それ以外の日付（先月1か月分など）は、表の下の「＋」で行を足して `月/日`（例：`11/1`）または `年/月/日` の形で入力するか、ファイル（Excel・CSV）で読み込みます。ファイルの行は、表の同じ日付のところに入ります。
+- 表には、前月末7日分・今月・翌月はじめ7日分の日付が最初から並んでいます。「区分」の列に ◀前月／今月／翌月▶ を表示します。
+- それ以外の日付（前月1か月分など）は、表の下の「＋」で行を足して `月/日`（例：`11/1`）または `年/月/日` の形で入力するか、ファイル（Excel・CSV）で読み込みます。ファイルの行は、表の同じ日付のところに入ります。
 - 担当する先生は、枠の欄をクリックすると出る一覧（医師条件の名前）から選びます。
-- 先月だけ勤務した先生など、医師条件にいない先生は、表の上の「先月・翌月だけ勤務した先生を、ドロップダウンに入れる（記録用）」に名前を入れて「ドロップダウンに入れる」を押すと選べるようになります（先月・翌月の日付だけに使えます。当直案には入りません）。
+- 前月だけ勤務した先生など、医師条件にいない先生は、表の下の「選びたい先生が、名前の一覧に出てこないとき」を開いて名前を入れ、「表で選べるようにする」を押すと選べるようになります（前月・翌月の日付だけに使えます。当直案には入りません）。
 - 同じ日・同じ枠を2人以上で担当する場合は、同じ日付の行を追加して、もう1人を選びます。ファイルで `佐藤、鈴木` のように「、」で区切って入れた場合は、読み込むと自動で2行に分かれます。
 - 未確定の枠は空欄で構いません。
 - 今月の平日に日直を入力する場合は、先に上のカレンダーでその日を「休日にする」にしてください。
@@ -6664,16 +6672,26 @@ with st.container(key="fixed_section"):
     fixed_template_df = pd.DataFrame(columns=fixed_columns)
     fixed_csv_template = table_xlsx(fixed_template_df, "確定当直", text_cols=fixed_columns, blank_rows=200)   # Excelのひな形（日付が勝手に変わらないよう「文字」の形）
 
-    fixed_file = csv_upload_card(
-        "fixed", "Excel・CSV", "確定当直のファイルをアップロード（任意）",
-        "先月の掲示用Excel（手直ししたものでも大丈夫）を、そのまま読み込めます。CSVも読み込めます。下の表に直接入力することもできます。",
-        f"fixed_csv_{st.session_state.get('uploader_gen', 0)}",
-        fixed_csv_template, "確定当直_ひな形.xlsx", "📥 確定当直のひな形（Excel）をダウンロード",
-        file_types=("csv", "xlsx"), drop_text="📄⬇　ここに掲示用ExcelかCSVファイルをドラッグ＆ドロップ")
+    # 入れ方は2つ：方法1（下の表に直接入力）・方法2（ファイルから読み込む）。医師条件の取り込みと同じ形にする
+    fx_a, fx_or, fx_b = st.columns([10, 1.4, 10])
+    fx_or.markdown("<div class='imp-or'><span>または</span></div>", unsafe_allow_html=True)
+    with fx_a, st.container(key="csvcard_fixedhand"):
+        st.markdown("<div class='csv-card-head blue'><span class='lab'>方法1</span>✏️ 下の表に直接入力する</div>", unsafe_allow_html=True)
+        st.caption(f"前後{FIXED_PAD_DAYS}日分の日付は最初から並んでいます。先生の欄をクリックして、名前を選ぶだけです。")
+        with st.container(key="fixedhand_act"):
+            st.markdown("<div class='fx-go'>⬇ 下の「✏️ 確定当直の表」へ<small>表の先生の欄をクリックすると、名前の一覧が出ます</small></div>",
+                        unsafe_allow_html=True)
+    with fx_b:
+        fixed_file = csv_upload_card(
+            "fixed", "方法2", "📂 ファイルから読み込む",
+            "前月の掲示用Excel（手直ししたものでも可）か、CSVを読み込みます。読み込んだ内容は下の表に入ります。",
+            f"fixed_csv_{st.session_state.get('uploader_gen', 0)}",
+            fixed_csv_template, "確定当直_ひな形.xlsx", "📥 確定当直のひな形（Excel）をダウンロード",
+            file_types=("csv", "xlsx"), drop_text="📄⬇　ここに掲示用ExcelかCSVファイルをドラッグ＆ドロップ")
 
     edited_fixed_df = fixed_duty_table(fixed_file, restored_state, fixed_columns, datetime.date(year, month, 1),
                                        datetime.date(year, month, calendar.monthrange(year, month)[1]), year, month,
-                                       ("◀先月", "今月", "翌月▶"), f"{month}/1")
+                                       ("◀前月", "今月", "翌月▶"), f"{month}/1")
 
 # ==========================================
 # 先生ごとの条件：① 名簿と医師条件（見るだけ） → ② NG日 → ③ 医師条件の調整 → ④ 足りそう？ の順に、1つの欄にまとめて表示する。
@@ -6694,23 +6712,23 @@ with staff_box_roster:
     imp_or.markdown("<div class='imp-or'><span>または</span></div>", unsafe_allow_html=True)
     imp_tmpl = st.container(key="imp_tmpl")   # 「初めての場合：ひな形をダウンロード」（中身はひな形を作ったあとで入れる）
     imp_ask = st.container()   # CSVにNG日・希望日が入っているときの「使う／空にする」と、読み込んだ結果（中身はCSVを読んだあとで入れる）
-    # --- 方法1：途中保存から先月の医師条件を引き継ぐ（管理用パスワードが必要） ---
+    # --- 方法1：途中保存から前月の医師条件を引き継ぐ（管理用パスワードが必要） ---
     with imp_a, st.container(key="csvcard_carry"):
-        st.markdown("<div class='csv-card-head blue'><span class='lab'>方法1</span>途中保存から先月の医師条件を引き継ぐ</div>", unsafe_allow_html=True)
+        st.markdown("<div class='csv-card-head blue'><span class='lab'>方法1</span>途中保存から前月の医師条件を引き継ぐ</div>", unsafe_allow_html=True)
         if not remote_is_configured():
             st.caption("保存用のGoogleスプレッドシートの設定をすると使えます。今はファイルのアップロード（方法2）で読み込んでください。")
         else:
             _co_msg = st.session_state.pop("carry_over_message", None)
-            # ボタンの名前：ログイン中は、途中保存してある月を出す（ふつうは先月）
-            _co_name = "先月"
+            # ボタンの名前：ログイン中は、途中保存してある月を出す（ふつうは前月）
+            _co_name = "前月"
             if st.session_state.get("remote_admin_ok"):
                 _co_at, _co_data = work_state_for_carry(year, month)
                 if _co_data and _co_data.get("staff_csv"):
                     _co_ym = (int(_co_data.get("year", 0)), int(_co_data.get("month", 0)))
                     _co_prev = (year, month - 1) if month > 1 else (year - 1, 12)
-                    _co_name = f"先月（{_co_ym[1]}月）" if _co_ym == _co_prev else f"{_co_ym[0]}年{_co_ym[1]}月"
+                    _co_name = f"前月（{_co_ym[1]}月）" if _co_ym == _co_prev else f"{_co_ym[0]}年{_co_ym[1]}月"
             _co_label = f"📋 {_co_name}の医師条件を引き継ぐ" + "\u200b" * st.session_state.get("carry_over_gen", 0)
-            st.caption("「💾 作業を途中保存する」で保存した医師条件（回数・勤務間隔・翌日PM duty・備考など）を読み込みます。先月分の保存があればその最新、なければいちばん新しい保存を使います。NG日・希望日・先生のコメントは空になります。")
+            st.caption("「💾 作業を途中保存する」で保存した医師条件（回数・勤務間隔・翌日PM duty・備考など）を読み込みます。前月分の保存があればその最新、なければいちばん新しい保存を使います。NG日・希望日・先生のコメントは空になります。")
             _co_act = st.container(key="carry_act")   # ボタンを入れる白い枠（方法2のドロップ枠と下でそろえる）
             with _co_act:
                 _co_box = st.popover(_co_label) if hasattr(st, "popover") else st.expander(_co_label, expanded=False)
@@ -6771,7 +6789,7 @@ with staff_box_cond:
 - **通常は「1」**を使用します。1〜99は、数字が大きいほど希望を優先しますが、NG日・回数上限・勤務間隔などの範囲内で割り当てます。
 - **100以上は、その先生の希望日すべてを確定当直と同じ扱いにする設定**です。「できれば入りたい」という用途には使わないでください。
 - 確定にした日は、NG日や翌日PM duty（宿直を外す曜日）よりも優先されます。回数の上限を超える場合も、確定した分はそのまま入ります。ほかの勤務は、確定の日から「宿⇔宿 間隔下限」（日直がからむ組み合わせは「宿⇔日・日⇔日 間隔下限」）以上あけて入れます。確定当直同士の間隔が近すぎる場合は、注意を表示します。
-- 一部の勤務だけを確定させたい場合は、上の「📅 先月今月来月の確定当直」へ入力し、希望優先度は通常の値にしてください。
+- 一部の勤務だけを確定させたい場合は、上の「📅 前月・今月・翌月の確定当直」へ入力し、希望優先度は通常の値にしてください。
 - 指定の誤りや条件の組み合わせによっては作成できない場合があります。作成後に、確定にした日が当直案に入っているか確認してください。
 
 **今月の同じ日・同じ枠を指定した場合、確定当直への入力と「希望優先度100以上」での指定は、どちらも固定され、計算上の扱いは基本的に同じです。両方に入力する必要はありません。**
@@ -7417,7 +7435,7 @@ if len(staff_df) > 0:
         st.subheader("🗓️ 医師別の当直一覧")
         st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。休日のマスは上半分が日直、下半分が宿直です。"
                    "希望日が通った当直は茶色の太い枠で囲み、回数が多い先生は右端の回数を赤い枠で示します。マスにカーソルを合わせると、その先生の行とその日の列がオレンジの線で囲まれます。")
-        # 先月末・来月初めの確定当直から「宿⇔宿 間隔下限」（日直がからむときは「宿⇔日・日⇔日 間隔下限」）以内で、入れない日
+        # 前月末・翌月初めの確定当直から「宿⇔宿 間隔下限」（日直がからむときは「宿⇔日・日⇔日 間隔下限」）以内で、入れない日
         # （今月の確定当直の前後は含めない）。日ごとに (日直に入れない, 宿直に入れない)
         gap_blocked = external_gap_blocked(staff_df, past_worked_dates, future_worked_dates, num_days,
                                            lambda d: datetime.date(year, month, d))
