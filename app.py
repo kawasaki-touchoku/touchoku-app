@@ -6714,9 +6714,13 @@ def staff_view_page():
     staff_table(df, editable=False, show_ng=True, max_height=900, ng_width=min(900, 8 * _ng_len + 30))
     # グループの設定（見るだけ）：グループごとに入れる枠（◯△×）とメモ
     rules = normalize_group_rules(data.get("group_rules")) if data.get("group_rules") is not None else {}
+    st.markdown("<div style='font-weight:800;color:#24405f;font-size:1.02rem;margin-top:14px'>👥 グループの設定（見るだけ）</div>",
+                unsafe_allow_html=True)
+    if data.get("group_rules") is None:
+        st.info("この保存には、グループの設定が入っていません（グループの機能ができる前の保存です）。")
+    elif not rules:
+        st.info("この保存では、グループは設定されていません。")
     if rules:
-        st.markdown("<div style='font-weight:800;color:#24405f;font-size:1.02rem;margin-top:14px'>👥 グループの設定（見るだけ）</div>",
-                    unsafe_allow_html=True)
         slots = doc_group_slots()
         gdf = pd.DataFrame([[g] + [r[s] for s in slots] + [r.get(DOC_GROUP_MEMO, "")] for g, r in rules.items()],
                            columns=["グループ名"] + slots + [DOC_GROUP_MEMO])
@@ -6728,6 +6732,7 @@ def staff_view_page():
     # 年間の当直回数（見るだけ）：途中保存に入っている回数（先生ごと・月ごとの回数と、集計だけのファイルの回数）を、その保存の集計の区切りで合計する
     annual = data.get("annual") or {}
     a_pieces, a_sums = list(annual.get("pieces") or []), list(annual.get("summaries") or [])
+    shown_annual = False
     if a_pieces or a_sums:
         y, m = int(data.get("year", 0)), int(data.get("month", 0))
         months = annual_fy_months(y, m, 1 if int(annual.get("fy", 4) or 4) == 1 else 4)
@@ -6743,6 +6748,11 @@ def staff_view_page():
             st.markdown(annual_table_html(rows), unsafe_allow_html=True)
             st.caption(f"在籍月数：その先生の名前がのっている月の数です（日数の割合で数えます）。平均（1か月あたり{avg:.1f}回）とくらべます。"
                        "「―」は分からない回数です。途中保存したときの集計なので、作成中の当直案の分は入っていません。")
+            shown_annual = True
+    if not shown_annual:
+        st.markdown("<div style='font-weight:800;color:#24405f;font-size:1.02rem;margin-top:14px'>📊 年間の当直回数（見るだけ）</div>",
+                    unsafe_allow_html=True)
+        st.info("この保存には、年間の当直回数の集計が入っていません（管理者がアプリの「📊 年間の当直回数」で掲示用Excelなどを読み込んでから途中保存すると、ここに出ます）。")
 
 
 # ==========================================
