@@ -1103,8 +1103,10 @@ with st.container(key="fixed_section"):
     with st.expander("入力例：確定当直の書き方と扱い", expanded=False):
         st.markdown("""
 - CSVのアップロードと、下の表への直接入力のどちらでも入力できます。
-- 日付は `12/30` や `1/2` のように月から入力します。期間の前後の日付も入れられます。
+- 表には、期間の前7日分・期間中・期間の後7日分の日付が最初から並んでいます。「区分」の列に ◀期間前／期間中／期間後▶ を表示します。
+- それ以外の日付（先月1か月分など）は、表の下の「＋」で行を足して `12/30` や `1/2` のように月から入力するか、CSVで読み込みます。CSVの行は、表の同じ日付のところに入ります。
 - 担当する先生は、枠の欄をクリックすると出る一覧（医師条件の名前）から選びます。
+- 先月だけ勤務した先生など、医師条件にいない先生は、表の上の「一覧にない先生を足す」に名前を入れて「➕ 一覧に足す」を押すと選べるようになります（期間の前後の日付だけに使えます）。
 - 同じ日・同じ枠を2人以上で担当する場合は、同じ日付の行を追加して、もう1人を選びます。CSVで `佐藤、鈴木` のように「、」で区切って入れた場合は、読み込むと自動で2行に分かれます。
 - 未確定の枠は空欄で構いません。
 - 期間中の平日に日直を入力する場合は、先に上のカレンダーでその日を「休日にする」にしてください。
@@ -1125,53 +1127,8 @@ with st.container(key="fixed_section"):
         f"fixed_csv_{st.session_state.get('uploader_gen', 0)}",
         fixed_csv_template, "確定当直_ひな形.csv", "📥 確定当直のひな形（CSV）をダウンロード")
 
-    # 表の中身は画面の裏（session_state）に持っておき、CSVを読み込んだときや途中保存から読み込んだときだけ置き換える
-    if fixed_file is not None:
-        _fixed_src = ("file", fixed_file.name, fixed_file.size)
-    elif restored_state and restored_state.get("fixed_csv"):
-        _fixed_src = ("restored", hashlib.sha256(restored_state["fixed_csv"].encode("utf-8")).hexdigest())
-    else:
-        _fixed_src = ("empty",)
-    if st.session_state.get("fixed_src") != _fixed_src or "fixed_rows" not in st.session_state:
-        if _fixed_src[0] == "file":
-            try:
-                base_fixed_df = parse_fixed_csv(fixed_file.getvalue())
-            except Exception as e:
-                st.error(f"確定当直ファイルの読み込みに失敗しました。詳細: {e}")
-                st.stop()
-            if "日付" not in base_fixed_df.columns:
-                st.error("確定当直CSVに「日付」の列がありません。ひな形の列名を確認してください。")
-                st.stop()
-        elif _fixed_src[0] == "restored":
-            base_fixed_df = parse_fixed_csv(restored_state["fixed_csv"].encode("utf-8"))
-        else:
-            base_fixed_df = pd.DataFrame(columns=fixed_columns)
-        st.session_state["fixed_rows"] = fixed_rows_for_editor(base_fixed_df)
-        st.session_state["fixed_src"] = _fixed_src
-        st.session_state["fixed_editor_gen"] = st.session_state.get("fixed_editor_gen", 0) + 1
-    base_fixed_df = st.session_state["fixed_rows"]
-
-    # 担当医師は、医師条件の名前から選ぶ（日本語を打たなくてよいので、入力の切り替えで文字が崩れない）
-    _fixed_names = list(dict.fromkeys(
-        list(st.session_state.get("fixed_name_options", []))
-        + [v for s_ in FIXED_SLOT_COLUMNS for v in base_fixed_df[s_].tolist() if v]))
-    st.write(f"日付（例：{month}/1）を入力し、担当する先生を枠の欄の一覧から選びます。行は下の「＋」で追加できます。")
-    if not _fixed_names:
-        st.caption("先に下の「医師条件」に先生の名前を入れると、ここで名前を選べるようになります。")
-    _fixed_key = f"fixed_editor_{st.session_state.get('fixed_editor_gen', 0)}"
-    _fixed_view = base_fixed_df.copy()
-    for s_ in FIXED_SLOT_COLUMNS:
-        _fixed_view[s_] = _fixed_view[s_].astype(object).where(_fixed_view[s_] != "", None)
-    _fixed_config = {"日付": st.column_config.TextColumn("日付", help=f"例：{month}/1 または {year}/{month}/1")}
-    _fixed_config.update({s_: st.column_config.SelectboxColumn(s_, options=_fixed_names, help="担当する先生を一覧から選びます。消すときはマスを選んで Delete キー。")
-                          for s_ in FIXED_SLOT_COLUMNS})
-    _fixed_config.update({c: st.column_config.TextColumn(c) for c in base_fixed_df.columns if c not in _fixed_config})
-    st.data_editor(
-        _fixed_view, num_rows="dynamic", use_container_width=True, height=200, hide_index=True,
-        column_config=_fixed_config, key=_fixed_key, on_change=apply_fixed_edits, args=(_fixed_key,),
-    )
-    st.caption("同じ日・同じ枠を2人以上で担当する場合は、同じ日付の行をもう1行追加して、もう1人を選んでください。")
-    edited_fixed_df = st.session_state["fixed_rows"].copy()
+    edited_fixed_df = fixed_duty_table(fixed_file, restored_state, fixed_columns, P.start, P.end, year, month,
+                                       ("◀期間前", "期間中", "期間後▶"), P.example())
 
 # ==========================================
 # 先生ごとの条件：① 名簿と医師条件（見るだけ） → ② NG日 → ③ 医師条件の調整 → ④ 足りそう？ の順に、1つの欄にまとめて表示する。
@@ -1383,7 +1340,7 @@ with staff_box_cond:
                                     if n and n.lower() not in ("nan", "none")))
     if st.session_state.get("fixed_name_options") != _names_now:
         st.session_state["fixed_name_options"] = _names_now
-        st.session_state["fixed_editor_gen"] = st.session_state.get("fixed_editor_gen", 0) + 1
+        commit_fixed_current()   # 確定当直の表に入力した分を残したまま、名前の一覧を新しくして出し直す
         if not (create_bar_request or work_save_request):
             st.rerun()
     # 「➕ 先生を追加する」「➖ 先生を外す」（名前が変わったときの再表示のあとに出す。知らせが消えないように）
