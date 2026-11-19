@@ -3458,7 +3458,8 @@ def staff_table(df, editable, show_ng=False, max_height=300, ng_width=None):
     st.markdown(STAFF_COLUMN_HINT_HTML, unsafe_allow_html=True)
     if editable:
         cols = [c for c in df.columns if str(c).startswith("備考")] + [c for c in df.columns if not str(c).startswith("備考")]
-        kwargs = dict(num_rows="dynamic", use_container_width=True, height=300, column_order=cols,
+        # 画面の幅いっぱいに引き伸ばさない（引き伸ばすと、1つの列の端をドラッグしたとき、ほかの列の幅も連動して変わるため）
+        kwargs = dict(num_rows="dynamic", use_container_width=False, height=300, column_order=cols,
                       column_config=staff_column_config(df.columns, as_index=True))
         try:
             try:
@@ -3479,7 +3480,8 @@ def staff_table(df, editable, show_ng=False, max_height=300, ng_width=None):
             if c != "先生の名前" and num.notna().any() and num.notna().sum() == view[c].replace("", None).notna().sum() \
                     and (num.dropna() % 1 == 0).all():
                 view[c] = num.astype("Int64")
-        kwargs = dict(hide_index=True, use_container_width=True, column_config=staff_column_config(view.columns, show_ng=show_ng, ng_width=ng_width),
+        # 画面の幅いっぱいに引き伸ばさない（列の端をドラッグしたとき、その列だけが広がるように）
+        kwargs = dict(hide_index=True, use_container_width=False, column_config=staff_column_config(view.columns, show_ng=show_ng, ng_width=ng_width),
                       height=min(max_height, 38 + (STAFF_ROW_HEIGHT + 1) * max(len(view), 1)))
         try:
             out = st.dataframe(view, row_height=STAFF_ROW_HEIGHT, **kwargs)
