@@ -3391,14 +3391,15 @@ def header_fit_width(label, width):
 
 
 def _column(maker, label, width, help_text, pinned=False, **kw):
-    """列の設定を作る。名前の列は左に固定する（固定の機能がない古いStreamlitでは、固定せずに作る）。
-    列の幅は、見出しが全部見える幅にする。"""
+    """列の設定を作る。名前の列は左に固定する。数字の列も含めて、すべて左揃えにする（どの列の値か分かりやすいように）。
+    固定・左揃えの機能がない古いStreamlitでは、その機能を使わずに作る。列の幅は、見出しが全部見える幅にする。"""
     width = header_fit_width(label, width)
-    if pinned:
+    tries = ([dict(pinned=True, alignment="left"), dict(pinned=True)] if pinned else []) + [dict(alignment="left")]
+    for extra in tries:
         try:
-            return maker(label, width=width, help=help_text, pinned=True, **kw)
+            return maker(label, width=width, help=help_text, **extra, **kw)
         except TypeError:
-            pass
+            continue
     return maker(label, width=width, help=help_text, **kw)
 
 
