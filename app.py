@@ -5736,6 +5736,75 @@ def group_orphan_notice(staff_df, rules):
                    "表の「グループ」の列で選び直すか、グループの設定に行を足してください。")
 
 
+# グループ内で、ほかの先生と違う設定を知らせるときに比べる列（備考・NG日・希望日・優先度・翌日PM duty は先生ごとに違うのが普通なので比べない）
+GROUP_MISMATCH_MIN_MEMBERS = 3   # この人数以上のグループだけ比べる（2人だと、どちらが正しいか決められない）
+
+
+def group_mismatches(staff_df, rules):
+    """
+    グループ内で、ほかの先生と違う設定を探す。[(名前, グループ, 列の表示名, その先生の値, 多い値, 多い値の人数)]
+    ・3人以上のグループで、半分より多くの先生が同じ値の項目だけを比べる（値がばらばらの項目は比べない）
+    ・×の枠の上限は計算で0になるので比べない
+    """
+    rules = normalize_group_rules(rules)
+    specs = staff_column_specs()
+    cols = ["月下限", "月上限", "休日上限", "宿直上限", "日直上限", "宿⇔宿 間隔下限", DAY_GAP_COLUMN] + [s + "上限" for s in STAFF_SLOT_SHORT]
+    cols = [c for c in cols if c in staff_df.columns]
+
+    def value_of(v):
+        if v is None or (isinstance(v, float) and math.isnan(v)) or clean_text(v) == "":
+            return None
+        try:
+            return int(float(v))
+        except (TypeError, ValueError):
+            return clean_text(v)
+
+    def word(v, c):
+        if v is None:
+            return "空欄（制限なし）" if specs.get(c, ("", 0, ""))[2] == "count0" else "空欄"
+        return f"{v}日間" if specs.get(c, ("", 0, ""))[2] == "days" else f"{v}回"
+
+    found = []
+    groups = {}
+    for _, row in staff_df.iterrows():
+        g, name = doc_group_of(row.get(DOC_GROUP_COLUMN, "")), clean_text(row.get("先生の名前", ""))
+        if g and g in rules and name and name.lower() not in ("nan", "none"):
+            groups.setdefault(g, []).append(row)
+    for g, members in groups.items():
+        if len(members) < GROUP_MISMATCH_MIN_MEMBERS:
+            continue
+        for c in cols:
+            if c.endswith("上限") and rules[g].get(c[:-2]) == "×":
+                continue
+            vals = [value_of(r.get(c)) for r in members]
+            common = max(set(vals), key=vals.count)
+            n = vals.count(common)
+            if n * 2 <= len(vals):
+                continue
+            label = specs.get(c, (c,))[0]
+            for r, v in zip(members, vals):
+                if v != common:
+                    found.append((clean_text(r.get("先生の名前", "")), g, label, word(v, c), word(common, c), n))
+    return found
+
+
+def group_mismatch_notice(staff_df, rules):
+    """グループ内で、ほかの先生と違う設定があれば、表の下に黄色の欄で知らせる（知らせるだけ。当直案はそのまま作れる）。"""
+    found = group_mismatches(staff_df, rules)
+    if not found:
+        return
+    items = "".join(f"<li><b style='color:#8a4b08'>{html_escape(name)}</b>（{html_escape(g)}）：{html_escape(label)} <b style='color:#8a4b08'>{html_escape(v)}</b>"
+                    f"　← {html_escape(g)}のほかの{n}人は {html_escape(common)}</li>"
+                    for name, g, label, v, common, n in found)
+    st.markdown(
+        "<div style='background:#fff8e6;border:1.5px solid #f0b46a;border-radius:10px;padding:10px 14px;margin:6px 0 10px'>"
+        "<div style='font-weight:800;color:#8a4b08;margin-bottom:4px'>⚠ グループ内で、ほかの先生と違う設定があります（念のため確認してください）</div>"
+        f"<ul style='margin:0 0 4px;padding-left:20px;line-height:1.75'>{items}</ul>"
+        "<div style='font-size:0.85rem;color:#6a5a40'>3人以上のグループで、半分より多くの先生が同じ値の項目だけを比べます。"
+        "わざと変えている場合は、そのままで大丈夫です（当直案はそのまま作れます）。</div></div>",
+        unsafe_allow_html=True)
+
+
 def group_avoid_terms(doctors, days, daily_active_shifts, shifts, staff_df):
     """△（できれば入れない）の枠に入れるたびの減点（目的関数に足す項）。"""
     terms = []
@@ -7610,6 +7679,8 @@ with staff_box_cond:
     staff_df, staff_input_errors = validate_staff_inputs(staff_df, year, month)
     staff_df_calc = apply_group_rules(staff_df, group_rules)   # 計算用：グループの×の枠は上限0、△の枠は「できれば入れない」
     group_orphan_notice(staff_df, group_rules)   # 消したグループに入っている先生がいれば知らせる
+    if not staff_input_errors:
+        group_mismatch_notice(staff_df, group_rules)   # グループ内で、ほかの先生と違う設定があれば知らせる
     if staff_input_errors:
         show_input_errors(staff_input_errors)
         if create_bar_request:
