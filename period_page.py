@@ -1398,6 +1398,8 @@ with staff_box_cond:
     staff_df, staff_input_errors = validate_staff_inputs(staff_df, year, month)
     staff_df_calc = apply_group_rules(staff_df, group_rules)   # 計算用：グループの×の枠は上限0、△の枠は「できれば入れない」
     group_orphan_notice(staff_df, group_rules)   # 消したグループに入っている先生がいれば知らせる
+    if not staff_input_errors:
+        group_mismatch_notice(staff_df, group_rules)   # グループ内で、ほかの先生と違う設定があれば知らせる
     if staff_input_errors:
         show_input_errors(staff_input_errors)
         if create_bar_request:
