@@ -1706,8 +1706,8 @@ with staff_box_dl:
     st.download_button(
         label="📥 医師条件をExcelでダウンロード",
         data=current_xlsx,
-        file_name=f"医師条件_{P.start.isoformat()}_{P.end.isoformat()}.csv",
-        mime="text/csv",
+        file_name=f"医師条件_{P.start.isoformat()}_{P.end.isoformat()}.xlsx",
+        mime=XLSX_MIME,
         use_container_width=True
     )
 
