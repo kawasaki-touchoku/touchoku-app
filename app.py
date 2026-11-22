@@ -5633,8 +5633,9 @@ DOC_GROUP_MEMO = "メモ"   # グループの設定の、いちばん右のメ�
 DOC_GROUP_AVOID_COLUMN = "_できれば入れない枠"   # 計算用の列（表には出さない）
 DOC_GROUP_AVOID_PENALTY = 3000   # △の枠に1回入れるごとの減点（人が足りない枠を空けておく減点より小さくして、足りないときは入れる）
 DOC_GROUP_SHEET = "グループの設定"   # 医師条件のExcelの2枚目のシート
-# 最初に並べる5つのグループ（名前, A日直・A宿直・B日直・B宿直・外来日直・外来宿直 の順の◯△×）
-DOC_GROUP_DEFAULT = [("上級", "◯◯××◯×"), ("中堅", "◯◯△◯◯×"), ("若手", "△△◯◯◯◯"), ("外来日直のみ", "××××◯×"), ("日直のみ", "◯×◯×◯×")]
+# 最初に並べる6つのグループ（名前, A日直・A宿直・B日直・B宿直・外来日直・外来宿直 の順の◯△×）。レジ＝年次下位のA日直・A宿直を×にしたもの
+DOC_GROUP_DEFAULT = [("年次上位", "◯◯××◯×"), ("年次中位", "◯◯△◯◯×"), ("年次下位", "△△◯◯◯◯"), ("レジ", "××◯◯◯◯"),
+                     ("外来日直のみ", "××××◯×"), ("日直のみ", "◯×◯×◯×")]
 
 
 def doc_group_slots():
@@ -5651,7 +5652,7 @@ def doc_group_next_name(used):
 
 
 def default_group_rules():
-    """最初のグループの設定（上級・中堅・若手・外来日直のみ・日直のみ）。{グループ名: {枠: ◯△×, "メモ": 文字}}"""
+    """最初のグループの設定（年次上位・年次中位・年次下位・レジ・外来日直のみ・日直のみ）。{グループ名: {枠: ◯△×, "メモ": 文字}}"""
     slots = doc_group_slots()
     return {name: {**{s: marks[j] for j, s in enumerate(slots)}, DOC_GROUP_MEMO: ""} for name, marks in DOC_GROUP_DEFAULT}
 
@@ -5838,7 +5839,7 @@ def group_rules_ui(restored_state, year, month, staff_is_template=False):
                    "グループは表の下の「＋」で足せます（いくつでも）。いらないグループは、行を選んで消せます。")
         for msg in st.session_state.pop("group_rules_notes", []):
             st.warning(msg)
-        config = {"グループ名": st.column_config.TextColumn("グループ名", width=120, help="ダブルクリックで名前を変えられます。例：上級")}
+        config = {"グループ名": st.column_config.TextColumn("グループ名", width=120, help="ダブルクリックで名前を変えられます。例：年次上位")}
         config.update({s: st.column_config.SelectboxColumn(s, options=DOC_GROUP_MARKS, required=True, default="◯",
                                                            width=header_fit_width(s, 80),   # 見出しが切れない幅
                                                            help="◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない")
@@ -7916,8 +7917,8 @@ with staff_box_dl:
     st.download_button(
         label="📥 医師条件をExcelでダウンロード",
         data=current_xlsx,
-        file_name=f"医師条件_{year}年{month}月.csv",
-        mime="text/csv",
+        file_name=f"医師条件_{year}年{month}月.xlsx",
+        mime=XLSX_MIME,
         use_container_width=True
     )
 
