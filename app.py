@@ -5736,7 +5736,7 @@ def group_orphan_notice(staff_df, rules):
                    "表の「グループ」の列で選び直すか、グループの設定に行を足してください。")
 
 
-# グループ内で、ほかの先生と違う設定を知らせるときに比べる列（備考・NG日・希望日・優先度・翌日PM duty は先生ごとに違うのが普通なので比べない）
+# グループ内で、ほかの先生と違う設定を知らせる（比べるのは休日上限・宿⇔宿・宿⇔日・日⇔日・枠ごとの上限だけ）
 GROUP_MISMATCH_MIN_MEMBERS = 3   # この人数以上のグループだけ比べる（2人だと、どちらが正しいか決められない）
 
 
@@ -5748,7 +5748,7 @@ def group_mismatches(staff_df, rules):
     """
     rules = normalize_group_rules(rules)
     specs = staff_column_specs()
-    cols = ["月下限", "月上限", "休日上限", "宿直上限", "日直上限", "宿⇔宿 間隔下限", DAY_GAP_COLUMN] + [s + "上限" for s in STAFF_SLOT_SHORT]
+    cols = ["休日上限", "宿⇔宿 間隔下限", DAY_GAP_COLUMN] + [s + "上限" for s in STAFF_SLOT_SHORT]   # 月下限・月上限・宿直上限・日直上限は比べない
     cols = [c for c in cols if c in staff_df.columns]
 
     def value_of(v):
@@ -5789,18 +5789,21 @@ def group_mismatches(staff_df, rules):
 
 
 def group_mismatch_notice(staff_df, rules):
-    """グループ内で、ほかの先生と違う設定があれば、表の下に黄色の欄で知らせる（知らせるだけ。当直案はそのまま作れる）。"""
+    """グループ内で、ほかの先生と違う設定があれば、表の下に黄色の欄で、1人1行で知らせる（知らせるだけ。当直案はそのまま作れる）。"""
     found = group_mismatches(staff_df, rules)
     if not found:
         return
-    items = "".join(f"<li><b style='color:#8a4b08'>{html_escape(name)}</b>（{html_escape(g)}）：{html_escape(label)} <b style='color:#8a4b08'>{html_escape(v)}</b>"
-                    f"　← {html_escape(g)}のほかの{n}人は {html_escape(common)}</li>"
-                    for name, g, label, v, common, n in found)
+    order = {clean_text(n): i for i, n in enumerate(staff_df.get("先生の名前", pd.Series(dtype=str)).tolist())}   # 表と同じ順に並べる
+    by_doc = {}
+    for name, g, label, v, common, n in found:
+        by_doc.setdefault((name, g), []).append(f"{html_escape(label)} <b style='color:#8a4b08'>{html_escape(v)}</b>（ほかは{html_escape(common)}）")
+    items = "".join(f"<li><b style='color:#8a4b08'>{html_escape(name)}</b><span style='color:#6a5a40'>（{html_escape(g)}）</span>：{'、'.join(parts)}</li>"
+                    for (name, g), parts in sorted(by_doc.items(), key=lambda kv: order.get(kv[0][0], 0)))
     st.markdown(
         "<div style='background:#fff8e6;border:1.5px solid #f0b46a;border-radius:10px;padding:10px 14px;margin:6px 0 10px'>"
         "<div style='font-weight:800;color:#8a4b08;margin-bottom:4px'>⚠ グループ内で、ほかの先生と違う設定があります（念のため確認してください）</div>"
         f"<ul style='margin:0 0 4px;padding-left:20px;line-height:1.75'>{items}</ul>"
-        "<div style='font-size:0.85rem;color:#6a5a40'>3人以上のグループで、半分より多くの先生が同じ値の項目だけを比べます。"
+        "<div style='font-size:0.85rem;color:#6a5a40'>比べる項目：休日上限・宿⇔宿・宿⇔日・日⇔日・枠ごとの上限（3人以上のグループで、半分より多くの先生が同じ値の項目だけ）。"
         "わざと変えている場合は、そのままで大丈夫です（当直案はそのまま作れます）。</div></div>",
         unsafe_allow_html=True)
 
