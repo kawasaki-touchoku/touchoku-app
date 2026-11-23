@@ -6635,7 +6635,7 @@ def annual_clear_saved():
 
 def annual_section(year, month, target_start, target_end, frac, restored_state, staff_names, now_word="今月"):
     """
-    「📊 年間の当直回数」の項目を出し、当直案の計算に渡す情報（反映しないときは None）を返す。
+    「📊 年間の当直回数」の項目を出す（集計して見るだけ。当直案の計算には使わないので、いつも None を返す）。
     ・掲示用Excelは画面の裏で読むだけで保存しない。途中保存には、月ごとの回数だけを入れる（annual_snapshot）
     ・target_start〜target_end はこれから作る期間（反映の計算では、この期間と重なる分は数えない）
     """
@@ -6782,27 +6782,17 @@ def annual_section(year, month, target_start, target_end, frac, restored_state, 
     st.markdown(f"**先生ごとの回数（{span}）**　<span style='font-size:.8rem;opacity:.7'>上段：合計　下段：1か月あたり</span>", unsafe_allow_html=True)
     st.markdown(annual_table_html(rows), unsafe_allow_html=True)
     st.caption(f"在籍月数：読み込んだ月のうち、その先生の名前がのっている月の数です（日数の割合で数えます。集計だけのファイルの月は、そのファイルの在籍月数）。"
-               f"平均（1か月あたり{avg:.1f}回）とくらべます。「―」は分からない回数です（その回数は、当直案の「そろえる」に使いません）。")
+               f"平均（1か月あたり{avg:.1f}回）とくらべます。「―」は分からない回数です。")
     st.download_button("📥 集計をExcelでダウンロード", annual_totals_xlsx(rows, f"年間の当直回数（{span}）"),
                        file_name=f"年間の当直回数_{span}.xlsx", key="annual_xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-    with st.container(border=True):
-        on = st.checkbox(f"年間の回数を、{now_word}の当直案に反映する（少ない先生に多めに入れる）", key="annual_on")
-        st.caption("回数ごとに、どれくらいそろえるかを選びます（1か月あたりの回数でくらべます）。"
-                   "組になっている回数は、片方をそろえると、もう片方も自然にそろいます（例：休日をそろえると、合計との差の平日もそろう）。")
-        weights = {}
-        for k, label, desc in ANNUAL_BALANCE_ITEMS:
-            c1, c2 = st.columns([1, 2], vertical_alignment="center")
-            with c1:
-                st.markdown(label)
-            with c2:
-                v = st.segmented_control(label, ANNUAL_STRENGTHS, key=f"annual_w_{k}", label_visibility="collapsed",
-                                         help=desc, disabled=not on)
-            weights[k] = ANNUAL_STRENGTH_WEIGHT.get(v or "しない", 0) if on else 0
-        st.caption("月上限・月下限・NG日・間隔下限など、医師条件の決まりは今までどおり守ります。その範囲の中で、1か月あたりの回数が少ない先生を多めに、多い先生を少なめにします。"
-                   f"{now_word}の分（これから作る期間）のExcelを読み込んでいても、反映には使いません。")
-    return annual_balance_info(pieces, months, target_start, target_end, frac, weights, staff_names, summaries) if on else None
+    # 年間の回数は見るだけ（当直案の計算には使わない）。偏りは、医師条件の「多め希望」で先生ごとに調整する
+    st.markdown("<div style='background:#eaf3ff;border:1.5px solid #6ea2e6;border-radius:10px;padding:9px 14px;color:#1d4e89;"
+                "line-height:1.7;margin:4px 0 8px'>💡 <b>この集計は、見るだけです（当直案の計算には使いません）。</b><br>"
+                "偏りが気になる先生は、医師条件の「病棟/外来 多め」「宿直/日直 多め」「平日/休日 多め」で調整してください。</div>",
+                unsafe_allow_html=True)
+    return None
 
 
 def annual_snapshot(year, month):
@@ -7024,7 +7014,7 @@ NG日は、管理者が画面のカレンダーで入力します。慣れてき
    新しく来た先生は「➕ 先生を追加する」で、名前・入れる位置（○○先生の下）・条件のもと（ほかの先生と同じ条件、または型）を選んで追加します。いなくなった先生は「➖ 先生を外す」で外します。
 6. **NG日**（②）：先生を選んでカレンダーでNG日を入れ、「NG日を反映する」を押します（紙やメールで集めたNG日を入力します）。先生方に専用URLから入力してもらう場合は、ここで受付・取り込みを行います（「NG日の集め方」のタブを参照）。
 7. **医師条件の調整**（③・④）：当直案の枠ができるだけ埋まるように、③の表で回数・上限・勤務間隔・希望日を調整します（①の表は見るだけなので、直すのは③です）。同じ扱いにしたい先生がいるときは、③の表の上の「👥 グループの設定」でグループごとに入れる枠（◯入れる・△できれば入れない・×入れない）を決め、表の「グループ」の列で先生のグループを選びます。④の「⚖️ 当直の枠は足りそう？」で、全体と枠の種類ごとに足りているか（赤い棒がないか）を確認します。
-8. **年間の当直回数（任意）**：「📊 年間の当直回数」に、これまでの月の掲示用Excelをまとめて読み込むと（当直表が見つからない月は、右の「📋 集計だけのファイル」に、ひな形で期間と先生ごとの回数を書いて読み込みます）、先生ごとの回数（合計と1か月あたり）（病棟・外来、平日・休日、宿直・日直、合計）が出ます。「年間の回数を、今月の当直案に反映する」にチェックすると、当直合計・休日（平日）・宿直（日直）・外来（病棟）のそれぞれを、選んだ強さでそろえて作ります。
+8. **年間の当直回数（任意）**：「📊 年間の当直回数」に、これまでの月の掲示用Excelをまとめて読み込むと（当直表が見つからない月は、右の「📋 集計だけのファイル」に、ひな形で期間と先生ごとの回数を書いて読み込みます）、先生ごとの回数（合計と1か月あたり）（病棟・外来、平日・休日、宿直・日直、合計）が出ます。集計は見るだけで、当直案の計算には使いません。偏りが気になる先生は、医師条件の「病棟/外来 多め」「宿直/日直 多め」「平日/休日 多め」で調整します。
 9. **不足時の優先順位（任意）**：人数が足りない月に、どの枠から埋めるかを決めます。
 10. **当直案を作る**：下の帯の「🚀 当直案を作成」を押します（計算に最大1分少々かかります）。押すたびに違うパターンの案ができるので、気に入るまで押し直して構いません。
    未決定の枠が出たら、条件を直して作り直します。下の帯の移動ボタンで、条件と結果を行き来できます。
@@ -8107,7 +8097,7 @@ with staff_box_dl:
 
 
 # ==========================================
-# 年間の当直回数（任意）：掲示用Excelから先生ごとの回数を集計し、当直案に反映する
+# 年間の当直回数（任意）：掲示用Excelから先生ごとの回数を集計する（見るだけ。当直案の計算には使わない）
 # ==========================================
 _annual_names = [n for n in (clean_text(v) for v in staff_df.get("先生の名前", pd.Series(dtype=str)).tolist()) if n and n.lower() not in ("nan", "none")]
 annual_balance = annual_section(year, month, datetime.date(year, month, 1), datetime.date(year, month, calendar.monthrange(year, month)[1]), 1.0,
