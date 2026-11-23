@@ -3471,6 +3471,42 @@ STAFF_COLUMN_HINT_HTML = (
     "<small>（例：「宿⇔日・日⇔日」に合わせると、どの組み合わせに使うかが出ます）</small></div>")
 
 
+# 表の上に出す「この表の列」の地図：列の仲間（名前, 札の背景色, 文字色）
+STAFF_MAP_GROUPS = [("基本", "#e9eef6", "#425268"), ("希望", "#fff1dc", "#8a4b08"), ("間隔・回数", "#e6f4ea", "#2e6b3f"), ("枠ごとの上限", "#efe8fb", "#4f3a8c")]
+
+
+def staff_column_group(column):
+    """医師条件の列が、地図のどの仲間か（STAFF_MAP_GROUPS の番号）。"""
+    if column in DOC_PREF_COLUMNS or column in (REQUEST_COLUMN, "希望優先度(数字が大きいほど優先)"):
+        return 1
+    if column in ("宿⇔宿 間隔下限", DAY_GAP_COLUMN, "月下限", "月上限", "休日上限", *GROUP_CAP_COLUMNS):
+        return 2
+    if column in [s + "上限" for s in STAFF_SLOT_SHORT]:
+        return 3
+    return 0
+
+
+def staff_column_map_html(columns):
+    """表のすぐ上に出す「この表の列」の地図。全部の列名を、仲間ごとに色分けした札で、表と同じ順（左から右）に並べる。"""
+    specs = staff_column_specs()
+    parts, last = [], None
+    for c in columns:
+        g = staff_column_group(c)
+        name, bg, fg = STAFF_MAP_GROUPS[g]
+        if g != last:
+            if last is not None:
+                parts.append("<span class='cm-ar'>→</span>")
+            parts.append(f"<span class='cm-gl' style='color:{fg}'>{name}</span>")
+            last = g
+        parts.append(f"<span class='cm-c' style='background:{bg};color:{fg}'>{html_escape(specs.get(c, (str(c),))[0])}</span>")
+    return ("<style>.cm-map{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:0 0 8px;font-size:.8rem;line-height:1.5}"
+            ".cm-map .cm-t{font-weight:800;color:#24405f;margin-right:4px}.cm-map .cm-gl{font-weight:800;font-size:.75rem;margin:0 1px 0 6px}"
+            ".cm-map .cm-c{border-radius:999px;padding:0 8px;border:1px solid rgba(0,0,0,.08);white-space:nowrap}"
+            ".cm-map .cm-ar,.cm-map .cm-n{color:#8a94a3}</style>"
+            f"<div class='cm-map'><span class='cm-t'>🗺 この表の列</span>{''.join(parts)}"
+            "<span class='cm-n'>（左から右の順。右へスクロールすると続きが見えます）</span></div>")
+
+
 def staff_table(df, editable, show_ng=False, max_height=300, ng_width=None):
     """医師条件の表。③（編集用）と①（見るだけ）で、列名・幅・行の高さ・並びを同じにする。
     show_ng=True なら、見るだけの表にNG日の列も出す（閲覧用の画面）。max_height は見るだけの表の高さの上限。
@@ -3478,6 +3514,7 @@ def staff_table(df, editable, show_ng=False, max_height=300, ng_width=None):
     st.markdown(STAFF_COLUMN_HINT_HTML, unsafe_allow_html=True)
     if editable:
         cols = [c for c in df.columns if str(c).startswith("備考")] + [c for c in df.columns if not str(c).startswith("備考")]
+        st.markdown(staff_column_map_html(["先生の名前"] + [c for c in cols if c != NG_COLUMN and not str(c).startswith("_")]), unsafe_allow_html=True)
         kwargs = dict(num_rows="dynamic", use_container_width=True, height=300, column_order=cols,
                       column_config=staff_column_config(df.columns, as_index=True))
         try:
@@ -3493,6 +3530,7 @@ def staff_table(df, editable, show_ng=False, max_height=300, ng_width=None):
         cols = ["先生の名前"] + [c for c in df.columns if str(c).startswith("備考")] \
             + [c for c in df.columns if c != "先生の名前" and not str(c).startswith("備考") and (show_ng or c != NG_COLUMN)]
         view = df[[c for c in cols if c in df.columns]].copy()
+        st.markdown(staff_column_map_html([c for c in view.columns if not str(c).startswith("_")]), unsafe_allow_html=True)
         # 「5.0」ではなく「5」と見せる（整数だけの列は整数にする。空欄は空欄のまま）
         for c in view.columns:
             num = pd.to_numeric(view[c], errors="coerce")
