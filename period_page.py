@@ -1351,6 +1351,7 @@ with staff_box_cond:
     # 宿⇔日・日⇔日 間隔下限の列がない（以前の）CSV・途中保存でも、「宿⇔宿 間隔下限」の右に、宿⇔宿 間隔下限と同じ値で列を足す
     base_df = add_day_gap_column(base_df.loc[:, ~base_df.columns.duplicated()])   # 同じ名前の列が2つあると表が出せないので1つにする
     base_df = add_group_column(base_df.drop(columns=[DOC_GROUP_AVOID_COLUMN], errors="ignore"))   # 「グループ」の列（ないファイルでは空欄で足す）
+    base_df = add_pref_columns(base_df)   # 「多め希望」の3つの列（ないファイルでは空欄で足す）
     if DAY_GAP_COLUMN in base_df.columns:
         base_df[DAY_GAP_COLUMN] = pd.to_numeric(base_df[DAY_GAP_COLUMN], errors="coerce")
     base_df = base_df.set_index("先生の名前")
