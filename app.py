@@ -29,6 +29,9 @@ REQUEST_COLUMN = '希望日(半角カンマ区切り)'
 # この列がない・空欄のときは「宿⇔宿 間隔下限」と同じ値にする（以前の動きのまま）
 DAY_GAP_COLUMN = '宿⇔日・日⇔日 間隔下限'
 DAY_GAP_TEMPLATE_DEFAULT = 2   # 新しいひな形の初めの値
+# 多め希望（できれば多めに入れる種類）。{列名: (選べる値1, 選べる値2)}。反対向きどうしを同じ列にして、両方は選べないようにする
+DOC_PREF_COLUMNS = {"病棟/外来 多め": ("病棟多め", "外来多め"), "宿直/日直 多め": ("宿直多め", "日直多め"), "平日/休日 多め": ("平日多め", "休日多め")}
+DOC_PREF_WEIGHT = 60   # 多め希望の強さ（希望日の優先度1＝100より弱い「できれば」）
 
 
 def clean_text(value):
@@ -2000,9 +2003,10 @@ def validate_staff_inputs(df, year, month):
     for col, default in NUMERIC_DEFAULTS.items():
         if col not in df:
             df[col] = default
-    for col in [NG_COLUMN, REQUEST_COLUMN, '翌日PM duty', DAY_GAP_COLUMN] + list(GROUP_CAP_COLUMNS):
+    for col in [NG_COLUMN, REQUEST_COLUMN, '翌日PM duty', DAY_GAP_COLUMN] + list(GROUP_CAP_COLUMNS) + list(DOC_PREF_COLUMNS):
         if col not in df:
             df[col] = ''
+    errors += doc_pref_errors(df)
     for col in list(GROUP_CAP_COLUMNS) + [DAY_GAP_COLUMN]:
         df[col] = df[col].astype(object)   # 空欄（制限なし／宿⇔宿 間隔下限と同じ）と数字が混ざるため
     for i, row in df.iterrows():
@@ -2471,6 +2475,9 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
 
     # グループの設定で△（できれば入れない）の枠は、入れるたびに減点する（人が足りないときだけ入る）
     objective_terms += group_avoid_terms(doctors, days, daily_active_shifts, shifts, staff_df)
+    # 多め希望（病棟/外来・宿直/日直・平日/休日）：希望の種類に寄せる（月の回数は増やさない）
+    objective_terms += doc_pref_terms(model, doctors, days, daily_active_shifts, shifts, staff_df, is_holiday, required_count,
+                                      lambda doc: min_shifts_total[doc], total_cap)
     # 年間の回数（1か月あたり）をそろえる（年間の当直回数を読み込み、反映するにしたときだけ）
     objective_terms += add_annual_balance_terms(model, doctors, days, daily_active_shifts, is_holiday, required_count,
                                                 worked_all, holiday_worked, shifts, annual_balance)
@@ -3238,7 +3245,7 @@ def carry_over_staff(year, month):
 # 先生の追加・外す（①先生の名簿）
 # 今の医師条件の表（前回の画面の内容）に行を足したり消したりして、表を作り直す。
 # ==========================================
-STAFF_KEEP_EMPTY_ON_COPY = ("備考（メモ・説明など自由記入）", NG_COLUMN, REQUEST_COLUMN)
+STAFF_KEEP_EMPTY_ON_COPY = ("備考（メモ・説明など自由記入）", NG_COLUMN, REQUEST_COLUMN, *DOC_PREF_COLUMNS)   # 多め希望も先生ごとのものなので写さない
 
 
 def _staff_apply_new_table(df, year, month, message):
@@ -3364,6 +3371,15 @@ def staff_column_specs():
             "当直に入れない日です（例：3,10:宿NG）。日にちだけなら日直・宿直ともNG、「:宿NG」は宿直だけNG、「:日NG」は日直だけNGです。"),
         "翌日PM duty": ("翌日PM duty", 92, "text",
             "例：木曜PMにdutyがある場合は水。複数は水,木のように入力。翌日が休日なら宿直に入る場合があります。日直は対象外です。確実に外す日はカレンダーでNGを指定してください。"),
+        "病棟/外来 多め": ("病棟/外来 多め", 120, "pref",
+            "病棟多め：病棟（A・B）の日直・宿直を、できれば多めに入れます。外来多め：外来日直・外来宿直を、できれば多めに入れます。"
+            "月の回数は増えません（回数の中で、種類の割合を寄せるだけ）。空欄なら希望なし。"),
+        "宿直/日直 多め": ("宿直/日直 多め", 120, "pref",
+            "宿直多め：宿直（A・B・外来）を、できれば多めに入れます。日直多め：日直（A・B・外来）を、できれば多めに入れます。"
+            "月の回数は増えません（回数の中で、種類の割合を寄せるだけ）。空欄なら希望なし。"),
+        "平日/休日 多め": ("平日/休日 多め", 120, "pref",
+            "平日多め：平日の宿直を、できれば多めに入れます。休日多め：休日（土日祝と「休日にする」にした日）の日直・宿直を、できれば多めに入れます。"
+            "月の回数は増えません（回数の中で、種類の割合を寄せるだけ）。休日回数の偏りを減らす決まりの方が優先です。空欄なら希望なし。"),
         REQUEST_COLUMN: ("希望日", 100, "text",
             "例：10,15 または 10:A宿直。複数は半角カンマ区切り。日直は休日（または「休日にする」にした日）だけ指定できます。通常の希望は各種条件の範囲内で割り当てます。"),
         "希望優先度(数字が大きいほど優先)": ("優先度", 56, "num",
@@ -3420,6 +3436,8 @@ def staff_column_config(columns, as_index=False, show_ng=False, ng_width=None):
             config[c] = _column(st.column_config.TextColumn, label, width, help_text, pinned=(c == "先生の名前"))
         elif kind == "group":
             config[c] = _column(st.column_config.SelectboxColumn, label, width, help_text, options=doc_group_names())
+        elif kind == "pref":
+            config[c] = _column(st.column_config.SelectboxColumn, label, width, help_text, options=list(DOC_PREF_COLUMNS[c]))
         elif kind == "num0":
             config[c] = _column(st.column_config.NumberColumn, label, width, help_text, min_value=0, step=1)
         elif kind == "days":
@@ -3440,7 +3458,8 @@ def staff_legend_text():
     return ("列名の意味：優先度＝希望優先度　宿⇔宿＝宿直と宿直の間に空ける日数（宿⇔宿 間隔下限）　宿⇔日・日⇔日＝日直がからむ勤務（日直→宿直・宿直→日直・日直→日直）の間に空ける日数（宿⇔日・日⇔日 間隔下限）　"
             "月下限＝月の回数の目標（できるだけ確保）　"
             "月上限＝月の回数の上限　休日上限＝休日の回数の上限　宿直上限・日直上限＝A・B・外来を合わせた上限　"
-            "A宿上限〜外日上限＝各枠（A宿直・B宿直・外来宿直・A日直・B日直・外来日直）の月の上限")
+            "A宿上限〜外日上限＝各枠（A宿直・B宿直・外来宿直・A日直・B日直・外来日直）の月の上限　"
+            "病棟/外来 多め・宿直/日直 多め・平日/休日 多め＝その種類の当直を、できれば多めに入れる（月の回数は増えない）")
 
 
 # 表のすぐ上に出す、青い案内の帯（列名にカーソルを合わせると説明が出ることを知らせる）
@@ -5234,6 +5253,9 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
 
     # グループの設定で△（できれば入れない）の枠は、入れるたびに減点する（人が足りないときだけ入る）
     objective_terms += group_avoid_terms(doctors, days, daily_active_shifts, shifts, staff_df)
+    # 多め希望（病棟/外来・宿直/日直・平日/休日）：希望の種類に寄せる（月の回数は増やさない）
+    objective_terms += doc_pref_terms(model, doctors, days, daily_active_shifts, shifts, staff_df, is_holiday, required_count,
+                                      lambda doc: min_shifts_total[doc], total_cap)
     # 年間の回数（1か月あたり）をそろえる（年間の当直回数を読み込み、反映するにしたときだけ）
     objective_terms += add_annual_balance_terms(model, doctors, days, daily_active_shifts, is_holiday, required_count,
                                                 worked_all, holiday_worked, shifts, annual_balance)
@@ -5352,9 +5374,10 @@ def period_validate_staff_inputs(df, P):
     for col, default in NUMERIC_DEFAULTS.items():
         if col not in df:
             df[col] = default
-    for col in [NG_COLUMN, REQUEST_COLUMN, '翌日PM duty', DAY_GAP_COLUMN] + list(GROUP_CAP_COLUMNS):
+    for col in [NG_COLUMN, REQUEST_COLUMN, '翌日PM duty', DAY_GAP_COLUMN] + list(GROUP_CAP_COLUMNS) + list(DOC_PREF_COLUMNS):
         if col not in df:
             df[col] = ''
+    errors += doc_pref_errors(df)
     for col in list(GROUP_CAP_COLUMNS) + [DAY_GAP_COLUMN]:
         df[col] = df[col].astype(object)   # 空欄（制限なし／宿⇔宿 間隔下限と同じ）と数字が混ざるため
     for i, row in df.iterrows():
@@ -5700,6 +5723,91 @@ def add_group_column(df):
         df.insert(pos, DOC_GROUP_COLUMN, "")
     df[DOC_GROUP_COLUMN] = df[DOC_GROUP_COLUMN].map(lambda v: doc_group_of(v) or None).astype(object)   # 空欄は None（選ぶ欄で空欄に見せる）
     return df
+
+
+def doc_pref_value(column, value):
+    """多め希望のマスの値をそろえる（「病棟」「病棟多め希望」なども「病棟多め」にする）。空欄は ""。分からない値はそのまま返す（入力の確認でエラーにする）。"""
+    v = clean_text(value)
+    if v.lower() in ("nan", "none", "<na>"):
+        return ""
+    for option in DOC_PREF_COLUMNS[column]:
+        if v and v.startswith(option[:2]):
+            return option
+    return v
+
+
+def add_pref_columns(df):
+    """医師条件に「多め希望」の3つの列がなければ、翌日PM duty（なければグループ・名前）の右に空欄で足す。中身は選べる値にそろえる。"""
+    df = df.copy()
+    cols = list(df.columns)
+    anchor = next((c for c in ("翌日PM duty", DOC_GROUP_COLUMN, "先生の名前") if c in cols), None)
+    pos = cols.index(anchor) + 1 if anchor else len(cols)
+    for c in DOC_PREF_COLUMNS:
+        if c not in df.columns:
+            df.insert(pos, c, "")
+        pos = list(df.columns).index(c) + 1
+        df[c] = df[c].map(lambda v, c=c: doc_pref_value(c, v) or None).astype(object)   # 空欄は None（選ぶ欄で空欄に見せる）
+    return df
+
+
+def doc_pref_errors(df):
+    """多め希望の列に、選べない値が入っていないか確かめる（Excelで手入力した場合など）。"""
+    errors = []
+    for _, row in df.iterrows():
+        for c, options in DOC_PREF_COLUMNS.items():
+            if c in df.columns:
+                v = doc_pref_value(c, row.get(c, ""))
+                if v and v not in options:
+                    errors.append(f"{row['先生の名前']}：{c}は「{options[0]}」「{options[1]}」か空欄にしてください（今の値：{v}）。")
+    return errors
+
+
+def doc_pref_terms(model, doctors, days, daily_active_shifts, shifts, staff_df, is_holiday, required_count, min_total, cap_total):
+    """
+    多め希望の加点（目的関数に足す項）。
+    その先生の希望の種類に入れると加点、反対の種類に入れると減点する。点の大きさは、月全体の枠の数の割合で決める。
+    多め希望の先生の回数は、全体の枠の数を月上限の比で分けた回数（月下限〜月上限の範囲）に保つよう減点する
+    （減点は種類の加点より大きいので、多め希望のために回数が増えたり減ったりしない。種類の割合だけを寄せる）。
+    """
+    kinds = {"病棟多め": lambda d, s: s not in ANNUAL_OUT_SLOTS, "外来多め": lambda d, s: s in ANNUAL_OUT_SLOTS,
+             "宿直多め": lambda d, s: s in NIGHT_SHIFTS, "日直多め": lambda d, s: s not in NIGHT_SHIFTS,
+             "平日多め": lambda d, s: not is_holiday(d), "休日多め": lambda d, s: bool(is_holiday(d))}
+    need = {k: sum(required_count(d, s) for d in days for s in daily_active_shifts[d] if f(d, s)) for k, f in kinds.items()}
+    demand = sum(required_count(d, s) for d in days for s in daily_active_shifts[d])
+    cap_sum = sum(cap_total(doc) for doc in doctors) or 1
+    terms = []
+    for _, row in staff_df.iterrows():
+        doc = str(row["先生の名前"])
+        if doc not in doctors:
+            continue
+        wants = [doc_pref_value(c, row.get(c, "")) for c in DOC_PREF_COLUMNS]
+        if any(w in pair for w, pair in zip(wants, DOC_PREF_COLUMNS.values())):
+            # この先生の回数の目安（全体の枠の数を、月上限の比で分ける）。ここからのずれを減点する
+            target = min(max(round(demand * cap_total(doc) / cap_sum), min_total(doc)), cap_total(doc))
+            mine = [shifts[(d, doc, s)] for d in days for s in daily_active_shifts[d] if (d, doc, s) in shifts]
+            dev = model.NewIntVar(0, len(mine) + target, f"pref_dev_{doc}")
+            model.Add(dev >= sum(mine) - target)
+            model.Add(dev >= target - sum(mine))
+            terms.append(-(DOC_PREF_WEIGHT * len(DOC_PREF_COLUMNS) + 1) * dev)
+        for c, (a, b) in DOC_PREF_COLUMNS.items():
+            want = doc_pref_value(c, row.get(c, ""))
+            if want not in (a, b):
+                continue
+            other = b if want == a else a
+            total = need[want] + need[other]
+            if not need[want] or not need[other]:
+                continue
+            plus = max(1, round(DOC_PREF_WEIGHT * need[other] / total))
+            minus = max(1, round(DOC_PREF_WEIGHT * need[want] / total))
+            for d in days:
+                for s in daily_active_shifts[d]:
+                    if (d, doc, s) not in shifts:
+                        continue
+                    if kinds[want](d, s):
+                        terms.append(plus * shifts[(d, doc, s)])
+                    elif kinds[other](d, s):
+                        terms.append(-minus * shifts[(d, doc, s)])
+    return terms
 
 
 def apply_group_rules(staff_df, rules):
@@ -6779,8 +6887,8 @@ def staff_view_page():
     st.info("管理者が途中保存した医師条件です（備考は表示しません）。最新の内容は、管理者が途中保存したときに変わります。")
     df = parse_staff_csv(str(data["staff_csv"]).encode("utf-8"))
     df = df[[c for c in df.columns if not str(c).startswith("備考") and not str(c).startswith("_")]]
-    df = add_day_gap_column(df.loc[:, ~df.columns.duplicated()])
-    for c in (NG_COLUMN, REQUEST_COLUMN, "翌日PM duty", DOC_GROUP_COLUMN):
+    df = add_pref_columns(add_day_gap_column(df.loc[:, ~df.columns.duplicated()]))   # 多め希望の列（ない保存では空欄で出す）
+    for c in (NG_COLUMN, REQUEST_COLUMN, "翌日PM duty", DOC_GROUP_COLUMN, *DOC_PREF_COLUMNS):
         if c in df.columns:
             df[c] = df[c].map(lambda v: "" if clean_text(v).lower() in ("nan", "none", "<na>") else clean_text(v))
     # NG日の列は、いちばん長い先生のNG日が入る幅にする（ほかの列は列名が見える最小限）
@@ -7635,6 +7743,7 @@ with staff_box_cond:
     # 宿⇔日・日⇔日 間隔下限の列がない（以前の）CSV・途中保存でも、「宿⇔宿 間隔下限」の右に、宿⇔宿 間隔下限と同じ値で列を足す
     base_df = add_day_gap_column(base_df.loc[:, ~base_df.columns.duplicated()])   # 同じ名前の列が2つあると表が出せないので1つにする
     base_df = add_group_column(base_df.drop(columns=[DOC_GROUP_AVOID_COLUMN], errors="ignore"))   # 「グループ」の列（ないファイルでは空欄で足す）
+    base_df = add_pref_columns(base_df)   # 「多め希望」の3つの列（ないファイルでは空欄で足す）
     if DAY_GAP_COLUMN in base_df.columns:
         base_df[DAY_GAP_COLUMN] = pd.to_numeric(base_df[DAY_GAP_COLUMN], errors="coerce")
     base_df = base_df.set_index("先生の名前")
