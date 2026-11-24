@@ -1620,6 +1620,8 @@ with staff_box_ng:
                         cu2.button("↩️ 取り込みを取り消す", key=f"undo_import_{doc_name}_{year}_{month}", use_container_width=True,
                                    on_click=undo_remote_import, args=(year, month, [doc_name]))
 
+                    pm_duty_setting_ui(doc_name, doc_row.get("翌日PM duty", ""), ng_is_dirty(doc_name), year, month)   # 翌日PM dutyもここで設定できる
+
                     component_days = []
                     for d in range(1, num_days + 1):
                         dt = datetime.date(year, month, d)
