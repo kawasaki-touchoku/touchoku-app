@@ -1261,11 +1261,11 @@ def memo_cell_html(row, tip_up=False):
 
 
 # 医師別の当直一覧の凡例の見た目（当直一覧と、使い方のページで同じものを使う）
-MATRIX_LEGEND_CSS = """<style>
-.dm-legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;margin:2px 0 6px;color:#243247}
-.dm-legend span{display:inline-flex;align-items:center;gap:4px}
-.dm-legend i{display:inline-block;min-width:34px;padding:1px 4px;border:1px solid #d8dde5;border-radius:3px;font-style:normal;font-weight:700;text-align:center;font-size:11px}
-</style>"""
+# 改行を入れない（使い方のページでは文の途中に入るため、改行があると画面の文として扱われ、そのあとが表示されなくなる）
+MATRIX_LEGEND_CSS = ("<style>.dm-legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;margin:2px 0 6px;color:#243247}"
+                     ".dm-legend span{display:inline-flex;align-items:center;gap:4px}"
+                     ".dm-legend i{display:inline-block;min-width:34px;padding:1px 4px;border:1px solid #d8dde5;border-radius:3px;"
+                     "font-style:normal;font-weight:700;text-align:center;font-size:11px}</style>")
 
 
 def matrix_legend_html(alerts=None):
