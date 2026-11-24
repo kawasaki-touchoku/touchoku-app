@@ -7081,6 +7081,313 @@ def staff_view_page():
 
 
 # ==========================================
+# マニュアル（…/?mode=manual）：図つきの使い方。パスワードなしで開ける（医師の名前などのデータは出さない）
+# ==========================================
+MANUAL_LINK_HTML = ("<a href='./?mode=manual' target='_blank' style='display:inline-block;margin:2px 0 8px;border:1.5px solid #47749b;"
+                    "color:#24405f !important;background:#fff;border-radius:8px;padding:5px 14px;font-weight:700;text-decoration:none !important'>"
+                    "📖 マニュアル（図つき）を別のタブで開く</a>")
+
+MANUAL_CSS = """<style>
+.mn{color:#31333f;line-height:1.75;font-size:.97rem}
+.mn h2{font-size:1.25rem;color:#24405f;border-left:6px solid #f08c00;padding:2px 0 2px 10px;margin:34px 0 10px;scroll-margin-top:4rem}
+.mn h3{font-size:1.05rem;color:#24405f;margin:16px 0 6px}
+.mn .lead{color:#566174;font-size:.92rem;margin:0 0 10px}
+.mn .row{display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap}
+.mn .fig{position:relative;border:1px solid #cfd8e3;border-radius:10px;padding:12px 14px;background:#fafbfc;width:520px;max-width:100%;box-sizing:border-box;font-size:.82rem;line-height:1.5}
+.mn .fig .cap{position:absolute;top:-11px;left:12px;background:#fff;border:1px solid #cfd8e3;border-radius:999px;padding:0 9px;font-size:.72rem;color:#6a7686}
+.mn .steps{flex:1;min-width:280px;list-style:none;padding:0;margin:0}
+.mn .steps li{margin:0 0 9px;padding-left:32px;position:relative}
+.mn .k,.mn .c{display:inline-block;width:23px;height:23px;border-radius:50%;background:#f08c00;color:#fff;font-weight:800;text-align:center;line-height:23px;font-size:.78rem}
+.mn .steps .k{position:absolute;left:0;top:2px}
+.mn .c{position:absolute;box-shadow:0 1px 4px rgba(0,0,0,.25);z-index:2}
+.mn .tip{background:#eaf3ff;border:1.5px solid #6ea2e6;border-radius:10px;padding:8px 12px;color:#1d4e89;font-size:.9rem;margin:10px 0}
+.mn .warn{background:#fff8e6;border:1.5px solid #f0b46a;border-radius:10px;padding:8px 12px;color:#7a4a0a;font-size:.9rem;margin:10px 0}
+.mn .toc{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 8px}
+.mn .toc a{border:1px solid #cfd8e3;border-radius:999px;padding:2px 12px;font-size:.85rem;text-decoration:none !important;color:#24405f !important;background:#fff}
+.mn .flow{display:flex;align-items:stretch;gap:6px;flex-wrap:wrap;margin:8px 0}
+.mn .st{flex:1;min-width:110px;border:2px solid #cfd8e3;border-radius:10px;padding:8px 6px;text-align:center;font-size:.8rem;background:#f8fafc;line-height:1.45}
+.mn .st .n{display:inline-block;width:24px;height:24px;border-radius:50%;background:#24405f;color:#fff;font-weight:800;line-height:24px;margin-bottom:3px}
+.mn .st b{display:block;font-size:.88rem;color:#24405f}
+.mn .st.opt{border-style:dashed;background:#fff}.mn .st.go{border-color:#f08c00;background:#fff7ed}.mn .st.go .n{background:#f08c00}
+.mn .ar{align-self:center;color:#9aa3af;font-size:1.2rem}
+.mn .bt{display:inline-block;border:1px solid #d5dae2;border-radius:7px;padding:3px 10px;background:#fff;margin:2px 3px 2px 0}
+.mn .bt.p{background:#ff4b4b;border-color:#ff4b4b;color:#fff;font-weight:700}.mn .bt.g{border-color:#2e8a5b;color:#1f6b45;font-weight:700}
+.mn .bt.on{border-color:#ff4b4b;color:#ff4b4b;background:#fff0f0;font-weight:700}
+.mn .band{background:#24405f;color:#fff;border-radius:8px;padding:7px 10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mn .band .bt{background:#fff;color:#24405f;border:0}.mn .band .bt.p{background:#ff4b4b;color:#fff}
+.mn .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin:6px 0}
+.mn .cal div{border:1px solid #dfe3ea;border-radius:4px;min-height:30px;padding:1px 4px;background:#fff;font-size:.72rem}
+.mn .cal .h{min-height:0;border:0;background:none;text-align:center;font-weight:700;color:#555}
+.mn .cal .hol{background:#fdecec}.mn .cal .lock{background:#e5e7eb;color:#888}.mn .cal .ng{background:#fde2e2;border-color:#f0a3a3}
+.mn .cal .pm{background:#fff6e0;border-color:#ef9b20}
+.mn .tb{border-collapse:collapse;font-size:.75rem;background:#fff;margin:4px 0}
+.mn .tb th,.mn .tb td{border:1px solid #c9d1dc;padding:2px 6px;white-space:nowrap;text-align:left}
+.mn .tb th{background:#f1f4f8;font-weight:600}
+.mn .drop{border:2px dashed #2e8a5b;border-radius:8px;padding:8px;text-align:center;color:#1f6b45;background:#f3faf6}
+.mn .box{border:1px solid #d5dae2;border-radius:8px;padding:6px 8px;background:#fff;margin:4px 0}
+.mn .chip{display:inline-block;border-radius:999px;padding:0 7px;margin:1px;font-size:.7rem;border:1px solid rgba(0,0,0,.08)}
+.mn .bar{height:12px;border-radius:3px;background:#5b8def;display:inline-block;vertical-align:middle}
+.mn .bar.r{background:#e5534b}
+.mn .phone{width:150px;border:3px solid #31333f;border-radius:18px;padding:10px 8px;background:#fff;font-size:.7rem;margin:0 auto}
+.mn .qa dt{font-weight:800;color:#24405f;margin-top:10px}.mn .qa dd{margin:2px 0 0 0}
+</style>"""
+
+
+def _mn_fig(caption, body, callouts=()):
+    """マニュアルの図（画面のイラスト）。callouts は [(番号, 左px, 上px)]。"""
+    marks = "".join(f"<span class='c' style='left:{x}px;top:{y}px'>{n}</span>" for n, x, y in callouts)
+    return f"<div class='fig'><span class='cap'>{caption}</span>{body}{marks}</div>"
+
+
+def _mn_steps(items):
+    """右側の手順（番号つき）。"""
+    return "<ol class='steps'>" + "".join(f"<li><span class='k'>{i}</span>{t}</li>" for i, t in enumerate(items, 1)) + "</ol>"
+
+
+def _mn_notes(items):
+    """番号なしの注意点（図の番号と対応しないもの）。"""
+    return "<ul class='steps' style='list-style:disc;padding-left:20px'>" + "".join(f"<li style='padding-left:4px'>{t}</li>" for t in items) + "</ul>"
+
+
+def _mn_section(anchor, title, lead, fig, steps, extra=""):
+    return (f"<h2 id='{anchor}'>{title}</h2><div class='lead'>{lead}</div>"
+            f"<div class='row'>{fig}{_mn_steps(steps)}</div>{extra}")
+
+
+MANUAL_TOC = [("mn-flow", "はじめに・全体の流れ"), ("mn-month", "年月・休日・必要人数"), ("mn-fixed", "確定当直"),
+              ("mn-staff", "① 名簿と医師条件の読み込み"), ("mn-ng", "② NG日を入れる"), ("mn-url", "専用URLでNG日を集める"),
+              ("mn-cond", "③ 医師条件を直す"), ("mn-group", "グループ・多め希望"), ("mn-cap", "④ 枠は足りそう？"),
+              ("mn-annual", "年間の当直回数"), ("mn-create", "当直案を作る・結果の見方"), ("mn-post", "掲示用Excel"),
+              ("mn-save", "途中保存と翌月の引き継ぎ"), ("mn-view", "閲覧用の画面"), ("mn-period", "期間指定版"), ("mn-qa", "困ったとき（Q&A）")]
+
+
+def manual_html():
+    """マニュアルの本文（HTML）。"""
+    cal_days = "".join(f"<div class='h'>{w}</div>" for w in WEEKDAYS_JA)
+    h = []
+    # --- はじめに・全体の流れ ---
+    h.append("<h2 id='mn-flow'>はじめに・全体の流れ</h2>"
+             "<div class='lead'>先生方の条件（回数・間隔・希望日・NG日など）をもとに、毎月の当直案を自動で作るアプリです。"
+             "画面は上から順に並んでいて、上から進めれば1か月分の作業が終わります。</div>"
+             "<div class='flow'>"
+             "<div class='st'><div class='n'>1</div><b>年月・休日</b>作る月と休日・人数</div><div class='ar'>›</div>"
+             "<div class='st opt'><div class='n'>2</div><b>確定当直</b>（任意）決まっている当直</div><div class='ar'>›</div>"
+             "<div class='st'><div class='n'>3</div><b>① 名簿</b>前月の条件を引き継ぐ</div><div class='ar'>›</div>"
+             "<div class='st'><div class='n'>4</div><b>② NG日</b>カレンダー・専用URL</div><div class='ar'>›</div>"
+             "<div class='st'><div class='n'>5</div><b>③④ 医師条件</b>回数・間隔・希望</div><div class='ar'>›</div>"
+             "<div class='st go'><div class='n'>6</div><b>当直案を作成</b>確認してExcel</div><div class='ar'>›</div>"
+             "<div class='st'><div class='n'>7</div><b>途中保存</b>翌月に引き継ぐ</div></div>"
+             "<div class='lead'>点線の枠は、必要なときだけ行う項目です。年間の当直回数・不足時の優先順位も、必要なときだけ使います。</div>")
+    h.append("<div class='row'>" + _mn_fig("画面のつくり",
+             "<div class='band'><span class='bt'>💾 作業を途中保存する</span><span class='bt'>📂 前回の作業の続きから始める</span></div>"
+             "<div style='padding:8px 4px;color:#555'>📅 年月・休日・必要人数<br>📅 前月・今月・翌月の確定当直<br>👩‍⚕️ 先生ごとの条件（①〜④）<br>"
+             "📊 年間の当直回数<br>🎯 当直案の作成・確認</div>"
+             "<div class='band'><span class='bt p'>🚀 当直案を作成</span><span class='bt'>医師条件</span><span class='bt'>NG日</span><span class='bt'>結果</span></div>",
+             [(1, 488, 14), (2, 488, 70), (3, 488, 168)])
+             + _mn_steps(["<b>上の紺色の帯</b>：「💾 作業を途中保存する」と「📂 前回の作業の続きから始める」。スクロールしても、いつも見えています。",
+                          "<b>真ん中</b>：見出しの帯で項目に分かれています。上から順に進めます。",
+                          "<b>下の紺色の帯</b>：「🚀 当直案を作成」ボタンと、医師条件・NG日・結果へ移動するボタンがあります。"]) + "</div>"
+             "<div class='warn'>⚠ 画面に入力した内容は、しばらく使わないと消えます。作業の区切りごとに「💾 作業を途中保存する」を押してください。"
+             "途中保存・続きからの読み込み・前月の引き継ぎ・専用URLの管理には、管理用パスワードが必要です（一度入れると、画面を閉じるまで不要）。</div>")
+    # --- 年月・休日・必要人数 ---
+    h.append(_mn_section("mn-month", "年月・休日・必要人数", "いちばん上の項目です。作る月と、休日の扱いを決めます。",
+        _mn_fig("📅 年月・休日・必要人数の設定",
+                "<span class='bt'>◀ 前の月</span><span class='bt on'>来月</span><span class='bt'>次の月 ▶</span>"
+                f"<div class='cal'>{cal_days}<div>1</div><div>2</div><div class='hol'>3<br>休日にする</div><div>4</div><div>5</div><div class='hol'>6</div><div class='hol'>7</div>"
+                "<div>8</div><div>9</div><div>10</div><div class='lock'>11<br>別途決定</div><div>12</div><div class='hol'>13</div><div class='hol'>14</div></div>"
+                "<div class='box'>人数を増やす枠：<b>12/24 A宿直 → 2名</b></div>",
+                [(1, 210, 8), (2, 212, 66), (3, 298, 136), (4, 470, 150)]),
+        ["作る年月を選びます。ふつうは「来月」を押すだけです。",
+         "<b>休日にする</b>：病院独自の休みなど、平日でも土日祝と同じ扱いにする日にチェックします（日直の枠ができます）。土日祝は自動で休日です。",
+         "<b>別途決定</b>：年末年始など、別の方法で当番を決める日です。この日の当直は作らず、先生もNGを入れられません。",
+         "<b>人数を増やす枠</b>（任意）：1つの枠を2名以上にする日があれば、行を足して設定します。"]))
+    # --- 確定当直 ---
+    h.append(_mn_section("mn-fixed", "確定当直（任意）", "すでに決まっている当直や、前月末・翌月初めの当直を入れます。勤務間隔の計算に使われます。",
+        _mn_fig("📅 前月・今月・翌月の確定当直",
+                "<span class='bt'>◀ 前月</span><span class='bt on'>今月</span><span class='bt'>翌月 ▶</span>"
+                "<table class='tb'><tr><th>日付</th><th>区分</th><th>A宿直</th><th>B宿直</th><th>外来宿直</th></tr>"
+                "<tr><td>11/28（土）</td><td>前月</td><td>青木 ⌄</td><td></td><td>稲垣 ⌄</td></tr>"
+                "<tr><td>11/29（日）</td><td>前月</td><td></td><td>岡山 ⌄</td><td></td></tr></table>"
+                "<div class='drop'>📂 前月の掲示用Excelをここにドラッグ＆ドロップ</div>",
+                [(1, 200, 8), (2, 285, 46), (3, 470, 112)]),
+        ["「前月・今月・翌月」を切り替えて、入れる期間を選びます。",
+         "<b>方法1</b>：「✏️ 確定当直の表」に直接入れます。前後7日分の日付は最初から並んでいるので、先生を選ぶだけです。",
+         "<b>方法2</b>：前月の掲示用Excel（手直ししたもの）をそのまま読み込みます。重なった日は、あとから読み込んだ方が使われます。"]))
+    # --- ① 名簿 ---
+    h.append(_mn_section("mn-staff", "① 名簿と医師条件の読み込み", "「👩‍⚕️ 先生ごとの条件」の最初の項目です。先生の名簿と医師条件を取り込みます。",
+        _mn_fig("① 先生の名簿と医師条件",
+                "<div style='display:flex;gap:8px'><div class='box' style='flex:1'><b>方法1</b><br><span class='bt g'>📋 前月の医師条件を引き継ぐ</span></div>"
+                "<div class='drop' style='flex:1'><b>方法2</b><br>医師条件のExcelをドラッグ＆ドロップ</div></div>"
+                "<div class='box'>今の名簿：青木・稲垣・岡山・川口・杉原 …</div>"
+                "<span class='bt'>➕ 先生を追加する</span><span class='bt'>➖ 先生を外す</span>"
+                "<div class='box' style='opacity:.6'>📋 読み込んだ医師条件（見るだけ）</div>",
+                [(1, 220, 20), (2, 470, 20), (3, 470, 98), (4, 262, 130)]),
+        ["<b>方法1</b>：新しい月なら「📋 前月の医師条件を引き継ぐ」を押します。前月の途中保存の医師条件（回数・間隔・翌日PM duty・備考など）が入り、NG日・希望日・コメントは空になります。",
+         "<b>方法2</b>：手元のExcel（ひな形は「📥 ひな形（Excel）をダウンロード」）を、緑の点線の枠にドラッグ＆ドロップします。",
+         "「今の名簿」と「読み込んだ医師条件」で、正しく読み込めたかを確認します。",
+         "新しく来た先生は「➕ 先生を追加する」（名前・入れる位置・条件のもとを選ぶ）、いなくなった先生は「➖ 先生を外す」で直します。"]))
+    # --- ② NG日 ---
+    h.append(_mn_section("mn-ng", "② NG日を入れる", "紙やメールで集めたNG日を、管理者がカレンダーで入れます。",
+        _mn_fig("② NG日を入れる",
+                "<div class='box' style='width:250px'>NG日を入力する医師：青木 ⌄</div>"
+                "<div class='box'><b style='color:#8a4b08'>🕑 翌日PM duty</b>　<span class='bt'>月</span><span class='bt'>火</span><span class='bt on'>水</span><span class='bt'>木</span><span class='bt'>金</span><span class='bt'>土</span><span class='bt'>日</span></div>"
+                f"<div class='cal'>{cal_days}<div>1</div><div class='ng'>2 宿NG</div><div class='pm'>3 ⚠</div><div>4</div><div>5</div><div class='hol'>6</div><div class='hol ng'>7 全NG</div>"
+                "<div>8</div><div>9</div><div class='pm'>10 ⚠</div><div>11</div><div>12</div><div class='hol'>13</div><div class='hol'>14</div></div>"
+                "<span class='bt p'>NG日を反映する</span>",
+                [(1, 275, 10), (2, 470, 48), (3, 128, 110), (4, 140, 205)]),
+        ["NG日を入れる先生を選びます。「◀」「▶」で前後の先生に移れます。",
+         "<b>翌日PM duty</b>の曜日もここで選べます（例：木曜PMにdutyがあれば「水」）。③の表にもすぐ反映され、カレンダーに⚠が付きます。",
+         "入れない日の「日直」「宿直」を押してNGにします。もう一度押すと戻ります。「全日NGにする」「すべてOKに戻す」もあります。",
+         "最後に<b>「NG日を反映する」</b>を押します。反映していない変更があると、ボタンがオレンジに光ります。"],
+        "<table class='tb'><tr><th>表示</th><th>意味</th></tr><tr><td>宿NG</td><td>宿直（夜）に入れない</td></tr>"
+        "<tr><td>日NG</td><td>日直（日中）に入れない（休日だけ）</td></tr><tr><td>全NG</td><td>日直・宿直とも入れない（休日だけ）</td></tr>"
+        "<tr><td>⚠</td><td>翌日PMにdutyがあるため、原則その日の宿直を外す日</td></tr><tr><td>灰色の「別途決定」</td><td>別の方法で当番を決める日（NGは入れられない）</td></tr></table>"))
+    # --- 専用URL ---
+    h.append("<h2 id='mn-url'>専用URLでNG日を集める</h2><div class='lead'>先生方に、スマートフォンから自分でNG日を入れてもらう方法です。"
+             "②の中の「📨 先生方からのNG日入力（専用URL）」を開き、管理用パスワードを入れて使います。</div>"
+             "<div class='flow'><div class='st'><div class='n'>1</div><b>受付を開始</b>締め切り日を書いて開始</div><div class='ar'>›</div>"
+             "<div class='st opt'><div class='n'>2</div><b>URLを配る</b>QRコードの案内書類（初回だけ）</div><div class='ar'>›</div>"
+             "<div class='st'><div class='n'>3</div><b>先生が入力</b>NG日とコメントを保存</div><div class='ar'>›</div>"
+             "<div class='st'><div class='n'>4</div><b>提出状況</b>提出済み・未提出・コメント</div><div class='ar'>›</div>"
+             "<div class='st'><div class='n'>5</div><b>締め切る</b>先生側は直せなくなる</div><div class='ar'>›</div>"
+             "<div class='st go'><div class='n'>6</div><b>取り込む</b>選んだ先生のNG日を反映</div></div>"
+             "<div class='row'>" + _mn_fig("先生のスマートフォンの画面",
+                 "<div class='phone'><b>12月　当直NG日の入力</b><div class='cal' style='grid-template-columns:repeat(4,1fr)'>"
+                 "<div>1</div><div class='ng'>2 NG</div><div>3</div><div class='hol'>4</div></div>"
+                 "<div class='box' style='font-size:.66rem'>管理者へのコメント</div><span class='bt p' style='font-size:.66rem'>NG日とコメントを保存する</span></div>")
+             + _mn_notes(["受付の前に、いちばん上のカレンダーで「休日にする」「別途決定」を済ませておきます。",
+                          "URLは毎月同じです。翌月からは「入力が始まりました」と伝えるだけです。",
+                          "先生は締め切りまで何度でも直せます。最後に保存した内容が使われます。締め切ったあとも、自分の提出内容は見られます。",
+                          "取り込むと、その先生のNG日は提出内容に置き換わります。コメントは③の表の「💬 先生からのコメント」の列や、当直一覧のメモ欄に出ます。",
+                          "やり直すときは「↩️ 取り込みを取り消す」「先生の提出をリセットする」「URLを作り直す」が使えます。"]) + "</div>")
+    # --- ③ 医師条件 ---
+    h.append(_mn_section("mn-cond", "③ 医師条件を直す", "当直案の枠ができるだけ埋まるように、回数・上限・勤務間隔・希望日などを直します。①の表は見るだけで、直すのは③の表です。",
+        _mn_fig("③ 医師条件の調整",
+                "<div><b style='color:#24405f'>🗺 この表の列</b> <span class='chip' style='background:#e9eef6'>名前</span><span class='chip' style='background:#e9eef6'>備考</span>"
+                "<span class='chip' style='background:#e9eef6'>💬 コメント</span><span class='chip' style='background:#fff1dc'>多め希望</span><span class='chip' style='background:#e6f4ea'>月上限</span>"
+                "<span class='chip' style='background:#efe8fb'>A宿上限</span> →</div>"
+                "<table class='tb'><tr><th>名前</th><th>💬 先生からのコメント</th><th>📊 年間（1か月あたり）</th><th>グループ</th><th>月上限</th></tr>"
+                "<tr><td>青木</td><td style='color:#888'>12/3は学会…</td><td style='color:#888'>計4.4｜外1.4｜日1.0｜休1.2</td><td>年次上位</td><td>4回</td></tr>"
+                "<tr><td>稲垣</td><td></td><td style='color:#888'>計4.6｜外0.8｜日1.1｜休1.4</td><td>年次中位</td><td>4回</td></tr></table>"
+                "<div class='warn' style='margin:4px 0 0;font-size:.72rem'>⚠ グループ内で、ほかの先生と違う設定があります</div>",
+                [(1, 470, 4), (2, 470, 52), (3, 470, 112)]),
+        ["<b>この表の列</b>：表の上に、全部の列名が左から右の順に並びます。表は横にスクロールできるので、右の列の入れ忘れに気をつけてください。",
+         "列名にカーソルを合わせると、その列の説明が出ます。灰色の列（先生からのコメント・年間の回数）は見るだけで、直せません。",
+         "グループ内で、休日上限・勤務間隔・枠ごとの上限がほかの先生と違うと、表の下に黄色の欄で知らせます（わざとならそのままで大丈夫です）。"],
+        "<div class='tip'>💡 Excelで直したいときは、「📂 医師条件をExcelでダウンロード」で落として直し、①の方法2で読み込みます。</div>"))
+    # --- グループ・多め希望 ---
+    h.append(_mn_section("mn-group", "グループ・多め希望", "同じ扱いにしたい先生をまとめたり、先生ごとに入れたい種類を寄せたりします。",
+        _mn_fig("👥 グループの設定と多め希望",
+                "<table class='tb'><tr><th>グループ</th><th>A日直</th><th>A宿直</th><th>B日直</th><th>B宿直</th><th>外来日直</th><th>外来宿直</th></tr>"
+                "<tr><td>年次上位</td><td>◯</td><td>◯</td><td>×</td><td>×</td><td>◯</td><td>×</td></tr>"
+                "<tr><td>年次下位</td><td>△</td><td>△</td><td>◯</td><td>◯</td><td>◯</td><td>◯</td></tr>"
+                "<tr><td>レジ</td><td>×</td><td>×</td><td>◯</td><td>◯</td><td>◯</td><td>◯</td></tr></table>"
+                "<table class='tb'><tr><th>名前</th><th>病棟/外来 多め</th><th>宿直/日直 多め</th><th>平日/休日 多め</th></tr>"
+                "<tr><td>青木</td><td>外来多め ⌄</td><td></td><td>休日多め ⌄</td></tr></table>",
+                [(1, 470, 8), (2, 470, 120)]),
+        ["<b>グループ</b>：③の表の上の「👥 グループの設定」で、グループごとに入れる枠を ◯入れる・△できれば入れない・×入れない で決め、表の「グループ」の列で先生のグループを選びます。名前は変えられ、行も足せます。",
+         "<b>多め希望</b>：「病棟/外来」「宿直/日直」「平日/休日」から、できれば多めに入れたい種類を選びます。月の回数は増えず、種類の割合を寄せるだけです（「できれば」なので、必ずではありません）。"],
+        "<div class='tip'>💡 年間の回数の偏りは、③の表の「📊 年間（1か月あたり）」の列を見ながら、多め希望で調整します。</div>"))
+    # --- ④ 枠は足りそう？ ---
+    h.append(_mn_section("mn-cap", "④ 枠は足りそう？", "当直案を作る前に、先生の回数の合計で枠が埋まりそうかを確認します。",
+        _mn_fig("④ ⚖️ 当直の枠は足りそう？",
+                "<div>全体　<span class='bar' style='width:300px'></span></div>"
+                "<div>A宿直　<span class='bar' style='width:260px'></span></div>"
+                "<div>外来日直　<span class='bar r' style='width:120px'></span> <b style='color:#c0392b'>足りない</b></div>",
+                [(1, 292, 50)]),
+        ["赤い棒は、その枠が足りなそうという意味です。月上限・枠ごとの上限・グループの×を見直してください。"]))
+    # --- 年間の当直回数 ---
+    h.append(_mn_section("mn-annual", "年間の当直回数（任意）", "これまでの月の掲示用Excelを読み込んで、先生ごとの回数を集計します。集計は見るだけで、当直案の計算には使いません。",
+        _mn_fig("📊 年間の当直回数",
+                "<div style='display:flex;gap:8px'><div class='drop' style='flex:1'>掲示用Excel（何か月分でも）</div><div class='drop' style='flex:1;border-color:#7a5cc4;color:#4f3a8c;background:#f6f2fd'>📋 集計だけのファイル</div></div>"
+                "<table class='tb'><tr><th>先生</th><th>病棟</th><th>外来</th><th>宿直</th><th>日直</th><th>平日</th><th>休日</th><th>合計</th></tr>"
+                "<tr><td>青木</td><td>21回 (2.6)</td><td>12回 (1.5)</td><td>25回 (3.1)</td><td>8回 (1.0)</td><td>23回 (2.9)</td><td>10回 (1.2)</td><td><b>33回 (4.1)</b></td></tr></table>",
+                [(1, 220, 14), (2, 470, 14), (3, 240, 96)]),
+        ["手直しした掲示用Excelを、まとめて読み込みます。",
+         "当直表が見つからない月は、「📋 集計だけのファイル」のひな形に、期間と先生ごとの回数を書いて読み込みます。",
+         "回数の右の（ ）内は1か月あたりです。表の中でスクロールできます。「集計の区切り」で年度（4月〜3月）か1月〜12月かを選べます。"]))
+    # --- 当直案を作る・結果 ---
+    h.append(_mn_section("mn-create", "当直案を作る・結果の見方", "下の帯の「🚀 当直案を作成」を押すと、当直案ができます（最大1分少々）。押すたびに違う案ができるので、気に入るまで押し直して構いません。",
+        _mn_fig("🗓️ 医師別の当直一覧",
+                "<div class='band'><span class='bt p'>🚀 当直案を作成</span><span class='bt'>結果</span></div>"
+                "<table class='tb'><tr><th>名前</th><th>1</th><th>2</th><th style='background:#fdecec'>3</th><th>4</th><th>病棟</th><th>外来</th><th>合計</th></tr>"
+                "<tr><td>青木</td><td style='background:#dbeafe'>A宿直</td><td>×</td><td style='background:#fdecec'></td><td></td><td>3</td><td>1</td><td>4</td></tr>"
+                "<tr><td>稲垣</td><td></td><td style='background:#fde68a'>外来宿直</td><td style='background:#fdecec'></td><td style='background:#ede9fe'></td><td>2</td><td>2</td><td>4</td></tr>"
+                "<tr><td style='color:#c0392b'>⚠️ 未決定</td><td></td><td></td><td style='color:#c0392b'>B日直</td><td></td><td></td><td></td><td></td></tr></table>"
+                "<span class='bt g'>📥 Excelでダウンロード</span>",
+                [(1, 200, 8), (2, 392, 62), (3, 392, 118)]),
+        ["「🚀 当直案を作成」を押します。",
+         "枠名のマスが決まった当直です。×＝NG、薄い赤の列＝休日、薄紫＝前後の確定当直から間隔が足りない日、黄色の斜線＝翌日PM dutyで宿直を外す日です。",
+         "赤線の下の「⚠️ 未決定」は、人数が足りず決まらなかった枠です。作成ボタンの下の「計算状況・条件の注意事項と対処方法」を見て、条件を直して作り直します。"],
+        "<div class='tip'>💡 「📥 Excelでダウンロード」は印刷用（A3横・1枚）です。右の回数は計算式なので、マスを書き換えると自動で変わります。"
+        "作った当直案は途中保存に入らないので、気に入った案はExcelで残してください。</div>"))
+    # --- 掲示用Excel ---
+    h.append(_mn_section("mn-post", "掲示用Excel", "病院に貼る形の表（A3横・1枚）です。表の下の緑のボタンからダウンロードします。",
+        _mn_fig("掲示用のExcel（A3）",
+                "<div style='text-align:right;font-size:.7rem'>作成日：　　　　　（あとで記入）</div><b>12月 当直表</b>"
+                "<table class='tb'><tr><th>日</th><th>A日直</th><th>A宿直</th><th>B日直</th><th>B宿直</th><th>外来日直</th><th>外来宿直</th><th>ICU</th></tr>"
+                "<tr><td>1（月）</td><td></td><td>青木</td><td></td><td>稲垣</td><td></td><td>岡山</td><td></td></tr>"
+                "<tr><td>2（火）</td><td></td><td>川口</td><td></td><td>未決定</td><td></td><td>杉原</td><td></td></tr></table>",
+                [(1, 300, 8), (2, 420, 92)]),
+        ["ICU病棟（循環器）の列と右上の作成日は空けてあります。ダウンロードしたあとに入れてください。",
+         "交代などの手直しは、このExcelで直接して構いません。人数が足りない枠は「未決定」と書かれています。"],
+        "<div class='warn'>⚠ <b>手直しした掲示用Excelは、毎月手元に残してください。</b>翌月の確定当直と、年間の当直回数の集計に、そのまま読み込めます。"
+        "見えないシート「集計用」は年間の集計に使うので、消さないでください。</div>"))
+    # --- 途中保存 ---
+    h.append(_mn_section("mn-save", "途中保存と翌月の引き継ぎ", "作業の区切りごとに途中保存します。翌月は、この保存から医師条件を引き継げます。",
+        _mn_fig("上の紺色の帯",
+                "<div class='band'><span class='bt'>💾 作業を途中保存する</span><span class='bt'>📂 前回の作業の続きから始める</span></div>"
+                "<div class='box'>翌月：① の <span class='bt g'>📋 前月の医師条件を引き継ぐ</span></div>",
+                [(1, 100, -2), (2, 300, -2), (3, 300, 70)]),
+        ["「💾 作業を途中保存する」で保存します。保存した回ごとに、新しいものから20回分まで残ります。",
+         "同じ月の続きは「📂 前回の作業の続きから始める」で、NG日なども含めて戻せます。どの回から再開するかも選べます。",
+         "翌月は①の「📋 前月の医師条件を引き継ぐ」で、この医師条件から始められます（NG日・希望日・コメントは空になります）。"],
+        "<div class='tip'>💡 途中保存には、年月・休日・確定当直・医師条件（NG日・グループの設定を含む）・取り込んだコメント・不足時の優先順位・年間の回数（回数だけ）などが入ります。作った当直案は入りません。</div>"))
+    # --- 閲覧用 ---
+    h.append(_mn_section("mn-view", "閲覧用の画面", "管理者以外の先生にも、医師条件・NG日・年間の回数を見てもらうための画面です（見るだけ）。",
+        _mn_fig("…/?mode=view",
+                "<b>📋 当直の条件と回数（閲覧用）</b><div class='box' style='width:220px'>閲覧用パスワード：●●●●</div>"
+                "<div class='box'>見る保存：通常版／期間指定版 ⌄</div><table class='tb'><tr><th>名前</th><th>グループ</th><th>NG日</th><th>月上限</th></tr>"
+                "<tr><td>青木</td><td>年次上位</td><td>3, 10:宿NG</td><td>4回</td></tr></table>",
+                [(1, 240, 30), (2, 470, 66)]),
+        ["アプリのURLの最後に「?mode=view」を付けて開き、閲覧用パスワードを入れます。",
+         "通常版・期間指定版の途中保存から選んで見られます。備考と先生からのコメントは出ません。"]))
+    # --- 期間指定版 ---
+    h.append(_mn_section("mn-period", "期間指定版（年末年始など）", "今月1日から、翌月の指定した日までを、1つの当直案として通しで作ります。",
+        _mn_fig("年月を選ぶ欄の下の紫の枠",
+                "<div class='box' style='border-color:#c9b9ee;background:#f6f2fd'><b style='color:#4f3a8c'>年末年始など、月をまたいで作るとき</b><br>"
+                "<span class='bt' style='border-color:#7a5cc4;color:#4f3a8c'>期間指定版を開く →</span></div>",
+                [(1, 470, 30)]),
+        ["紫の枠の「期間指定版を開く →」から移ります。使い方は通常版と同じです。先生方の専用URLも同じものを使えます。ふだんの月は、青い枠の「通常版に戻る →」から通常版で作ってください。"]))
+    # --- Q&A ---
+    h.append("<h2 id='mn-qa'>困ったとき（Q&amp;A）</h2><dl class='qa'>"
+             "<dt>「未決定」の枠が出る</dt><dd>作成ボタンの下の「計算状況・条件の注意事項と対処方法」と、④の赤い棒を確認します。月上限を増やす、勤務間隔を短くするなどして作り直してください。少しだけなら、Excelで手で埋めても構いません。</dd>"
+             "<dt>アプリを開くと入力した内容が消えている</dt><dd>しばらく使わないと画面がリセットされます。「📂 前回の作業の続きから始める」で読み込んでください。先生方の提出内容と専用URLは残っています。</dd>"
+             "<dt>英語の画面（Zzzz…）が出る</dt><dd>アプリが休止しています。青いボタン「Yes, get this app back up!」を押して1分ほど待つと開きます。</dd>"
+             "<dt>先生のNG日が当直案に入っていない</dt><dd>カレンダーで入れた場合は「NG日を反映する」、専用URLの場合は「⬇️ 選んだ先生のNG日を取り込む」を押したか確認してください。</dd>"
+             "<dt>先生側の休日・別途決定の表示が違う</dt><dd>管理用パスワードを入れて、「締め切り日・休日設定を更新」を押してください。</dd>"
+             "<dt>先生から「URLが無効」と言われた</dt><dd>URLを作り直していないか確認してください。案内書類をなくした場合は「URLを作り直す」で新しい案内書類を印刷します。</dd>"
+             "<dt>医師条件の表の右の方の列が見えない</dt><dd>表は横にスクロールできます。表の上の「🗺 この表の列」で、右にどの列があるかを確認できます。</dd>"
+             "<dt>アプリが起動しない・エラーが出る</dt><dd>表示されたエラーの内容を控えて、管理担当者に連絡してください。</dd></dl>")
+    toc = "<div class='toc'>" + "".join(f"<a href='#{a}' target='_self'>{t}</a>" for a, t in MANUAL_TOC) + "</div>"
+    return MANUAL_CSS + "<div class='mn'>" + toc + "".join(h) + "</div>"
+
+
+def manual_page():
+    """マニュアルのページ（…/?mode=manual）。パスワードなしで開ける。医師の名前などのデータは出さない。"""
+    st.title("📖 当直作成アプリ マニュアル")
+    st.markdown("<a href='./' target='_self' style='display:inline-block;border:1px solid #2e8a5b;color:#1f6b45 !important;border-radius:8px;"
+                "padding:3px 12px;font-weight:700;text-decoration:none !important'>← アプリに戻る</a>　"
+                "<span style='color:#6a7686;font-size:.9rem'>図の中のオレンジの番号と、右の手順の番号が対応しています。図の名前（例）は見本です。</span>",
+                unsafe_allow_html=True)
+    with st.sidebar:
+        st.markdown("### 📖 目次")
+        st.markdown("".join(f"<div style='margin:2px 0'><a href='#{a}' target='_self' style='text-decoration:none'>{t}</a></div>" for a, t in MANUAL_TOC),
+                    unsafe_allow_html=True)
+    st.markdown(manual_html(), unsafe_allow_html=True)
+
+
+# ==========================================
 # ページ設定
 # ==========================================
 st.set_page_config(page_title="当直作成アプリ", layout="wide")
@@ -7103,6 +7410,10 @@ except AttributeError:
 if _mode == "view":
     staff_view_page()
     st.stop()
+# マニュアル：…/?mode=manual（図つきの使い方。パスワードなしで開ける）
+if _mode == "manual":
+    manual_page()
+    st.stop()
 if _mode == "period":
     _pp = pathlib.Path(__file__).resolve().parent / "period_page.py"
     if _pp.exists():
@@ -7114,6 +7425,7 @@ if _mode == "period":
 
 st.title("当直作成アプリ")
 st.caption("年月・勤務条件・NG日を入力して、当直案を作成します。")
+st.markdown(MANUAL_LINK_HTML, unsafe_allow_html=True)   # 図つきのマニュアル（別のタブで開くので、入力中の内容は消えない）
 with st.expander("📖 使い方（初めての方・毎月の流れ・結果の見方）", expanded=False):
     tab_intro, tab_flow, tab_ng, tab_result, tab_trouble = st.tabs(["はじめに", "毎月の流れ", "NG日の集め方", "結果の見方・Excel", "困ったとき"])
     with tab_intro:
