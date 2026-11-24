@@ -3260,6 +3260,45 @@ def _staff_apply_new_table(df, year, month, message):
     st.session_state["staff_edit_message"] = message
 
 
+def _pm_duty_changed(doc_name, key, year, month):
+    """②の「翌日PM duty」の曜日ボタンを押したとき（コールバック）。医師条件の表のその先生の「翌日PM duty」を書き換える。"""
+    csv_text = st.session_state.get("staff_current_csv")
+    if not csv_text:
+        return
+    df = parse_staff_csv(csv_text.encode("utf-8"))
+    hit = df["先生の名前"].map(clean_text) == doc_name
+    if not hit.any():
+        return
+    picked = st.session_state.get(key) or []
+    if "翌日PM duty" not in df.columns:
+        df["翌日PM duty"] = ""
+    df["翌日PM duty"] = df["翌日PM duty"].astype(object)
+    df.loc[hit, "翌日PM duty"] = ",".join(w for w in WEEKDAYS_JA if w in picked)
+    _staff_apply_new_table(df, year, month, None)
+
+
+def pm_duty_setting_ui(doc_name, value, locked, year, month):
+    """
+    ②（NG日を入れる）の先生ごとの枠に出す「翌日PM duty」の曜日ボタン。押すとすぐ医師条件の表（③）にも反映する。
+    locked（カレンダーに反映していないNGがある）ときは押せない（押すとカレンダーが描き直され、反映前のNGが消えるため）。
+    """
+    key = f"pm_duty_pick::{doc_name}"
+    st.session_state[key] = [WEEKDAYS_JA[i] for i in pm_duty_weekdays(value)]   # いつも医師条件の表の今の値に合わせる
+    with st.container(border=True):
+        st.markdown("<div style='font-weight:800;color:#8a4b08'>🕑 翌日PM duty"
+                    "<span style='font-weight:500;color:#6a5a40;font-size:.85rem;margin-left:6px'>（その曜日の宿直を原則外す。例：木曜PMにdutyがあれば「水」）</span></div>",
+                    unsafe_allow_html=True)
+        kwargs = dict(key=key, on_change=_pm_duty_changed, args=(doc_name, key, year, month), disabled=locked, label_visibility="collapsed")
+        try:
+            st.pills("翌日PM duty", WEEKDAYS_JA, selection_mode="multi", **kwargs)
+        except (AttributeError, TypeError):   # 古いStreamlitで pills が使えない場合
+            st.multiselect("翌日PM duty", WEEKDAYS_JA, **kwargs)
+        if locked:
+            st.caption("カレンダーにまだ反映していないNGがあるので、押せません。先に「NG日を反映する」を押してください。")
+        else:
+            st.caption("押すとすぐ、③ 医師条件の表の「翌日PM duty」にも反映され、下のカレンダーの⚠も変わります（複数選べます。もう一度押すと外れます）。")
+
+
 def staff_add_doctor(year, month):
     """「この先生を追加する」（ボタンのコールバック）。"""
     csv_text = st.session_state.get("staff_current_csv")
@@ -8114,6 +8153,8 @@ with staff_box_ng:
                                     "取り消すと、取り込む前のNG日に戻ります（取り込み後に手直しした分も戻ります）。")
                         cu2.button("↩️ 取り込みを取り消す", key=f"undo_import_{doc_name}_{year}_{month}", use_container_width=True,
                                    on_click=undo_remote_import, args=(year, month, [doc_name]))
+
+                    pm_duty_setting_ui(doc_name, doc_row.get("翌日PM duty", ""), ng_is_dirty(doc_name), year, month)   # 翌日PM dutyもここで設定できる
 
                     component_days = []
                     for d in range(1, num_days + 1):
