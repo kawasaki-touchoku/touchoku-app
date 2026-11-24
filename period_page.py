@@ -1367,7 +1367,7 @@ with staff_box_cond:
     group_rules = group_rules_ui(restored_state, year, month, staff_is_template)   # 👥 グループの設定（任意）
     st.caption("先生の名前は、ほかの先生と重ならない表記にしてください。")
 
-    edited_df = staff_table(base_df, editable=True)
+    edited_df = staff_table(base_df, editable=True, comments=imported_comments(year, month))   # 先生からのコメントは見るだけで出す
 
     staff_df = edited_df.reset_index()
     # 先生の追加・外すは、この表（今の画面の内容）をもとに行う
@@ -1385,7 +1385,7 @@ with staff_box_cond:
     with staff_box_addrm:
         staff_add_remove_ui(staff_df, year, month, is_template=staff_is_template)
     with staff_box_ro:
-        staff_readonly_table(staff_df)
+        staff_readonly_table(staff_df, comments=imported_comments(year, month))
 
     # 備考が長くて表の中で読み切れない場合のために、全文の一覧を出す
     _note_cols = [c for c in staff_df.columns if str(c).strip().startswith("備考")]
