@@ -597,6 +597,7 @@ def work_save_floating():
 # ============================================================
 st.title("当直作成アプリ（期間指定版・年末年始など）")
 st.caption("今月の1日から、翌月の指定した日までを1つの当直案として作ります。使い方は通常版と同じです。")
+st.markdown(MANUAL_LINK_HTML, unsafe_allow_html=True)   # 図つきのマニュアル（別のタブで開くので、入力中の内容は消えない）
 with st.expander("📖 使い方（期間指定版・作業の流れ・結果の見方）", expanded=False):
     tab_intro, tab_flow, tab_ng, tab_result, tab_trouble = st.tabs(["はじめに（期間指定版）", "作業の流れ", "NG日の集め方", "結果の見方・Excel", "困ったとき"])
     with tab_intro:
