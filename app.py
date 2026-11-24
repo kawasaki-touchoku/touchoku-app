@@ -1260,6 +1260,39 @@ def memo_cell_html(row, tip_up=False):
             f'<div class="full">{full}</div></details><div class="tip{up}">{full}</div></td>')
 
 
+# 医師別の当直一覧の凡例の見た目（当直一覧と、使い方のページで同じものを使う）
+MATRIX_LEGEND_CSS = """<style>
+.dm-legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;margin:2px 0 6px;color:#243247}
+.dm-legend span{display:inline-flex;align-items:center;gap:4px}
+.dm-legend i{display:inline-block;min-width:34px;padding:1px 4px;border:1px solid #d8dde5;border-radius:3px;font-style:normal;font-weight:700;text-align:center;font-size:11px}
+</style>"""
+
+
+def matrix_legend_html(alerts=None):
+    """医師別の当直一覧の凡例（色・記号の見本と意味）。alerts は回数のアラートの基準（None なら初期設定）。"""
+    legend = ['<div class="dm-legend">']
+    for s, (bg, fg) in MATRIX_SHIFT_COLORS.items():
+        legend.append(f'<span><i style="background:{bg};color:{fg}">{s}</i></span>')
+    legend.append(f'<span><i style="box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME}">&nbsp;&nbsp;&nbsp;</i>茶色の枠：希望日が通った当直</span>')
+    legend.append('<span><i style="background:#fdf1f1">&nbsp;</i>薄い赤の列：土日祝・休日にした日</span>')
+    legend.append('<span><i style="background:#e2daf2">&nbsp;</i>薄紫：前後の月（前月末・翌月初めなど）の確定当直との勤務間隔のため、入れない日</span>')
+    legend.append('<span><i style="background:linear-gradient(#e2daf2,#e2daf2) left top/100% 50% no-repeat,#fdf1f1;line-height:1">&nbsp;<br>&nbsp;</i>'
+                  '上半分だけ薄紫：休日の日直だけ入れない日（下半分だけ薄紫＝宿直だけ入れない日）。日直がからむ組み合わせは「宿⇔日・日⇔日 間隔下限」で空けるため</span>')
+    legend.append('<span><i style="color:#c0392b">×</i>当直NG（平日は宿直NG）</span>')
+    legend.append('<span><i style="color:#c0392b;background:#fdf1f1;line-height:1;padding:0 4px">×<br>&nbsp;</i>'
+                  '休日のマス：上半分＝日直、下半分＝宿直。上の×＝日直NG、下の×＝宿直NG（上下とも×＝全NG）</span>')
+    legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>斜線：翌日PM dutyで宿直を外す日（×があればNGも付いている）</span>')
+    legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px) left bottom/100% 50% no-repeat,#fdf1f1">&nbsp;</i>'
+                  '下半分だけ斜線：休日の翌日PM dutyの日。宿直は外し、日直には入れる（×の意味は休日のマスと同じ）</span>')
+    legend.append('<span><i>💬📝</i>メモ欄：先生からのコメント・備考（カーソルを合わせると全文）</span>')
+    legend.append('<span><i style="color:#c0392b;border-color:#c0392b">⚠️ 未決定</i>赤線の下：当直が決まっていない枠</span>')
+    legend.append('<span><i style="background:#ffd2a1;color:#7a3a00">3</i>NG人数の行：その日にNGの先生の数（翌日PM dutyで宿直を外す先生・薄紫のマスの先生を含む）。休日は上＝日直NG・下＝宿直NGの人数</span>')
+    if count_alert_text(alerts):
+        legend.append('<span><i style="color:#c0392b;background:#ffd8d8;border-color:#e03131">⚠</i>右端の赤いマス：' + count_alert_text(alerts) + '</span>')
+    legend.append('</div>')
+    return "".join(legend)
+
+
 def duty_matrix_html(days, rows, year, month, alerts=None):
     def head_color(info):
         return MATRIX_HOLIDAY_HEAD if info['kind'] == 'holiday' else (MATRIX_SATURDAY_HEAD if info['kind'] == 'saturday' else '#243247')
@@ -1332,26 +1365,7 @@ def duty_matrix_html(days, rows, year, month, alerts=None):
 .dm-legend span{display:inline-flex;align-items:center;gap:4px}
 .dm-legend i{display:inline-block;min-width:34px;padding:1px 4px;border:1px solid #d8dde5;border-radius:3px;font-style:normal;font-weight:700;text-align:center;font-size:11px}
 </style>"""
-    legend = ['<div class="dm-legend">']
-    for s, (bg, fg) in MATRIX_SHIFT_COLORS.items():
-        legend.append(f'<span><i style="background:{bg};color:{fg}">{s}</i></span>')
-    legend.append(f'<span><i style="box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME}">&nbsp;&nbsp;&nbsp;</i>茶色の枠：希望日が通った当直</span>')
-    legend.append('<span><i style="background:#fdf1f1">&nbsp;</i>薄い赤の列：土日祝・休日にした日</span>')
-    legend.append('<span><i style="background:#e2daf2">&nbsp;</i>薄紫：前後の月（前月末・翌月初めなど）の確定当直との勤務間隔のため、入れない日</span>')
-    legend.append('<span><i style="background:linear-gradient(#e2daf2,#e2daf2) left top/100% 50% no-repeat,#fdf1f1;line-height:1">&nbsp;<br>&nbsp;</i>'
-                  '上半分だけ薄紫：休日の日直だけ入れない日（下半分だけ薄紫＝宿直だけ入れない日）。日直がからむ組み合わせは「宿⇔日・日⇔日 間隔下限」で空けるため</span>')
-    legend.append('<span><i style="color:#c0392b">×</i>当直NG（平日は宿直NG）</span>')
-    legend.append('<span><i style="color:#c0392b;background:#fdf1f1;line-height:1;padding:0 4px">×<br>&nbsp;</i>'
-                  '休日のマス：上半分＝日直、下半分＝宿直。上の×＝日直NG、下の×＝宿直NG（上下とも×＝全NG）</span>')
-    legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>斜線：翌日PM dutyで宿直を外す日（×があればNGも付いている）</span>')
-    legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px) left bottom/100% 50% no-repeat,#fdf1f1">&nbsp;</i>'
-                  '下半分だけ斜線：休日の翌日PM dutyの日。宿直は外し、日直には入れる（×の意味は休日のマスと同じ）</span>')
-    legend.append('<span><i>💬📝</i>メモ欄：先生からのコメント・備考（カーソルを合わせると全文）</span>')
-    legend.append('<span><i style="color:#c0392b;border-color:#c0392b">⚠️ 未決定</i>赤線の下：当直が決まっていない枠</span>')
-    legend.append('<span><i style="background:#ffd2a1;color:#7a3a00">3</i>NG人数の行：その日にNGの先生の数（翌日PM dutyで宿直を外す先生・薄紫のマスの先生を含む）。休日は上＝日直NG・下＝宿直NGの人数</span>')
-    if count_alert_text(alerts):
-        legend.append('<span><i style="color:#c0392b;background:#ffd8d8;border-color:#e03131">⚠</i>右端の赤いマス：' + count_alert_text(alerts) + '</span>')
-    legend.append('</div>')
+    legend = [matrix_legend_html(alerts)]
 
     head = ['<tr><th class="nm">名前</th><th class="pmcol">翌日<br>PM duty</th><th class="memo">メモ</th>']
     for info in days:
@@ -7254,17 +7268,9 @@ def manual_page():
             "<h4>NGの種類（どちらの方法でも共通）</h4>" + NG_KIND_TABLE)
     with t_result:
         _ug("<h4>🗓️ 医師別の当直一覧（先生ごとに1行）</h4>"
-            "<table><tr><th>見た目</th><th>意味</th></tr>"
-            "<tr><td>枠名のマス</td><td>決まった当直（色は枠の種類）</td></tr>"
-            "<tr><td>茶色の太い枠</td><td>希望日が、希望どおりに通った当直</td></tr>"
-            "<tr><td>薄い赤の列</td><td>土日祝と「休日にする」にした日</td></tr>"
-            "<tr><td>薄紫のマス</td><td>前月末・翌月初めの確定当直から、勤務間隔が足りないため入れない日（上半分だけ＝日直だけ、下半分だけ＝宿直だけ）</td></tr>"
-            "<tr><td>×</td><td>当直NGの日（平日は宿直NG）。休日のマスは上半分＝日直、下半分＝宿直</td></tr>"
-            "<tr><td>黄色の斜線</td><td>翌日PM dutyのため宿直を外す日（休日は下半分だけ。日直には入れます）</td></tr>"
-            "<tr><td>NG人数の行</td><td>その日にNGの先生の数（翌日PM duty・勤務間隔で入れない先生も数える）。多い日ほど濃いオレンジ</td></tr>"
-            "<tr><td>赤線の下の「⚠️ 未決定」</td><td>人数が足りず、担当が決まっていない枠</td></tr>"
-            "<tr><td>右端の回数</td><td>病棟・外来／宿直・日直／平日・休日／合計。多い先生は赤い枠（基準は表の上の「⚠ アラートの基準」で変えられます）</td></tr>"
-            "<tr><td>メモ欄</td><td>💬＝先生からのコメント、📝＝医師条件の備考。カーソルを合わせると全文</td></tr></table>"
+            "<div style='margin:0 0 4px'>アプリの当直一覧の上に出ている凡例と同じものです（色・記号の見本）。</div>"
+            + MATRIX_LEGEND_CSS + matrix_legend_html() +
+            "<ul><li><b>右端の回数</b>：病棟・外来／宿直・日直／平日・休日／合計。赤いマスの基準は、表のすぐ上の「⚠ アラートの基準」で変えられます。</li></ul>"
             "<div class='tip'>💡 マスにカーソルを合わせると、その先生の行と、その日の列がオレンジの線で囲まれます。</div>"
             "<h4>📥 Excelでダウンロード（緑のボタン）</h4><ul>"
             "<li>印刷用の表（A3横・1枚）です。翌日PM dutyの日は、斜線ではなく黄色の塗りで表します。</li>"
