@@ -3380,6 +3380,12 @@ def staff_column_specs():
         "平日/休日 多め": ("平日/休日 多め", 120, "pref",
             "平日多め：平日の宿直を、できれば多めに入れます。休日多め：休日（土日祝と「休日にする」にした日）の日直・宿直を、できれば多めに入れます。"
             "月の回数は増えません（回数の中で、種類の割合を寄せるだけ）。休日回数の偏りを減らす決まりの方が優先です。空欄なら希望なし。"),
+        STAFF_COMMENT_COLUMN: ("💬 先生からのコメント", 200, "comment",
+            "先生が専用URLから入れた「管理者へのコメント」です。取り込むと自動で入ります（この表では直せません）。"
+            "長いコメントは途中まで表示されます。マスをクリックすると全文が出ます。"),
+        STAFF_ANNUAL_COLUMN: ("📊 年間（1か月あたり）", 190, "comment",
+            "「📊 年間の当直回数」で読み込んだ集計の、1か月あたりの回数です（計＝当直合計、外＝外来、日＝日直、休＝休日）。"
+            "病棟＝計−外来、宿直＝計−日直、平日＝計−休日で分かります。見るだけで、この表では直せません。"),
         REQUEST_COLUMN: ("希望日", 100, "text",
             "例：10,15 または 10:A宿直。複数は半角カンマ区切り。日直は休日（または「休日にする」にした日）だけ指定できます。通常の希望は各種条件の範囲内で割り当てます。"),
         "希望優先度(数字が大きいほど優先)": ("優先度", 56, "num",
@@ -3436,6 +3442,8 @@ def staff_column_config(columns, as_index=False, show_ng=False, ng_width=None):
             config[c] = _column(st.column_config.TextColumn, label, width, help_text, pinned=(c == "先生の名前"))
         elif kind == "group":
             config[c] = _column(st.column_config.SelectboxColumn, label, width, help_text, options=doc_group_names())
+        elif kind == "comment":
+            config[c] = _column(st.column_config.TextColumn, label, width, help_text, disabled=True)
         elif kind == "pref":
             config[c] = _column(st.column_config.SelectboxColumn, label, width, help_text, options=list(DOC_PREF_COLUMNS[c]))
         elif kind == "num0":
@@ -3469,6 +3477,39 @@ STAFF_COLUMN_HINT_HTML = (
     ".col-hint .ic{font-size:1.25rem}.col-hint small{font-weight:500;color:#41618a;font-size:.85rem}</style>"
     "<div class='col-hint'><span class='ic'>💡</span>列名にカーソルを合わせると、その列の説明が出ます"
     "<small>（例：「宿⇔日・日⇔日」に合わせると、どの組み合わせに使うかが出ます）</small></div>")
+
+
+# 医師条件の表（①・③）に、見るだけで出す「先生からのコメント」の列（専用URLから取り込んだもの。医師条件のデータには入れない）
+STAFF_COMMENT_COLUMN = "💬 先生からのコメント"
+
+
+STAFF_ANNUAL_COLUMN = "📊 年間（1か月あたり）"
+
+
+def with_annual_column(df, rates, as_index):
+    """表に出すために、コメント（なければ備考）の右へ「📊 年間（1か月あたり）」の列を足したコピーを返す。rates は {名前: 文字}。"""
+    df = df.copy()
+    names = list(df.index) if as_index else list(df.get("先生の名前", pd.Series(dtype=str)))
+    values = [rates.get(clean_text(n), "") for n in names]
+    cols = list(df.columns)
+    anchor = next((i for i, c in enumerate(cols) if c == STAFF_COMMENT_COLUMN), None)
+    if anchor is None:
+        anchor = next((i for i, c in enumerate(cols) if str(c).startswith("備考")), None)
+    pos = anchor + 1 if anchor is not None else (0 if as_index else min(1, len(cols)))
+    df.insert(pos, STAFF_ANNUAL_COLUMN, values)
+    return df
+
+
+def with_comment_column(df, comments, as_index):
+    """表に出すために、備考の右へ「先生からのコメント」の列を足したコピーを返す。comments は {名前: (コメント, 保存日時)}。"""
+    df = df.copy()
+    names = list(df.index) if as_index else list(df.get("先生の名前", pd.Series(dtype=str)))
+    values = [clean_text((comments.get(clean_text(n)) or ("",))[0]) for n in names]
+    cols = list(df.columns)
+    note = next((i for i, c in enumerate(cols) if str(c).startswith("備考")), None)
+    pos = note + 1 if note is not None else (0 if as_index else min(1, len(cols)))
+    df.insert(pos, STAFF_COMMENT_COLUMN, values)
+    return df
 
 
 # 表の上に出す「この表の列」の地図：列の仲間（名前, 札の背景色, 文字色）
@@ -3507,11 +3548,19 @@ def staff_column_map_html(columns):
             "<span class='cm-n'>（左から右の順。右へスクロールすると続きが見えます）</span></div>")
 
 
-def staff_table(df, editable, show_ng=False, max_height=300, ng_width=None):
+def staff_table(df, editable, show_ng=False, max_height=300, ng_width=None, comments=None):
     """医師条件の表。③（編集用）と①（見るだけ）で、列名・幅・行の高さ・並びを同じにする。
     show_ng=True なら、見るだけの表にNG日の列も出す（閲覧用の画面）。max_height は見るだけの表の高さの上限。
-    ng_width を渡すと、NG日の列をその幅にし、ほかの列は列名が見える最小限の幅にする（閲覧用の画面）。"""
+    ng_width を渡すと、NG日の列をその幅にし、ほかの列は列名が見える最小限の幅にする（閲覧用の画面）。
+    comments（{名前: (コメント, 保存日時)}）を渡すと、備考の右に「先生からのコメント」の列を見るだけで出す（返す表には入れない）。"""
     st.markdown(STAFF_COLUMN_HINT_HTML, unsafe_allow_html=True)
+    if comments is not None:
+        df = with_comment_column(df, comments, as_index=editable)
+        # 年間の集計を読み込んでいれば、「📊 年間（1か月あたり）」の列も見るだけで出す（①・③だけ。閲覧用には出さない）
+        rates = st.session_state.get("annual_doc_rates") or {}
+        st.session_state["annual_doc_rates_used"] = rates
+        if rates:
+            df = with_annual_column(df, rates, as_index=editable)
     if editable:
         cols = [c for c in df.columns if str(c).startswith("備考")] + [c for c in df.columns if not str(c).startswith("備考")]
         st.markdown(staff_column_map_html(["先生の名前"] + [c for c in cols if c != NG_COLUMN and not str(c).startswith("_")]), unsafe_allow_html=True)
@@ -3526,6 +3575,8 @@ def staff_table(df, editable, show_ng=False, max_height=300, ng_width=None):
             # 表を出せないときは、原因の文をそのまま画面に出す（ふつうのエラー表示では中身が隠されるため）
             st.error(f"医師条件の表を表示できませんでした。この画面の写真を管理担当者に送ってください。\n\n詳細：{type(e).__name__}: {e}")
             st.stop()
+        if isinstance(out, pd.DataFrame):
+            out = out.drop(columns=[STAFF_COMMENT_COLUMN, STAFF_ANNUAL_COLUMN], errors="ignore")   # 見るだけの列は、医師条件のデータには入れない
     else:
         cols = ["先生の名前"] + [c for c in df.columns if str(c).startswith("備考")] \
             + [c for c in df.columns if c != "先生の名前" and not str(c).startswith("備考") and (show_ng or c != NG_COLUMN)]
@@ -3547,7 +3598,7 @@ def staff_table(df, editable, show_ng=False, max_height=300, ng_width=None):
     return out
 
 
-def staff_readonly_table(staff_df):
+def staff_readonly_table(staff_df, comments=None):
     """①に出す「読み込んだ医師条件」：③の表と同じ列名・幅・行の高さで、見るだけの薄い表にする。"""
     st.markdown("""<style>
 .st-key-staff_readonly{position:relative;border:1px solid #e3e7ee;border-radius:10px;background:#f6f7f9;padding:8px 8px 6px}
@@ -3561,7 +3612,7 @@ def staff_readonly_table(staff_df):
 </style>""", unsafe_allow_html=True)
     st.markdown("<div class='ro-head'>📋 読み込んだ医師条件<small>③の表と同じ内容・ここでは直せません</small></div>", unsafe_allow_html=True)
     with st.container(key="staff_readonly"):
-        staff_table(staff_df, editable=False)
+        staff_table(staff_df, editable=False, comments=comments)
     st.markdown("<a class='ro-link' href='#sec-cond' target='_self'>⬇ ③で医師条件を直す</a>", unsafe_allow_html=True)
 
 
@@ -6558,6 +6609,28 @@ def annual_fmt_months(m):
     return f"{m:.0f}か月" if abs(m - round(m)) < 0.05 else f"{m:.1f}か月"
 
 
+def annual_rate_text(r):
+    """医師条件の表の「📊 年間（1か月あたり）」のマスの文字（計・外来・日直・休日の1か月あたり）。"""
+    m = r["m"]
+
+    def f(v):
+        return "―" if (v is None or m <= 0) else f"{v / m:.1f}"
+    c = r["c"]
+    return f"計{f(c[0])}｜外{f(c[5])}｜日{f(c[2])}｜休{f(c[3])}"
+
+
+def annual_publish_rates(rows):
+    """
+    年間の集計（1か月あたり）を、医師条件の表で使えるように残す。
+    医師条件の表は年間の項目より上にあるので、この回の表で使った値と違えば、もう一度描き直して表にも反映する（同じになれば描き直さない）。
+    """
+    rates = {r["name"]: annual_rate_text(r) for r in rows if r.get("here")}
+    st.session_state["annual_doc_rates"] = rates
+    if rates != st.session_state.get("annual_doc_rates_used", {}):
+        st.session_state["annual_doc_rates_used"] = rates
+        st.rerun()
+
+
 def annual_rows(tot, staff_names):
     """
     集計の表の行を作る。今月の先生を先に、いない先生（年間の分だけある先生）を後に並べる。
@@ -6576,10 +6649,12 @@ def annual_rows(tot, staff_names):
 
 
 ANNUAL_TABLE_CSS = (
-    "<style>.an-t{width:100%;border-collapse:collapse;font-size:.9rem}"
-    ".an-t th,.an-t td{border-bottom:1px solid rgba(128,144,160,.3);padding:5px 9px;text-align:right;white-space:nowrap}"
-    ".an-t th{background:rgba(128,144,160,.12);font-weight:600}.an-t td:first-child,.an-t th:first-child{text-align:left}"
-    ".an-t .pm{display:block;font-size:.76rem;opacity:.65}.an-t .lo{color:#1f6fbf;font-weight:700}.an-t .hi{color:#c0392b;font-weight:700}"
+    "<style>.an-t{width:100%;border-collapse:collapse;font-size:.85rem}"
+    ".an-t th,.an-t td{border-bottom:1px solid rgba(128,144,160,.3);padding:3px 8px;text-align:right;white-space:nowrap}"
+    ".an-t th{background:#eef1f5;font-weight:600}.an-t td:first-child,.an-t th:first-child{text-align:left}"
+    ".an-box{max-height:420px;overflow:auto;border:1px solid rgba(128,144,160,.35);border-radius:8px;margin:2px 0 6px}"
+    ".an-box thead{position:sticky;top:0;z-index:2}.an-box .an-t{border-collapse:separate;border-spacing:0}"
+    ".an-t .pm{display:inline;font-size:.74rem;opacity:.6;margin-left:3px}.an-t .lo{color:#1f6fbf;font-weight:700}.an-t .hi{color:#c0392b;font-weight:700}"
     ".an-t tr.gone td{opacity:.45}.an-t .l{text-align:left}"
     ".an-m{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0}.an-m div{border-radius:8px;padding:4px 0;width:66px;text-align:center;font-size:.8rem;border:1px solid rgba(128,144,160,.35)}"
     ".an-m .ok{background:#e9f6ee;border-color:#9fd3b0;color:#1d6b3a;font-weight:700}.an-m .sv{background:#eaf0f7;border-color:#b7c7dc;color:#24405f;font-weight:700}"
@@ -6590,7 +6665,7 @@ ANNUAL_TABLE_CSS = (
 def annual_cell(v, m, bold=False):
     if v is None:   # 以前の途中保存で、内訳が分からない
         return "―"
-    pm = f"{v / m:.1f}回/月" if m > 0 else "―"
+    pm = f"({v / m:.1f})" if m > 0 else "(―)"   # （ ）内は1か月あたり。1人1段に収めるため横に並べる
     return (f"<b>{v}回</b><span class='pm'><b>{pm}</b></span>" if bold else f"{v}回<span class='pm'>{pm}</span>")
 
 
@@ -6628,7 +6703,7 @@ def annual_table_html(rows):
     for r in rows:
         name = html_escape(r["name"]) + ("" if r["here"] else "（今月はいない先生）")
         body += f"<tr class='{'' if r['here'] else 'gone'}'><td>{name}</td><td>{annual_fmt_months(r['m'])}</td>{annual_body_cells(r)}</tr>"
-    return ANNUAL_TABLE_CSS + f"<table class='an-t'>{annual_head_html(['先生', '在籍月数'])}{body}</table>"
+    return ANNUAL_TABLE_CSS + f"<div class='an-box'><table class='an-t'><thead>{annual_head_html(['先生', '在籍月数'])}</thead><tbody>{body}</tbody></table></div>"
 
 
 def annual_totals_xlsx(rows, title):
@@ -6812,11 +6887,13 @@ def annual_section(year, month, target_start, target_end, frac, restored_state, 
     tot = annual_totals(pieces, months, summaries=summaries)
     if not tot:
         st.caption("まだ集計する回数がありません。掲示用Excelか集計だけのファイルを読み込むと、ここに先生ごとの回数が出ます。")
+        annual_publish_rates([])
         return None
     got = [m for m in months if m in status]
     span = f"{got[0][:4]}年{int(got[0][5:])}月〜{got[-1][:4]}年{int(got[-1][5:])}月" if got else ""
     rows, avg = annual_rows(tot, staff_names)
-    st.markdown(f"**先生ごとの回数（{span}）**　<span style='font-size:.8rem;opacity:.7'>上段：合計　下段：1か月あたり</span>", unsafe_allow_html=True)
+    annual_publish_rates(rows)   # 医師条件の表の「📊 年間（1か月あたり）」の列に使う
+    st.markdown(f"**先生ごとの回数（{span}）**　<span style='font-size:.8rem;opacity:.7'>回数の右の（ ）内は1か月あたり。表の中でスクロールできます</span>", unsafe_allow_html=True)
     st.markdown(annual_table_html(rows), unsafe_allow_html=True)
     st.caption(f"在籍月数：読み込んだ月のうち、その先生の名前がのっている月の数です（日数の割合で数えます。集計だけのファイルの月は、そのファイルの在籍月数）。"
                f"平均（1か月あたり{avg:.1f}回）とくらべます。「―」は分からない回数です。")
@@ -6869,8 +6946,8 @@ def annual_result_view(df_result, year, month, staff_names, created, now_word="�
         body += f"<tr><td>{html_escape(r['name'])}</td><td>{now_counts.get(r['name'], [0])[0]}回</td>{annual_body_cells(r)}</tr>"
     head = annual_head_html(["先生", f"{now_word}の当直"], "（年間）")
     st.subheader(f"📊 年間の回数（{now_word}込み）")
-    st.caption("上段：合計　下段：1か月あたり。この当直案を入れた場合の、年間の回数です。")
-    st.markdown(ANNUAL_TABLE_CSS + f"<table class='an-t'>{head}{body}</table>", unsafe_allow_html=True)
+    st.caption("回数の右の（ ）内は1か月あたり。この当直案を入れた場合の、年間の回数です（表の中でスクロールできます）。")
+    st.markdown(ANNUAL_TABLE_CSS + f"<div class='an-box'><table class='an-t'><thead>{head}</thead><tbody>{body}</tbody></table></div>", unsafe_allow_html=True)
 
 
 # 期間指定版の途中保存のシート（閲覧用の画面で、通常版の途中保存と一緒に選べるようにする）
@@ -6953,7 +7030,7 @@ def staff_view_page():
             names = [clean_text(n) for n in df["先生の名前"].tolist() if clean_text(n)]
             rows, avg = annual_rows(tot, names)
             st.markdown(f"<div style='font-weight:800;color:#24405f;font-size:1.02rem;margin-top:14px'>📊 年間の当直回数（{span}・見るだけ）</div>"
-                        "<span style='font-size:.8rem;opacity:.7'>上段：合計　下段：1か月あたり</span>", unsafe_allow_html=True)
+                        "<span style='font-size:.8rem;opacity:.7'>回数の右の（ ）内は1か月あたり。表の中でスクロールできます</span>", unsafe_allow_html=True)
             st.markdown(annual_table_html(rows), unsafe_allow_html=True)
             st.caption(f"在籍月数：その先生の名前がのっている月の数です（日数の割合で数えます）。平均（1か月あたり{avg:.1f}回）とくらべます。"
                        "「―」は分からない回数です。途中保存したときの集計なので、作成中の当直案の分は入っていません。")
@@ -7786,7 +7863,7 @@ with staff_box_cond:
     group_rules = group_rules_ui(restored_state, year, month, staff_is_template)   # 👥 グループの設定（任意）
     st.caption("先生の名前は、ほかの先生と重ならない表記にしてください。")
 
-    edited_df = staff_table(base_df, editable=True)
+    edited_df = staff_table(base_df, editable=True, comments=imported_comments(year, month))   # 先生からのコメントは見るだけで出す
 
     staff_df = edited_df.reset_index()
     # 先生の追加・外すは、この表（今の画面の内容）をもとに行う
@@ -7804,7 +7881,7 @@ with staff_box_cond:
     with staff_box_addrm:
         staff_add_remove_ui(staff_df, year, month, is_template=staff_is_template)
     with staff_box_ro:
-        staff_readonly_table(staff_df)
+        staff_readonly_table(staff_df, comments=imported_comments(year, month))
 
     # 備考が長くて表の中で読み切れない場合のために、全文の一覧を出す
     _note_cols = [c for c in staff_df.columns if str(c).strip().startswith("備考")]
