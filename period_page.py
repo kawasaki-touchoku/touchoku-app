@@ -568,7 +568,9 @@ def work_save_floating():
                 _entries = work_state_entries()
                 if _entries:
                     _labels = {sid: f"{str(at)[:16]}　{work_state_title(d)}の作業" for sid, at, d in _entries}
-                    if st.session_state.get("work_restore_pick") not in _labels:
+                    # 途中保存した直後は、いちばん新しい保存（今保存したもの）を選んだ状態にする
+                    # （前に選んでいた古い保存が選ばれたままだと、「この作業を読み込む」で古い内容が戻ってしまう）
+                    if st.session_state.pop("work_restore_pick_newest", False) or st.session_state.get("work_restore_pick") not in _labels:
                         st.session_state["work_restore_pick"] = _entries[0][0]
                     st.selectbox(f"読み込む途中保存（新しい順・最大{WORK_HISTORY_KEEP}回分）", list(_labels),
                                  format_func=lambda sid: _labels[sid], key="work_restore_pick")
@@ -1705,6 +1707,7 @@ if work_save_request:
     try:
         work_state_save(work_snapshot)
         st.session_state["work_save_note"] = remote_now()[-8:-3]
+        st.session_state["work_restore_pick_newest"] = True   # 「前回の作業の続きから始める」で、今保存したものを選んだ状態にする
         st.session_state.pop("work_restore_note", None)
         st.session_state["work_note_fresh"] = True   # スマートフォンでは、保存の直後に画面上部へ数秒だけ表示する
         # カレンダーで押したまま反映していない変更は、途中保存に入らないので知らせる
