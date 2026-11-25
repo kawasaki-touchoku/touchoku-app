@@ -6266,12 +6266,18 @@ def doc_pref_terms(model, doctors, days, daily_active_shifts, shifts, staff_df, 
     demand = sum(required_count(d, s) for d in days for s in daily_active_shifts[d])
     cap_sum = sum(cap_total(doc) for doc in doctors) or 1
     terms = []
+    # 回数の勾配（グループの「回数（余裕があるとき）」）の対象の先生は、回数を勾配の目安に合わせるので、ここでは回数の目安を使わない
+    # （両方の目安があると、多め希望の先生だけ「月上限の比で分けた回数」に引っぱられ、勾配とずれるため）
+    def _in_gradient(r):
+        return clean_text(r.get(DOC_GROUP_LEVEL_COLUMN, "")).lower() not in ("", "nan", "none")
+    gradient_on = DOC_GROUP_LEVEL_COLUMN in staff_df.columns and sum(
+        1 for _, r in staff_df.iterrows() if str(r["先生の名前"]) in doctors and _in_gradient(r)) >= 2
     for _, row in staff_df.iterrows():
         doc = str(row["先生の名前"])
         if doc not in doctors:
             continue
         wants = [doc_pref_value(c, row.get(c, "")) for c in DOC_PREF_COLUMNS]
-        if any(w in pair for w, pair in zip(wants, DOC_PREF_COLUMNS.values())):
+        if any(w in pair for w, pair in zip(wants, DOC_PREF_COLUMNS.values())) and not (gradient_on and _in_gradient(row)):
             # この先生の回数の目安（全体の枠の数を、月上限の比で分ける）。ここからのずれを減点する
             target = min(max(round(demand * cap_total(doc) / cap_sum), min_total(doc)), cap_total(doc))
             mine = [shifts[(d, doc, s)] for d in days for s in daily_active_shifts[d] if (d, doc, s) in shifts]
