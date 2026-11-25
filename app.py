@@ -3586,7 +3586,34 @@ def staff_column_group(column):
     return 0
 
 
-def staff_column_map_html(columns):
+SLOT_CAP_LABEL = "枠ごとの上限（A宿・B宿・外宿・A日・B日・外日）"
+SLOT_CAP_SHOW_KEY = "show_slot_caps"   # 「枠ごとの上限の列も出す」のスイッチ
+
+
+def slot_cap_columns(columns):
+    """医師条件の列のうち、枠ごとの上限（A宿上限〜外日上限）の列。"""
+    names = [s + "上限" for s in STAFF_SLOT_SHORT]
+    return [c for c in columns if c in names]
+
+
+def slot_cap_values(df):
+    """枠ごとの上限に値が入っている先生と値。[(名前, 列の表示名, 値)]（空欄は上限なしなので数えない）。"""
+    specs = staff_column_specs()
+    names = list(df.index) if "先生の名前" not in df.columns else list(df["先生の名前"])
+    found = []
+    for c in slot_cap_columns(df.columns):
+        for n, v in zip(names, df[c].tolist()):
+            t = clean_text(v)
+            if t and t.lower() not in ("nan", "none", "<na>"):
+                try:
+                    t = f"{int(float(t))}回"
+                except ValueError:
+                    pass
+                found.append((clean_text(n), specs.get(c, (c,))[0], t))
+    return found
+
+
+def staff_column_map_html(columns, hidden_slot_caps=False):
     """表のすぐ上に出す「この表の列」の地図。全部の列名を、仲間ごとに色分けした札で、表と同じ順（左から右）に並べる。"""
     specs = staff_column_specs()
     parts, last = [], None
@@ -3604,7 +3631,31 @@ def staff_column_map_html(columns):
             ".cm-map .cm-c{border-radius:999px;padding:0 8px;border:1px solid rgba(0,0,0,.08);white-space:nowrap}"
             ".cm-map .cm-ar,.cm-map .cm-n{color:#8a94a3}</style>"
             f"<div class='cm-map'><span class='cm-t'>🗺 この表の列</span>{''.join(parts)}"
-            "<span class='cm-n'>（左から右の順。右へスクロールすると続きが見えます）</span></div>")
+            + ("<span class='cm-ar'>→</span><span style='border:1.5px dashed #7a5cc4;color:#4f3a8c;background:#f6f2fd;border-radius:999px;"
+               f"padding:0 9px;font-weight:800;white-space:nowrap'>＋ {SLOT_CAP_LABEL}：通常は不要。各枠の上限を個別に決めたいときに表示</span>"
+               if hidden_slot_caps else "")
+            + "<span class='cm-n'>（左から右の順。右へスクロールすると続きが見えます）</span></div>")
+
+
+def _slot_cap_switch_changed(base):
+    """「枠ごとの上限の列も出す」を切り替えたとき。表が作り直されるので、③で直しかけの内容を先に今の表として残す。"""
+    csv_text = st.session_state.get("staff_current_csv")
+    if not csv_text or csv_text == base.reset_index().to_csv(index=False):
+        return
+    year, month = st.session_state.get("staff_table_ym") or (None, None)
+    _staff_apply_new_table(parse_staff_csv(csv_text.encode("utf-8")), year, month, None)
+
+
+def slot_cap_switch(base, locked=False):
+    """③の表の下の、紫の枠の「枠ごとの上限の列も出す」スイッチ。値が入っているあいだは、列を隠せないので押せない。"""
+    with st.container(key="slot_cap_box"):
+        st.markdown("<style>.st-key-slot_cap_box{border:2px solid #7a5cc4;background:#f6f2fd;border-radius:10px;padding:8px 14px 4px;margin:6px 0}"
+                    ".st-key-slot_cap_box p{color:#4f3a8c}</style>", unsafe_allow_html=True)
+        st.toggle(f"🟪 {SLOT_CAP_LABEL}の列も出す", key=SLOT_CAP_SHOW_KEY, disabled=locked,
+                  on_change=_slot_cap_switch_changed, args=(base,))
+        st.caption("通常はなくても大丈夫なことが多いです（入れる枠はグループの設定で決めます）。"
+                   "先生ごとに、各枠の上限をより個別に決めたいとき（例：外来宿直は月1回まで）に使ってください。"
+                   + ("　※ 今は値が入っている先生がいるので、列を出したままにしています。" if locked else ""))
 
 
 def staff_table(df, editable, show_ng=False, max_height=300, ng_width=None, comments=None):
@@ -3613,6 +3664,15 @@ def staff_table(df, editable, show_ng=False, max_height=300, ng_width=None, comm
     ng_width を渡すと、NG日の列をその幅にし、ほかの列は列名が見える最小限の幅にする（閲覧用の画面）。
     comments（{名前: (コメント, 保存日時)}）を渡すと、備考の右に「先生からのコメント」の列を見るだけで出す（返す表には入れない）。"""
     st.markdown(STAFF_COLUMN_HINT_HTML, unsafe_allow_html=True)
+    # 枠ごとの上限（A宿〜外日）の列：ふだんは出さない（入れる枠はグループで決める）。スイッチを入れたときと、値が入っているときだけ出す
+    cap_values = slot_cap_values(df)
+    show_caps = bool(st.session_state.get(SLOT_CAP_SHOW_KEY)) or bool(cap_values)
+    hidden_caps = [] if show_caps else slot_cap_columns(df.columns)
+    if editable and cap_values:
+        shown = "、".join(f"{html_escape(n)}：{html_escape(l)} {html_escape(v)}" for n, l, v in cap_values[:6]) + ("…" if len(cap_values) > 6 else "")
+        st.markdown("<div style='background:#fff8e6;border:1.5px solid #f0b46a;border-radius:10px;padding:8px 14px;margin:0 0 8px;color:#7a4a0a'>"
+                    f"⚠ 枠ごとの上限に値が入っている先生がいるので、列を出しています（{shown}）。不要なら空欄にしてください。</div>",
+                    unsafe_allow_html=True)
     if comments is not None:
         df = with_comment_column(df, comments, as_index=editable)
         # 年間の集計を読み込んでいれば、「📊 年間（1か月あたり）」の列も見るだけで出す（①・③だけ。閲覧用には出さない）
@@ -3622,7 +3682,9 @@ def staff_table(df, editable, show_ng=False, max_height=300, ng_width=None, comm
             df = with_annual_column(df, rates, as_index=editable)
     if editable:
         cols = [c for c in df.columns if str(c).startswith("備考")] + [c for c in df.columns if not str(c).startswith("備考")]
-        st.markdown(staff_column_map_html(["先生の名前"] + [c for c in cols if c != NG_COLUMN and not str(c).startswith("_")]), unsafe_allow_html=True)
+        cols = [c for c in cols if c not in hidden_caps]   # 隠した列も、返す表にはそのまま残る
+        st.markdown(staff_column_map_html(["先生の名前"] + [c for c in cols if c != NG_COLUMN and not str(c).startswith("_")], bool(hidden_caps)),
+                    unsafe_allow_html=True)
         kwargs = dict(num_rows="dynamic", use_container_width=True, height=300, column_order=cols,
                       column_config=staff_column_config(df.columns, as_index=True))
         try:
@@ -3636,11 +3698,12 @@ def staff_table(df, editable, show_ng=False, max_height=300, ng_width=None, comm
             st.stop()
         if isinstance(out, pd.DataFrame):
             out = out.drop(columns=[STAFF_COMMENT_COLUMN, STAFF_ANNUAL_COLUMN], errors="ignore")   # 見るだけの列は、医師条件のデータには入れない
+        slot_cap_switch(df.drop(columns=[STAFF_COMMENT_COLUMN, STAFF_ANNUAL_COLUMN], errors="ignore"), locked=bool(cap_values))
     else:
         cols = ["先生の名前"] + [c for c in df.columns if str(c).startswith("備考")] \
             + [c for c in df.columns if c != "先生の名前" and not str(c).startswith("備考") and (show_ng or c != NG_COLUMN)]
-        view = df[[c for c in cols if c in df.columns]].copy()
-        st.markdown(staff_column_map_html([c for c in view.columns if not str(c).startswith("_")]), unsafe_allow_html=True)
+        view = df[[c for c in cols if c in df.columns and c not in hidden_caps]].copy()
+        st.markdown(staff_column_map_html([c for c in view.columns if not str(c).startswith("_")], bool(hidden_caps)), unsafe_allow_html=True)
         # 「5.0」ではなく「5」と見せる（整数だけの列は整数にする。空欄は空欄のまま）
         for c in view.columns:
             num = pd.to_numeric(view[c], errors="coerce")
@@ -3677,6 +3740,7 @@ def staff_readonly_table(staff_df, comments=None):
 
 def staff_add_remove_ui(staff_df, year, month, is_template=False):
     """①先生の名簿：「今の名簿」の一覧と、「➕ 先生を追加する」「➖ 先生を外す」。"""
+    st.session_state["staff_table_ym"] = (year, month)   # 「枠ごとの上限の列も出す」を切り替えたときに使う
     names = [n for n in (clean_text(v) for v in staff_df["先生の名前"].tolist()) if n and n.lower() not in ("nan", "none")]
     if is_template:
         st.markdown(staff_roster_html(names, "入力例の型1〜型9を表示中"), unsafe_allow_html=True)
@@ -7428,6 +7492,7 @@ def manual_page():
                         "<b>グループ</b>：表の上の「👥 グループの設定」で、グループごとに入れる枠（◯入れる・△できれば入れない・×入れない）を決め、表の「グループ」の列で先生のグループを選びます。",
                         "<b>多め希望</b>：「病棟/外来 多め」「宿直/日直 多め」「平日/休日 多め」で、できれば多めに入れたい種類を選べます（月の回数は増えず、種類の割合を寄せるだけ）。",
                         "灰色の列（💬 先生からのコメント・📊 年間（1か月あたり））は見るだけで、直せません。",
+                        "<b>枠ごとの上限（A宿・B宿・外宿・A日・B日・外日）</b>の列は、ふだんは出しません（入れる枠はグループで決めます）。各枠の上限を先生ごとに個別に決めたいときは、表の下の紫のスイッチで出します。値が入っている先生がいると、自動で出して黄色で知らせます。",
                         "グループ内でほかの先生と違う設定（休日上限・勤務間隔・枠ごとの上限）があると、表の下に黄色の欄で知らせます。わざとならそのままで大丈夫です。"])
             + _ug_step(4, "当直の枠は足りそう？（目安）", "", ["赤い棒（足りない枠）がないかを確認します。条件を直すと、すぐに変わります。"])
             + _ug_band("📊 年間の当直回数", tag="任意")
