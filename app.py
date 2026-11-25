@@ -3646,6 +3646,16 @@ def _slot_cap_switch_changed(base):
     _staff_apply_new_table(parse_staff_csv(csv_text.encode("utf-8")), year, month, None)
 
 
+def _slot_cap_clear_all(base):
+    """「🧹 枠ごとの上限を全員分空欄にする」を押したとき。③で直しかけの内容は残したまま、枠ごとの上限だけを全員空欄にする。"""
+    csv_text = st.session_state.get("staff_current_csv")
+    df = parse_staff_csv(csv_text.encode("utf-8")) if csv_text else base.reset_index()
+    for c in slot_cap_columns(df.columns):
+        df[c] = None
+    year, month = st.session_state.get("staff_table_ym") or (None, None)
+    _staff_apply_new_table(df, year, month, None)
+
+
 def slot_cap_switch(base, locked=False):
     """③の表の下の、紫の枠の「枠ごとの上限の列も出す」スイッチ。値が入っているあいだは、列を隠せないので押せない。"""
     with st.container(key="slot_cap_box"):
@@ -3654,8 +3664,20 @@ def slot_cap_switch(base, locked=False):
         st.toggle(f"🟪 {SLOT_CAP_LABEL}の列も出す", key=SLOT_CAP_SHOW_KEY, disabled=locked,
                   on_change=_slot_cap_switch_changed, args=(base,))
         st.caption("通常はなくても大丈夫なことが多いです（入れる枠はグループの設定で決めます）。"
-                   "先生ごとに、各枠の上限をより個別に決めたいとき（例：外来宿直は月1回まで）に使ってください。"
-                   + ("　※ 今は値が入っている先生がいるので、列を出したままにしています。" if locked else ""))
+                   "先生ごとに、各枠の上限をより個別に決めたいとき（例：外来宿直は月1回まで）に使ってください。")
+        if locked:
+            # 値が入っているあいだだけ：人数と、全員分を1回で空欄にするボタン（表の上のほうの行に残った値も消せる）
+            n = len({n for n, _, _ in slot_cap_values(base)})
+            with st.container(key="slot_cap_clear_box"):
+                st.markdown("<style>.st-key-slot_cap_clear_box{background:#fff;border:1.5px solid #e0a36a;border-radius:8px;padding:6px 12px;margin:2px 0 6px}"
+                            ".st-key-slot_cap_clear_box p{color:#7a4a0a !important}"
+                            ".st-key-slot_cap_clear_btn button{border:1.5px solid #c0392b !important;color:#c0392b !important;background:#fff !important;font-weight:700}"
+                            ".st-key-slot_cap_clear_btn button p{color:#c0392b !important;font-weight:700}</style>", unsafe_allow_html=True)
+                c1, c2 = st.columns([3, 2], vertical_alignment="center")
+                c1.markdown(f"※ 値が入っている先生が **{n}名** いるので、列を出したままにしています。")
+                with c2:
+                    st.button("🧹 枠ごとの上限を全員分空欄にする", key="slot_cap_clear_btn",
+                              on_click=_slot_cap_clear_all, args=(base,))
 
 
 def staff_table(df, editable, show_ng=False, max_height=300, ng_width=None, comments=None):
