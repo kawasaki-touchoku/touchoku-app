@@ -4861,7 +4861,18 @@ def paper_ng_form_ui(title, days, file_label):
     """
     if PAPER_NOTES_KEY not in st.session_state:
         st.session_state[PAPER_NOTES_KEY] = PAPER_NOTES_DEFAULT
-    with st.expander("🖨️ 紙で配る当直不可日の用紙", expanded=False):
+    # 管理用の欄（紺の枠）と同じ形で、一歩控えめに：細く薄い紺の枠と、白抜きのしるし
+    st.markdown("<style>.st-key-paper_form_box{border:1.5px solid #9fb0cc;background:#f7f9fc;border-radius:12px;padding:10px 12px 6px}"
+                ".st-key-paper_form_box [data-testid=\"stExpander\"] details{background:#fff}"
+                ".paper-badge{display:inline-flex;align-items:center;gap:6px;font-size:.85rem;font-weight:800;color:#3b5b92;background:#fff;"
+                "border:1.5px solid #3b5b92;border-radius:999px;padding:1px 11px}"
+                ".paper-note{font-size:.85rem;color:#3b4a63;margin-left:8px}</style>", unsafe_allow_html=True)
+    box = st.container(key="paper_form_box")
+    with box:
+        st.markdown("<span class='paper-badge'>🖨️ 紙で集める</span>"
+                    "<span class='paper-note'>URLを使わない先生に、印刷して配る用紙です（パスワードなしで使えます）</span>",
+                    unsafe_allow_html=True)
+    with box, st.expander("🖨️ 紙で配る当直不可日の用紙", expanded=False):
         st.caption("紙でNG日を集めるときの用紙です（A4縦1枚のExcel）。休日と別途決定の日は、上の「年月・休日」の設定のとおりです。"
                    "氏名・締め切り・提出先は空欄なので、印刷してから手で書きます。")
         show_locked = st.checkbox("別途決定の日も書いてもらう", key="paper_form_show_locked",
