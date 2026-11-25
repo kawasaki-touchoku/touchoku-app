@@ -6607,7 +6607,8 @@ def group_rules_ui(restored_state, year, month, staff_is_template=False):
                                                            help="◯ 担当する　△ できるだけ担当しない（ほかの先生で埋まらないときだけ担当する）　× 担当しない")
                        for s in slots})
         config[DOC_GROUP_LEVEL] = st.column_config.SelectboxColumn(
-            DOC_GROUP_LEVEL, options=DOC_GROUP_LEVELS, required=True, default=DOC_GROUP_LEVEL_OFF, width=150,
+            DOC_GROUP_LEVEL, options=DOC_GROUP_LEVELS, required=True, default=DOC_GROUP_LEVEL_OFF,
+            width=header_fit_width(DOC_GROUP_LEVEL, 150),   # 見出しが切れない幅
             help="枠に余裕があるとき、グループごとに当直の回数を多め・少なめにします（足りない月は全員で埋めるので差はつきません）。"
                  "月下限〜月上限は必ず守ります。同じ段階のグループの先生は、なるべく同じ回数にします。"
                  "対象外のグループの先生には、回数の差をつけません（月下限〜月上限の中で決まります）。")
@@ -7513,7 +7514,7 @@ def staff_view_page():
                            columns=["グループ名"] + slots + [DOC_GROUP_LEVEL, DOC_GROUP_MEMO])
         gcfg = {"グループ名": st.column_config.TextColumn("グループ名", width=120)}
         gcfg.update({s: st.column_config.TextColumn(s, width=header_fit_width(s, 0)) for s in slots})
-        gcfg[DOC_GROUP_LEVEL] = st.column_config.TextColumn(DOC_GROUP_LEVEL, width=150)
+        gcfg[DOC_GROUP_LEVEL] = st.column_config.TextColumn(DOC_GROUP_LEVEL, width=header_fit_width(DOC_GROUP_LEVEL, 150))
         gcfg[DOC_GROUP_MEMO] = st.column_config.TextColumn(DOC_GROUP_MEMO, width=240)
         st.dataframe(gdf, hide_index=True, use_container_width=False, column_config=gcfg)
         st.caption("◯：担当する　△：できるだけ担当しない（ほかの先生で埋まらないときだけ担当する）　×：担当しない（ただし、確定当直で決めた分は×でも担当します）")
