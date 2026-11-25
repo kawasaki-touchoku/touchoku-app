@@ -479,6 +479,9 @@ def work_state_restore():
             st.session_state[f"alert_{k}"] = int(v)
     for slot, rank in (data.get("priority") or {}).items():
         st.session_state[f"shortage_priority_{slot}"] = int(rank)
+    if data.get("paper_notes") is not None:   # 紙で配る当直不可日の用紙の注意書き
+        st.session_state[PAPER_NOTES_KEY] = str(data["paper_notes"])
+        st.session_state.pop("paper_form_notes_edit", None)
     st.session_state["restored_state"] = data
     st.session_state.pop("fixed_src", None)   # 確定当直の表も、読み込んだ内容で作り直す
     st.session_state["multi_editor_gen"] = st.session_state.get("multi_editor_gen", 0) + 1   # 増員設定の表を読み込んだ内容で作り直す
@@ -517,6 +520,9 @@ def carry_over_staff(year, month):
     state["staff_csv"] = df.to_csv(index=False)
     if data.get("group_rules"):
         state["group_rules"] = data["group_rules"]   # グループの設定も引き継ぐ
+    if data.get("paper_notes") is not None:   # 紙で配る用紙の注意書きも引き継ぐ
+        st.session_state[PAPER_NOTES_KEY] = str(data["paper_notes"])
+        st.session_state.pop("paper_form_notes_edit", None)
     st.session_state["restored_state"] = state
     st.session_state["uploader_gen"] = st.session_state.get("uploader_gen", 0) + 1
     st.session_state.pop("last_uploaded_file_id", None)
@@ -1355,6 +1361,14 @@ with staff_box_ng:
             [(str(r["先生の名前"]), clean_text(r.get("翌日PM duty", ""))) for _, r in valid_staff.iterrows()],
             custom_holidays, next_month_special_holiday, day_is_holiday, locked_days,
         )
+        # 紙で配る「当直不可日」の用紙（専用URLのすぐ下）。期間の日付は本当の日付にする
+        _paper_days = []
+        for d in range(1, num_days + 1):
+            _real = P.start + _REAL_DATETIME.timedelta(days=d - 1)
+            _paper_days.append((_real, bool(day_is_holiday.get(d)), d in set(locked_days),
+                                str(_real.day) if _real.month == P.start.month else f"{_real.month}/{_real.day}"))
+        paper_ng_form_ui(f"当直不可日（{P.start.year}年{P.start.month}月{P.start.day}日〜{P.end.month}月{P.end.day}日）", _paper_days,
+                         f"当直不可日_{P.start.isoformat()}_{P.end.isoformat()}.xlsx")
         # 医師の選択はタブではなく選択欄にする。
         # （タブは表示の切り替えなどで画面が作り直されると先頭の医師に戻ってしまい、入力ミスの原因になるため）
         # 選択中の医師は「ng_current_doctor」に覚えておく（選択欄そのものの値には頼らない）。
@@ -1682,6 +1696,7 @@ work_snapshot = {
     "alerts": {k: int(st.session_state.get(f"alert_{k}", v) or 0) for k, v in MATRIX_COUNT_ALERTS.items()},
     "annual": annual_snapshot(year, month),   # 年間の当直回数（月ごとの回数だけ）
     "group_rules": st.session_state.get("group_rules_current", default_group_rules()),   # 👥 グループの設定（メモを含む）
+    "paper_notes": st.session_state.get(PAPER_NOTES_KEY, PAPER_NOTES_DEFAULT),   # 紙で配る当直不可日の用紙の注意書き
 }
 # 右上の途中保存ボタンが押されていたら、ここで（全部の入力を読み終えてから）保存する
 if work_save_request:
