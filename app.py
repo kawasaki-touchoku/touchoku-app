@@ -2530,9 +2530,9 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
     # ==================================================================
     reasons = []
     if status == cp_model.MODEL_INVALID:
-        return None, False, ["計算モデルが無効です。入力条件と数値の範囲を確認してください。"], None, None
+        return None, False, ["当直案の計算を始められませんでした。医師条件の数字（回数・間隔など）に、大きすぎる値やおかしな値がないか確認してください。"], None, None
     if status == cp_model.UNKNOWN:
-        reasons.append("通常計算では時間内に案を見つけられませんでした。条件が不可能と確定したわけではありません。")
+        reasons.append("すべての枠を埋める案は、時間内に見つかりませんでした（条件の上で、ぜったいに無理と決まったわけではありません）。")
     try:
         relax_model = cp_model.CpModel()
         r_shifts = {(d, doc, s): relax_model.NewBoolVar(f'r_shift_d{d}_{doc}_{s}') for d in days for doc in doctors for s in daily_active_shifts[d]}
@@ -2590,11 +2590,11 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
                         reasons.append(f"・{s}： 計 {count} 枠不足")
             return partial_df, False, reasons, past_worked_dates, future_worked_dates
         if relax_status == cp_model.INFEASIBLE:
-            reasons.append("不足枠を許容しても条件が矛盾し、当直案を作成できませんでした。確定当直と回数の上限を確認してください。")
+            reasons.append("空き枠を残しても、条件どうしがぶつかって当直案を作れませんでした。確定当直と回数の上限を確認してください。")
         elif relax_status == cp_model.MODEL_INVALID:
-            reasons.append("不足枠計算のモデルが無効です。入力値を確認してください。")
+            reasons.append("当直案の計算を始められませんでした。医師条件の数字（回数・間隔など）に、大きすぎる値やおかしな値がないか確認してください。")
         else:
-            reasons.append("不足枠を含む案も時間内に見つかりませんでした。条件が不可能と確定したわけではありません。")
+            reasons.append("空き枠を残す案も、時間内に見つかりませんでした（条件の上で、ぜったいに無理と決まったわけではありません）。")
     except Exception as e:
         reasons.append(f"⚠️ 不足を含む当直案の作成中にもエラーが発生しました。詳細: {e}")
 
@@ -3426,13 +3426,13 @@ STAFF_ROW_HEIGHT = 26
 
 def staff_column_specs():
     """{列名: (表に出す名前, 幅px, 種類, 説明)}"""
-    cap = "を担当する月間の上限です。空欄なら、できれば2回まで（入れないと枠が空くときだけ3回以上も入れます）。確定当直がある場合は、超えることがあります。"
+    cap = "を担当する月間の上限です。空欄なら、できるだけ2回まで（ほかの先生で埋まらないときだけ3回以上も担当します）。確定当直がある場合は、超えることがあります。"
     specs = {
         "先生の名前": ("名前", 72, "text", "先生の名前です。ほかの先生と重ならない表記にしてください。"),
         "備考（メモ・説明など自由記入）": ("備考", 110, "text",
             "管理用メモです。ここに書いた内容は計算に反映されません。セルをダブルクリックすると全文が表示され、編集できます。表の下の「備考の全文を見る」でも確認できます。"),
         DOC_GROUP_COLUMN: ("グループ", 96, "group",
-            "グループを選ぶと、上の「👥 グループの設定」で決めた枠の決まり（◯入れる・△できれば入れない・×入れない）が使われます。空欄なら今までどおり。"),
+            "グループを選ぶと、上の「👥 グループの設定」で決めた枠の決まり（◯担当する・△できるだけ担当しない・×担当しない）が使われます。空欄の先生には、グループの決まりを使いません（医師条件の表の値だけで決めます）。"),
         NG_COLUMN: ("NG日", 150, "text",
             "当直に入れない日です（例：3,10:宿NG）。日にちだけなら日直・宿直ともNG、「:宿NG」は宿直だけNG、「:日NG」は日直だけNGです。"),
         "翌日PM duty": ("翌日PM duty", 92, "text",
@@ -3532,7 +3532,7 @@ def staff_legend_text():
     return ("列名の意味：優先度＝希望優先度　宿⇔宿＝宿直と宿直の間に空ける日数（宿⇔宿 間隔下限）　宿⇔日・日⇔日＝日直がからむ勤務（日直→宿直・宿直→日直・日直→日直）の間に空ける日数（宿⇔日・日⇔日 間隔下限）　"
             "月下限＝月の回数の目標（できるだけ確保）　"
             "月上限＝月の回数の上限　休日上限＝休日の回数の上限　宿直上限・日直上限＝A・B・外来を合わせた上限　"
-            "A宿上限〜外日上限＝各枠（A宿直・B宿直・外来宿直・A日直・B日直・外来日直）の月の上限（空欄はできれば2回まで）　"
+            "A宿上限〜外日上限＝各枠（A宿直・B宿直・外来宿直・A日直・B日直・外来日直）の月の上限（空欄はできるだけ2回まで）　"
             "病棟/外来 多め・宿直/日直 多め・平日/休日 多め＝その種類の当直を、できれば多めに入れる（月の回数は増えない）")
 
 
@@ -3689,8 +3689,8 @@ def slot_cap_switch(base, locked=False):
                     ".st-key-slot_cap_box p{color:#4f3a8c}</style>", unsafe_allow_html=True)
         st.toggle(f"🟪 {SLOT_CAP_LABEL}の列も出す", key=SLOT_CAP_SHOW_KEY, disabled=locked,
                   on_change=_slot_cap_switch_changed, args=(base,))
-        st.caption("通常はなくても大丈夫なことが多いです（入れる枠はグループの設定で決めます）。"
-                   "空欄のときは、1つの枠はできれば月2回までにします（入れないと枠が空くときだけ3回以上も入れます）。"
+        st.caption("通常はなくても大丈夫なことが多いです（担当する枠はグループの設定で決めます）。"
+                   "空欄のときは、1つの枠はできるだけ月2回までにします（ほかの先生で埋まらないときだけ3回以上も担当します）。"
                    "先生ごとに、各枠の上限をより個別に決めたいとき（例：外来宿直は月1回まで）に使ってください。")
         if locked:
             # 値が入っているあいだだけ：人数と、全員分を1回で空欄にするボタン（表の上のほうの行に残った値も消せる）
@@ -5753,9 +5753,9 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
     # ==================================================================
     reasons = []
     if status == cp_model.MODEL_INVALID:
-        return None, False, ["計算モデルが無効です。入力条件と数値の範囲を確認してください。"], None, None
+        return None, False, ["当直案の計算を始められませんでした。医師条件の数字（回数・間隔など）に、大きすぎる値やおかしな値がないか確認してください。"], None, None
     if status == cp_model.UNKNOWN:
-        reasons.append("通常計算では時間内に案を見つけられませんでした。条件が不可能と確定したわけではありません。")
+        reasons.append("すべての枠を埋める案は、時間内に見つかりませんでした（条件の上で、ぜったいに無理と決まったわけではありません）。")
     try:
         relax_model = cp_model.CpModel()
         r_shifts = {(d, doc, s): relax_model.NewBoolVar(f'r_shift_d{d}_{doc}_{s}') for d in days for doc in doctors for s in daily_active_shifts[d]}
@@ -5813,11 +5813,11 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
                         reasons.append(f"・{s}： 計 {count} 枠不足")
             return partial_df, False, reasons, past_worked_dates, future_worked_dates
         if relax_status == cp_model.INFEASIBLE:
-            reasons.append("不足枠を許容しても条件が矛盾し、当直案を作成できませんでした。確定当直と回数の上限を確認してください。")
+            reasons.append("空き枠を残しても、条件どうしがぶつかって当直案を作れませんでした。確定当直と回数の上限を確認してください。")
         elif relax_status == cp_model.MODEL_INVALID:
-            reasons.append("不足枠計算のモデルが無効です。入力値を確認してください。")
+            reasons.append("当直案の計算を始められませんでした。医師条件の数字（回数・間隔など）に、大きすぎる値やおかしな値がないか確認してください。")
         else:
-            reasons.append("不足枠を含む案も時間内に見つかりませんでした。条件が不可能と確定したわけではありません。")
+            reasons.append("空き枠を残す案も、時間内に見つかりませんでした（条件の上で、ぜったいに無理と決まったわけではありません）。")
     except Exception as e:
         reasons.append(f"⚠️ 不足を含む当直案の作成中にもエラーが発生しました。詳細: {e}")
 
@@ -6420,7 +6420,7 @@ def group_orphan_notice(staff_df, rules):
         if g and g not in rules:
             gone.setdefault(g, []).append(clean_text(row.get("先生の名前", "")))
     for g, names in gone.items():
-        st.warning(f"「{g}」はグループの設定にないため、{'・'.join(names)}先生は、グループなし（今までどおり）として扱います。"
+        st.warning(f"「{g}」はグループの設定にないため、{'・'.join(names)}先生は、グループが空欄の先生と同じように扱います（グループの決まりは使いません）。"
                    "表の「グループ」の列で選び直すか、グループの設定に行を足してください。")
 
 
@@ -6523,7 +6523,7 @@ def group_rules_xlsx_sheet(wb, rules):
         for i in range(2, len(slots) + 3):
             ws.cell(ws.max_row, i).alignment = Alignment(horizontal="center")
     ws.append([])
-    ws.append(["◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない"])
+    ws.append(["◯：担当する　△：できるだけ担当しない（ほかの先生で埋まらないときだけ担当する）　×：担当しない（ただし、確定当直で決めた分は×でも担当します）"])
     ws.append([f"{DOC_GROUP_LEVEL}：" + "／".join(DOC_GROUP_LEVELS) + "（枠に余裕があるとき、グループごとに回数を多め・少なめにします）"])
     ws.column_dimensions["A"].width = 16
     for i in range(2, len(slots) + 2):
@@ -6596,26 +6596,26 @@ def group_rules_ui(restored_state, year, month, staff_is_template=False):
                         columns=["_id", "グループ名"] + slots + [DOC_GROUP_LEVEL, DOC_GROUP_MEMO])
     with st.container(key="group_rules_box", border=True):
         st.markdown("<div style='font-weight:800;color:#24405f;font-size:1.02rem'>👥 グループの設定（任意）</div>", unsafe_allow_html=True)
-        st.caption("同じ扱いにしたい先生をグループにまとめ、グループごとに入れる枠を決めます。**グループ名はマスをダブルクリックして変えられます**"
-                   "（変えると、そのグループの先生の「グループ」の列も自動で変わります）。先生のグループは、下の表の「グループ」の列で選びます（空欄の先生は今までどおり）。"
+        st.caption("同じ扱いにしたい先生をグループにまとめ、グループごとに担当する枠を決めます。**グループ名はマスをダブルクリックして変えられます**"
+                   "（変えると、そのグループの先生の「グループ」の列も自動で変わります）。先生のグループは、下の表の「グループ」の列で選びます（空欄の先生には、グループの決まりを使いません）。"
                    "グループは表の下の「＋」で足せます（いくつでも）。いらないグループは、行を選んで消せます。")
         for msg in st.session_state.pop("group_rules_notes", []):
             st.warning(msg)
         config = {"グループ名": st.column_config.TextColumn("グループ名", width=120, help="ダブルクリックで名前を変えられます。例：年次上位")}
         config.update({s: st.column_config.SelectboxColumn(s, options=DOC_GROUP_MARKS, required=True, default="◯",
                                                            width=header_fit_width(s, 80),   # 見出しが切れない幅
-                                                           help="◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない")
+                                                           help="◯ 担当する　△ できるだけ担当しない（ほかの先生で埋まらないときだけ担当する）　× 担当しない")
                        for s in slots})
         config[DOC_GROUP_LEVEL] = st.column_config.SelectboxColumn(
             DOC_GROUP_LEVEL, options=DOC_GROUP_LEVELS, required=True, default=DOC_GROUP_LEVEL_OFF, width=150,
             help="枠に余裕があるとき、グループごとに当直の回数を多め・少なめにします（足りない月は全員で埋めるので差はつきません）。"
                  "月下限〜月上限は必ず守ります。同じ段階のグループの先生は、なるべく同じ回数にします。"
-                 "対象外のグループは、差をつける計算に入れません（今までどおり）。")
+                 "対象外のグループの先生には、回数の差をつけません（月下限〜月上限の中で決まります）。")
         config[DOC_GROUP_MEMO] = st.column_config.TextColumn(DOC_GROUP_MEMO, width=240, help="自由に書けるメモです（計算には使いません）。")
         cur = st.data_editor(view, hide_index=True, use_container_width=False, num_rows="dynamic", column_config=config,
                              column_order=["グループ名"] + slots + [DOC_GROUP_LEVEL, DOC_GROUP_MEMO],   # 見えない番号（_id）は出さない
                              key=f"group_rules_editor_{st.session_state.get('group_rules_gen', 0)}")
-        st.caption("◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない（確定当直は、今までどおり入ります）")
+        st.caption("◯：担当する　△：できるだけ担当しない（ほかの先生で埋まらないときだけ担当する）　×：担当しない（ただし、確定当直で決めた分は×でも担当します）")
         st.caption(f"{DOC_GROUP_LEVEL}：枠に余裕があるとき、グループごとに回数を ⬆⬆ 多め〜⬇⬇ 少なめ にします（ふつうに比べて 多め 約1.25倍・やや多め 約1.1倍・"
                    "やや少なめ 約0.9倍・少なめ 約0.75倍）。月下限〜月上限は必ず守ります。対象外のグループは差をつけません。")
 
@@ -7499,12 +7499,12 @@ def staff_view_page():
     # NG日の列は、いちばん長い先生のNG日が入る幅にする（ほかの列は列名が見える最小限）
     _ng_len = max([len(clean_text(v)) for v in df.get(NG_COLUMN, pd.Series(dtype=str)).tolist()] + [10])
     staff_table(df, editable=False, show_ng=True, max_height=900, ng_width=min(900, 8 * _ng_len + 30))
-    # グループの設定（見るだけ）：グループごとに入れる枠（◯△×）とメモ
+    # グループの設定（見るだけ）：グループごとに担当する枠（◯△×）とメモ
     rules = normalize_group_rules(data.get("group_rules")) if data.get("group_rules") is not None else {}
     st.markdown("<div style='font-weight:800;color:#24405f;font-size:1.02rem;margin-top:14px'>👥 グループの設定（見るだけ）</div>",
                 unsafe_allow_html=True)
     if data.get("group_rules") is None:
-        st.info("この保存には、グループの設定が入っていません（グループの機能ができる前の保存です）。")
+        st.info("この保存には、グループの設定が入っていません（グループの設定を使い始める前に保存したものです）。")
     elif not rules:
         st.info("この保存では、グループは設定されていません。")
     if rules:
@@ -7516,7 +7516,7 @@ def staff_view_page():
         gcfg[DOC_GROUP_LEVEL] = st.column_config.TextColumn(DOC_GROUP_LEVEL, width=150)
         gcfg[DOC_GROUP_MEMO] = st.column_config.TextColumn(DOC_GROUP_MEMO, width=240)
         st.dataframe(gdf, hide_index=True, use_container_width=False, column_config=gcfg)
-        st.caption("◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない（確定当直は、今までどおり入ります）")
+        st.caption("◯：担当する　△：できるだけ担当しない（ほかの先生で埋まらないときだけ担当する）　×：担当しない（ただし、確定当直で決めた分は×でも担当します）")
     # 年間の当直回数（見るだけ）：途中保存に入っている回数（先生ごと・月ごとの回数と、集計だけのファイルの回数）を、その保存の集計の区切りで合計する
     annual = data.get("annual") or {}
     a_pieces, a_sums = list(annual.get("pieces") or []), list(annual.get("summaries") or [])
@@ -7678,11 +7678,11 @@ def manual_page():
             + _ug_step(3, "医師条件を調整する", "",
                        ["当直案の枠ができるだけ埋まるように、この表で回数・上限・勤務間隔・希望日などを直します（①の表は見るだけ。直すのは③の表）。",
                         "表は横にスクロールできます。表の上の<b>「🗺 この表の列」</b>で、右にどの列があるかを確認できます。列名にカーソルを合わせると、その列の説明が出ます。",
-                        "<b>グループ</b>：表の上の「👥 グループの設定」で、グループごとに入れる枠（◯入れる・△できれば入れない・×入れない）を決め、表の「グループ」の列で先生のグループを選びます。"
+                        "<b>グループ</b>：表の上の「👥 グループの設定」で、グループごとに担当する枠（◯担当する・△できるだけ担当しない・×担当しない）を決め、表の「グループ」の列で先生のグループを選びます。"
                         "「回数（余裕があるとき）」で、枠に余裕がある月に、グループごとに回数を多め・少なめにできます（対象外のグループは差をつけません）。",
                         "<b>多め希望</b>：「病棟/外来 多め」「宿直/日直 多め」「平日/休日 多め」で、できれば多めに入れたい種類を選べます（月の回数は増えず、種類の割合を寄せるだけ）。",
                         "灰色の列（💬 先生からのコメント・📊 年間（1か月あたり））は見るだけで、直せません。",
-                        "<b>枠ごとの上限（A宿・B宿・外宿・A日・B日・外日）</b>の列は、ふだんは出しません（入れる枠はグループで決めます）。空欄のときは、1つの枠はできれば月2回までにします。各枠の上限を先生ごとに個別に決めたいときは、表の下の紫のスイッチで出します。値が入っている先生がいると、自動で出して黄色で知らせます。",
+                        "<b>枠ごとの上限（A宿・B宿・外宿・A日・B日・外日）</b>の列は、ふだんは出しません（担当する枠はグループで決めます）。空欄のときは、1つの枠はできるだけ月2回までにします。各枠の上限を先生ごとに個別に決めたいときは、表の下の紫のスイッチで出します。値が入っている先生がいると、自動で出して黄色で知らせます。",
                         "グループ内でほかの先生と違う設定（休日上限・勤務間隔・枠ごとの上限）があると、表の下に黄色の欄で知らせます。わざとならそのままで大丈夫です。"])
             + _ug_step(4, "当直の枠は足りそう？（目安）", "", ["赤い棒（足りない枠）がないかを確認します。条件を直すと、すぐに変わります。"])
             + _ug_band("📊 年間の当直回数", tag="任意")
@@ -7783,7 +7783,7 @@ def manual_page():
             "<dt>先生側の休日・別途決定の表示が違う</dt><dd>管理用パスワードを入れて、「締め切り日・休日設定を更新」を押してください。</dd>"
             "<dt>先生から「URLが無効」と言われた</dt><dd>URLを作り直していないか確認してください。案内書類をなくした場合は「URLを作り直す」で新しい案内書類を印刷します。</dd>"
             "<dt>医師条件の表の右の方の列が見えない</dt><dd>表は横にスクロールできます。表の上の「🗺 この表の列」で、右にどの列があるかを確認できます。</dd>"
-            "<dt>年間の当直回数で、在籍月数が少なく出る先生がいる</dt><dd>見えないシート「集計用」を消した掲示用Excelや、この機能ができる前の掲示用Excelでは、その月に当直がなかった先生を在籍に数えられません。アプリでもう一度ダウンロードした掲示用Excelを使うと、正しく数えられます。</dd>"
+            "<dt>年間の当直回数で、在籍月数が少なく出る先生がいる</dt><dd>見えないシート「集計用」がない掲示用Excel（シートを消したものや、少し前のアプリで作ったもの）では、その月に当直がなかった先生を在籍に数えられません。アプリでもう一度ダウンロードした掲示用Excelを使うと、正しく数えられます。</dd>"
             "<dt>確定当直に掲示用Excelを読み込んだら、作る月の分まで入った</dt><dd>作る月（または期間）の掲示用Excelを読み込んでいないか確認してください。確定当直に入れるのは、ふつうは前月の掲示用Excelです。</dd>"
             "<dt>アプリが起動しない・エラーが出る</dt><dd>表示されたエラーの内容を控えて、管理担当者に連絡してください。</dd></dl>")
 
@@ -8336,7 +8336,7 @@ with staff_box_cond:
 | 月上限 | 日直と宿直を合わせた月間の上限です。 |
 | 休日上限 | 土日祝日と「休日にする」にした日に担当する、日直と宿直の合計上限です。 |
 | 宿直上限・日直上限 | A・B・外来を合わせた宿直（日直）の月間の上限です。空欄なら制限しません。 |
-| 各枠の上限（A宿上限〜外日上限） | A宿直など、それぞれの枠を担当する月間の上限です。空欄なら、できれば2回まで（入れないと枠が空くときだけ3回以上も入れます）。表では「A宿上限」「外日上限」のように短く表示します。 |
+| 各枠の上限（A宿上限〜外日上限） | A宿直など、それぞれの枠を担当する月間の上限です。空欄なら、できるだけ2回まで（ほかの先生で埋まらないときだけ3回以上も担当します）。表では「A宿上限」「外日上限」のように短く表示します。 |
 
 1つの枠を1回と数えます。確定当直で同じ日に日直と宿直を担当する場合は2回です。
 月下限は、月上限以下に設定してください。
@@ -8396,7 +8396,7 @@ with staff_box_roster:
     with imp_b:
         uploaded_file = csv_upload_card(
             "staff", "方法2", "ファイルをアップロード（Excel・CSV）",
-            "手元のExcel（以前ダウンロードした医師条件、またはひな形に入力したもの）を読み込みます。以前のCSVも読み込めます。NG日・希望日が入っているときは、使うかどうかを選べます。",
+            "手元のExcel（以前ダウンロードした医師条件、またはひな形に入力したもの）を読み込みます。CSVファイルも読み込めます。NG日・希望日が入っているときは、使うかどうかを選べます。",
             f"staff_csv_{st.session_state.get('uploader_gen', 0)}_{st.session_state.get('staff_uploader_gen', 0)}",
             None, "", "", file_types=("xlsx", "csv"), drop_text="📄⬇　ここにExcelかCSVファイルをドラッグ＆ドロップ")
     with imp_tmpl:
