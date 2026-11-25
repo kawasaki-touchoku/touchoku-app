@@ -3206,6 +3206,9 @@ def work_state_restore():
             st.session_state[f"alert_{k}"] = int(v)
     for slot, rank in (data.get("priority") or {}).items():
         st.session_state[f"shortage_priority_{slot}"] = int(rank)
+    if data.get("paper_notes") is not None:   # 紙で配る当直不可日の用紙の注意書き
+        st.session_state[PAPER_NOTES_KEY] = str(data["paper_notes"])
+        st.session_state.pop("paper_form_notes_edit", None)
     st.session_state["restored_state"] = data
     st.session_state.pop("fixed_src", None)   # 確定当直の表も、読み込んだ内容で作り直す
     st.session_state["multi_editor_gen"] = st.session_state.get("multi_editor_gen", 0) + 1   # 増員設定の表を読み込んだ内容で作り直す
@@ -3244,6 +3247,9 @@ def carry_over_staff(year, month):
     state["staff_csv"] = df.to_csv(index=False)
     if data.get("group_rules"):
         state["group_rules"] = data["group_rules"]   # グループの設定も引き継ぐ
+    if data.get("paper_notes") is not None:   # 紙で配る用紙の注意書きも引き継ぐ
+        st.session_state[PAPER_NOTES_KEY] = str(data["paper_notes"])
+        st.session_state.pop("paper_form_notes_edit", None)
     st.session_state["restored_state"] = state
     st.session_state["uploader_gen"] = st.session_state.get("uploader_gen", 0) + 1
     st.session_state.pop("last_uploaded_file_id", None)
@@ -4567,6 +4573,196 @@ def undo_remote_import(year, month, names):
     if done:
         st.toast(f"↩️ {'、'.join(done)} 先生のNG日を、URLから取り込む前の状態に戻しました。" if len(done) <= 3
                  else f"↩️ {len(done)}名分のNG日を、URLから取り込む前の状態に戻しました。")
+
+
+# ==========================================
+# 紙で配る「当直不可日」の用紙（Excel・A4縦1枚）。先生方の専用URLの入力画面に近い見た目にする
+# ==========================================
+PAPER_NOTES_DEFAULT = "記名なき者は無効とさせていただきます。\n働き方改革を考慮ください。\n遅延は一切認めません。"
+PAPER_NOTES_KEY = "paper_form_notes"
+
+
+def paper_ng_form_xlsx(title, days, notes, show_locked=False):
+    """
+    紙で配る「当直不可日」の用紙（A4縦1枚のExcel）を作る。
+    days は [(日付, 休日か, 別途決定か, 表に出す日付の文字)]。氏名・締め切り・提出先・管理者へのコメントは空欄（印刷してから手で書く）。
+    休日は「日直」「宿直」の2つの欄、平日は「宿直」の欄だけ（日直の欄は斜線）。別途決定の日は、show_locked でなければ灰色の点線のマスにする。
+    白黒で印刷しても分かるように、色だけに頼らない（休日は日付の帯を灰色にして「休日」と書き、枠を太くする。平日の日直は濃い斜線）。
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "当直不可日"
+    ws.sheet_view.showGridLines = False
+    font = "Meiryo"
+    line, hol_line, pale = "7F7F7F", "262626", "8C8C8C"   # 白黒で印刷しても見分けられる濃さ
+    # 列：曜日ごとに「マスの列」と「すき間の列」を交互に並べる（B,D,F,…がマス）
+    ws.column_dimensions["A"].width = 1.5
+    day_cols = []
+    for i in range(7):
+        c = 2 + i * 2
+        day_cols.append(c)
+        ws.column_dimensions[get_column_letter(c)].width = 12.2
+        if i < 6:
+            ws.column_dimensions[get_column_letter(c + 1)].width = 1.0
+    first, last = get_column_letter(day_cols[0]), get_column_letter(day_cols[-1])
+
+    def put(row, col, value=None, size=11, bold=False, color="1F2937", align="left", valign="center"):
+        cell = ws.cell(row=row, column=col, value=value)
+        cell.font = Font(name=font, size=size, bold=bold, color=color)
+        cell.alignment = Alignment(horizontal=align, vertical=valign, wrap_text=False)
+        return cell
+
+    def underline(row, c1, c2):
+        for c in range(c1, c2 + 1):
+            ws.cell(row=row, column=c).border = Border(bottom=Side(style="thin", color="111111"))
+
+    r = 2
+    ws.row_dimensions[r].height = 34
+    put(r, day_cols[0], title, size=18, bold=True)
+    r += 2
+    ws.row_dimensions[r].height = 24
+    put(r, day_cols[0], "氏名：", size=13, bold=True)
+    underline(r, day_cols[1], day_cols[4])
+    r += 2
+    ws.row_dimensions[r].height = 22
+    put(r, day_cols[0], "締め切り：", size=11)
+    underline(r, day_cols[1], day_cols[3])
+    put(r, day_cols[3] + 1, "まで", size=11)
+    r += 1
+    ws.row_dimensions[r].height = 22
+    put(r, day_cols[0], "（消化器内科は", size=11)
+    underline(r, day_cols[1], day_cols[1] + 1)
+    put(r, day_cols[2], "まで、その他は", size=11)
+    underline(r, day_cols[3], day_cols[3] + 1)
+    put(r, day_cols[4], "まで）", size=11)
+    r += 1
+    for text in [t for t in str(notes or "").splitlines() if t.strip()]:
+        ws.row_dimensions[r].height = 18
+        put(r, day_cols[0], text.strip(), size=10.5)
+        r += 1
+    r += 1
+    ws.row_dimensions[r].height = 34
+    ws.merge_cells(f"{first}{r}:{last}{r}")
+    how = put(r, day_cols[0], "入れない日の「日直」「宿直」の欄に×を書いてください（休日は日直・宿直の両方、平日は宿直だけ。斜線の欄は書かなくてよい）。", size=10)
+    how.fill = PatternFill("solid", fgColor="EDEDED")
+    how.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    r += 2
+    for i, w in enumerate(WEEKDAYS_JA):
+        put(r, day_cols[i], w, size=12, bold=True, align="center",
+            color="1F4E8C" if i == 5 else ("A61B29" if i == 6 else "262626"))
+    r += 1
+
+    # カレンダー：月曜はじまり。範囲の外の日は空ける
+    start = days[0][0] - datetime.timedelta(days=days[0][0].weekday())
+    end = days[-1][0] + datetime.timedelta(days=6 - days[-1][0].weekday())
+    info = {d: (hol, locked, label) for d, hol, locked, label in days}
+    cur = start
+    while cur <= end:
+        r_date, r_day, r_night = r, r + 1, r + 2
+        ws.row_dimensions[r_date].height = 22
+        ws.row_dimensions[r_day].height = 30
+        ws.row_dimensions[r_night].height = 30
+        ws.row_dimensions[r + 3].height = 6
+        for i in range(7):
+            d = cur + datetime.timedelta(days=i)
+            c = day_cols[i]
+            if d not in info:
+                continue
+            hol, locked, label = info[d]
+            if locked and not show_locked:
+                side = Side(style="dashed", color=line)
+                for rr, top, bottom in ((r_date, True, False), (r_day, False, False), (r_night, False, True)):
+                    cell = ws.cell(row=rr, column=c)
+                    cell.fill = PatternFill("solid", fgColor="BFBFBF")
+                    cell.border = Border(left=side, right=side, top=side if top else None, bottom=side if bottom else None)
+                put(r_date, c, label, size=13, bold=True, color="595959", align="center")
+                continue
+            outline = Side(style="medium" if hol else "thin", color=hol_line if hol else line)   # 休日は太い枠
+            inner = Side(style="thin", color=line)
+            color = "1F4E8C" if (hol and d.weekday() == 5) else ("A61B29" if hol else "1F2937")
+            dc = put(r_date, c, f"{label}　休日" if hol else label, size=13, bold=True, color=color, align="center")
+            if hol:
+                # 日付の後ろの「休日」は小さく、黒で（白黒でも休日と分かるように）
+                try:
+                    from openpyxl.cell.rich_text import CellRichText, TextBlock
+                    from openpyxl.cell.text import InlineFont
+                    dc.value = CellRichText([TextBlock(InlineFont(rFont=font, sz=13, b=True, color=color), label),
+                                             TextBlock(InlineFont(rFont=font, sz=8, b=True, color="262626"), "  休日")])
+                except ImportError:
+                    pass
+            dc.fill = PatternFill("solid", fgColor="D9D9D9" if hol else "FFFFFF")
+            dc.border = Border(left=outline, right=outline, top=outline, bottom=inner)
+            day_cell = ws.cell(row=r_day, column=c)
+            if hol:
+                put(r_day, c, "日直", size=7.5, bold=True, color="404040", valign="top")
+            else:
+                day_cell.fill = PatternFill("lightUp", fgColor=pale, bgColor="FFFFFF")   # 平日の日直は書かなくてよい（斜線）
+            day_cell.border = Border(left=outline, right=outline, bottom=inner)
+            put(r_night, c, "宿直", size=7.5, bold=True, color="404040", valign="top")
+            ws.cell(row=r_night, column=c).border = Border(left=outline, right=outline, bottom=outline)
+        cur += datetime.timedelta(days=7)
+        r += 4
+
+    # 専用URLの画面と同じく、カレンダーの下に「管理者へのコメント・要望（任意）」の欄
+    r += 1
+    ws.row_dimensions[r].height = 20
+    put(r, day_cols[0], "管理者へのコメント・要望（任意）", size=11, bold=True)
+    r += 1
+    box = Side(style="thin", color=line)
+    for k in range(4):
+        ws.row_dimensions[r + k].height = 22
+        for c in range(day_cols[0], day_cols[-1] + 1):
+            ws.cell(row=r + k, column=c).border = Border(left=box if c == day_cols[0] else None, right=box if c == day_cols[-1] else None,
+                                                         top=box if k == 0 else None, bottom=box if k == 3 else None)
+    r += 4
+
+    ws.print_area = f"A1:{last}{r}"
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.orientation = "portrait"
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_margins.left = ws.page_margins.right = 0.5
+    ws.page_margins.top = ws.page_margins.bottom = 0.5
+    ws.print_options.horizontalCentered = True
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def paper_ng_form_ui(title, days, file_label):
+    """
+    ②（NG日を入れる）の「🖨️ 紙で配る当直不可日の用紙」の欄。ふだんは閉じておける。
+    days は paper_ng_form_xlsx と同じ形。注意書きはスイッチを入れたときだけ書き換えられる（途中保存に入る）。
+    """
+    if PAPER_NOTES_KEY not in st.session_state:
+        st.session_state[PAPER_NOTES_KEY] = PAPER_NOTES_DEFAULT
+    with st.expander("🖨️ 紙で配る当直不可日の用紙", expanded=False):
+        st.caption("紙でNG日を集めるときの用紙です（A4縦1枚のExcel）。休日と別途決定の日は、上の「年月・休日」の設定のとおりです。"
+                   "氏名・締め切り・提出先は空欄なので、印刷してから手で書きます。")
+        show_locked = st.checkbox("別途決定の日も書いてもらう", key="paper_form_show_locked",
+                                  help="チェックなし：別途決定の日は灰色のマスにします（書かなくてよい）。"
+                                       "チェックあり：別途決定の日も、ほかの日と同じ書く欄を出します（書いてもらった×は、別の方法で当番を決めるときの参考用。アプリのカレンダーには入れられません）。")
+        try:
+            data = paper_ng_form_xlsx(title, days, st.session_state[PAPER_NOTES_KEY], show_locked)
+            st.download_button("🖨️ 当直不可日の用紙（Excel）をダウンロード", data, file_name=file_label, mime=XLSX_MIME, key="paper_form_download")
+        except ImportError:
+            st.error("Excelで作るには、Excelを扱う部品（openpyxl）が必要です。requirements.txt に「openpyxl」の1行を追加してください。")
+        if st.toggle("✏️ 用紙の注意書きを変える", key="paper_form_edit_notes"):
+            def _save_notes():
+                st.session_state[PAPER_NOTES_KEY] = st.session_state.get("paper_form_notes_edit", "")
+
+            def _reset_notes():
+                st.session_state[PAPER_NOTES_KEY] = PAPER_NOTES_DEFAULT
+                st.session_state["paper_form_notes_edit"] = PAPER_NOTES_DEFAULT
+            if "paper_form_notes_edit" not in st.session_state:
+                st.session_state["paper_form_notes_edit"] = st.session_state[PAPER_NOTES_KEY]
+            st.text_area("注意書き（1行ずつ。用紙の締め切りの下に出ます）", key="paper_form_notes_edit", height=100, on_change=_save_notes)
+            st.button("初めの文に戻す", key="paper_form_reset_notes", on_click=_reset_notes)
+            st.caption("書き換えた注意書きは途中保存に入るので、翌月も同じ文が使えます。")
 
 
 def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_special_holiday, day_is_holiday, locked_days=()):
@@ -8131,6 +8327,10 @@ with staff_box_ng:
             [(str(r["先生の名前"]), clean_text(r.get("翌日PM duty", ""))) for _, r in valid_staff.iterrows()],
             custom_holidays, next_month_special_holiday, day_is_holiday, locked_days,
         )
+        # 紙で配る「当直不可日」の用紙（専用URLのすぐ下）
+        paper_ng_form_ui(f"当直不可日（{year}年{month}月）",
+                         [(datetime.date(year, month, d), bool(day_is_holiday.get(d)), d in set(locked_days), str(d)) for d in range(1, num_days + 1)],
+                         f"当直不可日_{year}年{month}月.xlsx")
         # 医師の選択はタブではなく選択欄にする。
         # （タブは表示の切り替えなどで画面が作り直されると先頭の医師に戻ってしまい、入力ミスの原因になるため）
         # 選択中の医師は「ng_current_doctor」に覚えておく（選択欄そのものの値には頼らない）。
@@ -8456,6 +8656,7 @@ work_snapshot = {
     "alerts": {k: int(st.session_state.get(f"alert_{k}", v) or 0) for k, v in MATRIX_COUNT_ALERTS.items()},
     "annual": annual_snapshot(year, month),   # 年間の当直回数（月ごとの回数だけ）
     "group_rules": st.session_state.get("group_rules_current", default_group_rules()),   # 👥 グループの設定（メモを含む）
+    "paper_notes": st.session_state.get(PAPER_NOTES_KEY, PAPER_NOTES_DEFAULT),   # 紙で配る当直不可日の用紙の注意書き
 }
 # 右上の途中保存ボタンが押されていたら、ここで（全部の入力を読み終えてから）保存する
 if work_save_request:
