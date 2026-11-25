@@ -1117,7 +1117,7 @@ with staff_box_cond:
 | 月上限 | 日直と宿直を合わせた、**期間全体での**上限です（列名は通常版と共通）。 |
 | 休日上限 | 土日祝日と「休日にする」にした日に担当する、日直と宿直の合計上限です。 |
 | 宿直上限・日直上限 | A・B・外来を合わせた宿直（日直）の期間全体での上限です。空欄なら制限しません。 |
-| 各枠の上限（A宿上限〜外日上限） | A宿直など、それぞれの枠を担当する期間全体での上限です。表では「A宿上限」「外日上限」のように短く表示します。 |
+| 各枠の上限（A宿上限〜外日上限） | A宿直など、それぞれの枠を担当する期間全体での上限です。空欄なら、できれば2回まで（入れないと枠が空くときだけ3回以上も入れます）。表では「A宿上限」「外日上限」のように短く表示します。 |
 
 1つの枠を1回と数えます。確定当直で同じ日に日直と宿直を担当する場合は2回です。
 月下限は、月上限以下に設定してください。
@@ -1584,7 +1584,7 @@ with staff_box_dl:
 
     # ダウンロードするExcelも、画面と同じく「先生の名前 → 備考 → その他」の順にそろえる（読み込みは列名で行うので、古い並びのファイルもそのまま使える）
     _first = ["先生の名前"] + [c for c in staff_df.columns if str(c).startswith("備考")]
-    current_xlsx = staff_xlsx_with_groups(staff_df[_first + [c for c in staff_df.columns if c not in _first and not str(c).startswith("_")]],
+    current_xlsx = staff_xlsx_with_groups(keep_blank_slot_caps(staff_df)[_first + [c for c in staff_df.columns if c not in _first and not str(c).startswith("_")]],
                                           [c for c in staff_df.columns if c not in NUMERIC_DEFAULTS and c not in GROUP_CAP_COLUMNS and c != DAY_GAP_COLUMN],
                                           st.session_state.get("group_rules_current"))
     st.download_button(
@@ -1692,7 +1692,7 @@ work_snapshot = {
     "multi": [[_day_label(d), s, int(c)] for (d, s), c in multi_slots_dict.items()],
     "extra": extra,
     "fixed_csv": edited_fixed_df.to_csv(index=False),
-    "staff_csv": staff_df.to_csv(index=False),
+    "staff_csv": keep_blank_slot_caps(staff_df).to_csv(index=False),   # 枠ごとの上限の空欄は空欄のまま保存する
     "priority": {k: int(v) for k, v in shortage_priority.items()},
     "comments": {n: list(v) for n, v in imported_comments(year, month).items()},
     "alerts": {k: int(st.session_state.get(f"alert_{k}", v) or 0) for k, v in MATRIX_COUNT_ALERTS.items()},
