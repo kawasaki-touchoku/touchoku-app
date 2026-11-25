@@ -2014,6 +2014,7 @@ def validate_staff_inputs(df, year, month):
     df = df[~blank].reset_index(drop=True)
     for name in df.loc[df['先生の名前'].duplicated(), '先生の名前'].unique():
         errors.append(f'先生の名前「{name}」が重複しています。')
+    df = mark_soft_slot_caps(df)   # 枠ごとの上限の空欄（できれば2回まで）を、2が入る前に覚えておく
     for col, default in NUMERIC_DEFAULTS.items():
         if col not in df:
             df[col] = default
@@ -2210,7 +2211,7 @@ def audit_schedule(result, staff, year, month, holidays, multi, past, future, ne
             warnings.append(f'{name}：月下限の目標{int(row["月下限"])}回に対し、{total}回です。')
         group_items = [(col, sum(counts[s] for s in slots), int(row[col])) for col, slots in GROUP_CAP_COLUMNS.items()
                        if clean_text(row.get(col, '')) not in ('', 'nan')]
-        for label, value, cap in [('月上限', total, int(row['月上限'])), ('休日上限', hol_count, int(row['休日上限']))] + group_items + [(s + '上限', counts[s], int(row[s + '上限'])) for s in ALL_SHIFT_TYPES]:
+        for label, value, cap in [('月上限', total, int(row['月上限'])), ('休日上限', hol_count, int(row['休日上限']))] + group_items + [(s + '上限', counts[s], int(row[s + '上限'])) for s in ALL_SHIFT_TYPES if s not in soft_cap_slots(row)]:
             if value > cap:
                 warnings.append(f'{name}：確定当直のため{staff_column_specs().get(label, (label,))[0]}を超えています（設定{cap}回／結果{value}回）。')
         warnings += close_fixed_duty_warnings(name, worked, past, future, int(row['宿⇔宿 間隔下限']), int(row.get(DAY_GAP_COLUMN, row['宿⇔宿 間隔下限'])),
@@ -2262,6 +2263,7 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
     max_shifts_total = {}
     max_hol_shifts_per_doc = {}
     max_shifts_per_type = {}
+    soft_caps = {}   # 枠ごとの上限が空欄の枠（できれば2回まで）
     group_caps = {}
 
     absolute_req_days = {doc: [] for doc in doctors}
@@ -2305,6 +2307,7 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
         max_shifts_total[doc] = safe_int(row.get('月上限'), 5)
         max_hol_shifts_per_doc[doc] = safe_int(row.get('休日上限'), 4)
         max_shifts_per_type[doc] = {s: safe_int(row.get(s + '上限'), 2) for s in ALL_SHIFT_TYPES}
+        soft_caps[doc] = soft_cap_slots(row)
         group_caps[doc] = {col: safe_int(row.get(col), None) for col in GROUP_CAP_COLUMNS}
 
     # --- その日に存在する枠（平日は宿直のみ、休日は日直・宿直） ---
@@ -2393,7 +2396,7 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
             # 枠ごとの上限
             for s_type in ALL_SHIFT_TYPES:
                 active_days = [d for d in days if s_type in daily_active_shifts[d]]
-                if not active_days:
+                if not active_days or s_type in soft_caps[doc]:   # 空欄の枠は決まりにせず、目的の減点で「できれば2回まで」にする
                     continue
                 worked = [x[(d, doc, s_type)] for d in active_days]
                 forced_vars = [x[(d, doc, s_type)] for d in active_days if (d, s_type) in absolute_req_specific[doc] or d in absolute_req_days[doc]]
@@ -2489,6 +2492,8 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
 
     # グループの設定で△（できれば入れない）の枠は、入れるたびに減点する（人が足りないときだけ入る）
     objective_terms += group_avoid_terms(doctors, days, daily_active_shifts, shifts, staff_df)
+    # 枠ごとの上限が空欄の枠は、できれば2回まで（1つの枠に偏らないように）
+    objective_terms += soft_cap_terms(model, doctors, days, daily_active_shifts, shifts, soft_caps)
     # 多め希望（病棟/外来・宿直/日直・平日/休日）：希望の種類に寄せる（月の回数は増やさない）
     objective_terms += doc_pref_terms(model, doctors, days, daily_active_shifts, shifts, staff_df, is_holiday, required_count,
                                       lambda doc: min_shifts_total[doc], total_cap)
@@ -3419,7 +3424,7 @@ STAFF_ROW_HEIGHT = 26
 
 def staff_column_specs():
     """{列名: (表に出す名前, 幅px, 種類, 説明)}"""
-    cap = "を担当する月間の上限です。確定当直がある場合は、超えることがあります。"
+    cap = "を担当する月間の上限です。空欄なら、できれば2回まで（入れないと枠が空くときだけ3回以上も入れます）。確定当直がある場合は、超えることがあります。"
     specs = {
         "先生の名前": ("名前", 72, "text", "先生の名前です。ほかの先生と重ならない表記にしてください。"),
         "備考（メモ・説明など自由記入）": ("備考", 110, "text",
@@ -3525,7 +3530,7 @@ def staff_legend_text():
     return ("列名の意味：優先度＝希望優先度　宿⇔宿＝宿直と宿直の間に空ける日数（宿⇔宿 間隔下限）　宿⇔日・日⇔日＝日直がからむ勤務（日直→宿直・宿直→日直・日直→日直）の間に空ける日数（宿⇔日・日⇔日 間隔下限）　"
             "月下限＝月の回数の目標（できるだけ確保）　"
             "月上限＝月の回数の上限　休日上限＝休日の回数の上限　宿直上限・日直上限＝A・B・外来を合わせた上限　"
-            "A宿上限〜外日上限＝各枠（A宿直・B宿直・外来宿直・A日直・B日直・外来日直）の月の上限　"
+            "A宿上限〜外日上限＝各枠（A宿直・B宿直・外来宿直・A日直・B日直・外来日直）の月の上限（空欄はできれば2回まで）　"
             "病棟/外来 多め・宿直/日直 多め・平日/休日 多め＝その種類の当直を、できれば多めに入れる（月の回数は増えない）")
 
 
@@ -3597,7 +3602,7 @@ def slot_cap_columns(columns):
 
 
 def slot_cap_values(df):
-    """枠ごとの上限に値が入っている先生と値。[(名前, 列の表示名, 値)]（空欄は上限なしなので数えない）。"""
+    """枠ごとの上限に値が入っている先生と値。[(名前, 列の表示名, 値)]（空欄は「できれば2回まで」で、値ではないので数えない）。"""
     specs = staff_column_specs()
     names = list(df.index) if "先生の名前" not in df.columns else list(df["先生の名前"])
     found = []
@@ -3646,6 +3651,25 @@ def _slot_cap_switch_changed(base):
     _staff_apply_new_table(parse_staff_csv(csv_text.encode("utf-8")), year, month, None)
 
 
+def keep_blank_slot_caps(df):
+    """
+    途中保存・Excelのダウンロード用。枠ごとの上限（A宿上限〜外日上限）は、③の表で空欄だった先生は空欄のまま残す。
+    入力チェックで空欄に計算用の初めの値（2）が入るため、そのまま保存すると、読み込んだときに全員に値が入ってしまう。
+    計算用の列（空欄だった枠の印）は保存しない。
+    """
+    caps = slot_cap_columns(df.columns)
+    if SLOT_CAP_SOFT_COLUMN not in df.columns or not caps:
+        return df.drop(columns=[SLOT_CAP_SOFT_COLUMN], errors="ignore")
+    out = df.copy()
+    for c in caps:
+        out[c] = out[c].astype(object)
+    for i, r in out.iterrows():
+        for s in soft_cap_slots(r):
+            if s + "上限" in out.columns:
+                out.at[i, s + "上限"] = None
+    return out.drop(columns=[SLOT_CAP_SOFT_COLUMN])
+
+
 def _slot_cap_clear_all(base):
     """「🧹 枠ごとの上限を全員分空欄にする」を押したとき。③で直しかけの内容は残したまま、枠ごとの上限だけを全員空欄にする。"""
     csv_text = st.session_state.get("staff_current_csv")
@@ -3664,6 +3688,7 @@ def slot_cap_switch(base, locked=False):
         st.toggle(f"🟪 {SLOT_CAP_LABEL}の列も出す", key=SLOT_CAP_SHOW_KEY, disabled=locked,
                   on_change=_slot_cap_switch_changed, args=(base,))
         st.caption("通常はなくても大丈夫なことが多いです（入れる枠はグループの設定で決めます）。"
+                   "空欄のときは、1つの枠はできれば月2回までにします（入れないと枠が空くときだけ3回以上も入れます）。"
                    "先生ごとに、各枠の上限をより個別に決めたいとき（例：外来宿直は月1回まで）に使ってください。")
         if locked:
             # 値が入っているあいだだけ：人数と、全員分を1回で空欄にするボタン（表の上のほうの行に残った値も消せる）
@@ -5149,7 +5174,8 @@ def doctor_capacity(row):
     """
     total = _cap_num(row.get("月上限"), 0)
     hol = _cap_num(row.get("休日上限"), 0)
-    per = {s: _cap_num(row.get(s + "上限"), 0) for s in ALL_SHIFT_TYPES}
+    soft = soft_cap_slots(row)   # 空欄の枠（できれば2回まで）は、足りないときは3回目以上も入るので、枠の上限では頭打ちにしない
+    per = {s: (total if s in soft else _cap_num(row.get(s + "上限"), 0)) for s in ALL_SHIFT_TYPES}
     g_night = _cap_num(row.get("宿直上限"))
     g_day = _cap_num(row.get("日直上限"))
     night = min([total, sum(per[s] for s in NIGHT_SHIFTS)] + ([g_night] if g_night is not None else []))
@@ -5458,6 +5484,7 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
     max_shifts_total = {}
     max_hol_shifts_per_doc = {}
     max_shifts_per_type = {}
+    soft_caps = {}   # 枠ごとの上限が空欄の枠（できれば2回まで）
     group_caps = {}
 
     absolute_req_days = {doc: [] for doc in doctors}
@@ -5501,6 +5528,7 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
         max_shifts_total[doc] = safe_int(row.get('月上限'), 5)
         max_hol_shifts_per_doc[doc] = safe_int(row.get('休日上限'), 4)
         max_shifts_per_type[doc] = {s: safe_int(row.get(s + '上限'), 2) for s in ALL_SHIFT_TYPES}
+        soft_caps[doc] = soft_cap_slots(row)
         group_caps[doc] = {col: safe_int(row.get(col), None) for col in GROUP_CAP_COLUMNS}
 
     # --- その日に存在する枠（平日は宿直のみ、休日は日直・宿直） ---
@@ -5589,7 +5617,7 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
             # 枠ごとの上限
             for s_type in ALL_SHIFT_TYPES:
                 active_days = [d for d in days if s_type in daily_active_shifts[d]]
-                if not active_days:
+                if not active_days or s_type in soft_caps[doc]:   # 空欄の枠は決まりにせず、目的の減点で「できれば2回まで」にする
                     continue
                 worked = [x[(d, doc, s_type)] for d in active_days]
                 forced_vars = [x[(d, doc, s_type)] for d in active_days if (d, s_type) in absolute_req_specific[doc] or d in absolute_req_days[doc]]
@@ -5685,6 +5713,8 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
 
     # グループの設定で△（できれば入れない）の枠は、入れるたびに減点する（人が足りないときだけ入る）
     objective_terms += group_avoid_terms(doctors, days, daily_active_shifts, shifts, staff_df)
+    # 枠ごとの上限が空欄の枠は、できれば2回まで（1つの枠に偏らないように）
+    objective_terms += soft_cap_terms(model, doctors, days, daily_active_shifts, shifts, soft_caps)
     # 多め希望（病棟/外来・宿直/日直・平日/休日）：希望の種類に寄せる（月の回数は増やさない）
     objective_terms += doc_pref_terms(model, doctors, days, daily_active_shifts, shifts, staff_df, is_holiday, required_count,
                                       lambda doc: min_shifts_total[doc], total_cap)
@@ -5803,6 +5833,7 @@ def period_validate_staff_inputs(df, P):
     df = df[~blank].reset_index(drop=True)
     for name in df.loc[df['先生の名前'].duplicated(), '先生の名前'].unique():
         errors.append(f'先生の名前「{name}」が重複しています。')
+    df = mark_soft_slot_caps(df)   # 枠ごとの上限の空欄（できれば2回まで）を、2が入る前に覚えておく
     for col, default in NUMERIC_DEFAULTS.items():
         if col not in df:
             df[col] = default
@@ -5932,7 +5963,7 @@ def period_audit_schedule(result, staff, P, holidays, multi, past, future, next_
             warnings.append(f'{name}：月下限の目標{int(row["月下限"])}回に対し、{total}回です。')
         group_items = [(col, sum(counts[s] for s in slots), int(row[col])) for col, slots in GROUP_CAP_COLUMNS.items()
                        if clean_text(row.get(col, '')) not in ('', 'nan')]
-        for label, value, cap in [('月上限', total, int(row['月上限'])), ('休日上限', hol_count, int(row['休日上限']))] + group_items + [(s + '上限', counts[s], int(row[s + '上限'])) for s in ALL_SHIFT_TYPES]:
+        for label, value, cap in [('月上限', total, int(row['月上限'])), ('休日上限', hol_count, int(row['休日上限']))] + group_items + [(s + '上限', counts[s], int(row[s + '上限'])) for s in ALL_SHIFT_TYPES if s not in soft_cap_slots(row)]:
             if value > cap:
                 warnings.append(f'{name}：確定当直のため{staff_column_specs().get(label, (label,))[0]}を超えています（設定{cap}回／結果{value}回）。')
         warnings += close_fixed_duty_warnings(name, worked, past, future, int(row['宿⇔宿 間隔下限']), int(row.get(DAY_GAP_COLUMN, row['宿⇔宿 間隔下限'])),
@@ -6242,6 +6273,43 @@ def doc_pref_terms(model, doctors, days, daily_active_shifts, shifts, staff_df, 
     return terms
 
 
+# 枠ごとの上限（A宿上限〜外日上限）が空欄の枠は「できれば2回まで」（どうしても足りないときだけ3回目以上も入れる）
+SLOT_CAP_SOFT_COLUMN = "_枠ごとの上限が空欄"   # 計算用の列（表には出さない）。空欄だった枠の名前をカンマ区切りで入れる
+SLOT_CAP_SOFT_LIMIT = 2
+SLOT_CAP_SOFT_PENALTY = 4000   # 2回を超えた1回ごとの減点（空き枠・月下限より弱く、グループの△・休日の偏り・ふつうの希望日より強い）
+
+
+def mark_soft_slot_caps(df):
+    """入力チェックの前に、枠ごとの上限が空欄の枠を計算用の列に書いておく（入力チェックで空欄に2が入るため）。
+    すでに列がある表（計算用に作り直した表）は、そのままにする。"""
+    if SLOT_CAP_SOFT_COLUMN in df.columns:
+        return df
+    df = df.copy()
+    df[SLOT_CAP_SOFT_COLUMN] = [",".join(s for s in ALL_SHIFT_TYPES
+                                         if s + "上限" not in df.columns or clean_text(r[s + "上限"]).lower() in ("", "nan", "none", "<na>"))
+                                for _, r in df.iterrows()]
+    return df
+
+
+def soft_cap_slots(row):
+    """その先生の「枠ごとの上限が空欄（できれば2回まで）」の枠。"""
+    return {x for x in clean_text(row.get(SLOT_CAP_SOFT_COLUMN, "")).split(",") if x in ALL_SHIFT_TYPES}
+
+
+def soft_cap_terms(model, doctors, days, daily_active_shifts, shifts, soft_caps):
+    """枠ごとの上限が空欄の枠：2回を超えた分を減点する（入れないと空き枠が出るときだけ、3回目以上が入る）。"""
+    terms = []
+    for doc in doctors:
+        for s in soft_caps.get(doc, ()):
+            worked = [shifts[(d, doc, s)] for d in days if s in daily_active_shifts[d]]
+            if len(worked) <= SLOT_CAP_SOFT_LIMIT:
+                continue
+            excess = model.NewIntVar(0, len(worked), f"soft_cap_{doc}_{s}")
+            model.Add(excess >= sum(worked) - SLOT_CAP_SOFT_LIMIT)
+            terms.append(-SLOT_CAP_SOFT_PENALTY * excess)
+    return terms
+
+
 def apply_group_rules(staff_df, rules):
     """
     計算に使う医師条件を作る（画面の表・保存する医師条件は変えない）。
@@ -6258,6 +6326,8 @@ def apply_group_rules(staff_df, rules):
         for s, mark in marks.items():
             if mark == "×" and s + "上限" in df.columns:
                 df.at[i, s + "上限"] = 0
+                if SLOT_CAP_SOFT_COLUMN in df.columns:   # ×の枠は「できれば」ではなく、必ず0回
+                    df.at[i, SLOT_CAP_SOFT_COLUMN] = ",".join(x for x in clean_text(df.at[i, SLOT_CAP_SOFT_COLUMN]).split(",") if x and x != s)
         avoid.append(",".join(s for s, mark in marks.items() if mark == "△"))
     df[DOC_GROUP_AVOID_COLUMN] = avoid
     return df
@@ -7522,7 +7592,7 @@ def manual_page():
                         "<b>グループ</b>：表の上の「👥 グループの設定」で、グループごとに入れる枠（◯入れる・△できれば入れない・×入れない）を決め、表の「グループ」の列で先生のグループを選びます。",
                         "<b>多め希望</b>：「病棟/外来 多め」「宿直/日直 多め」「平日/休日 多め」で、できれば多めに入れたい種類を選べます（月の回数は増えず、種類の割合を寄せるだけ）。",
                         "灰色の列（💬 先生からのコメント・📊 年間（1か月あたり））は見るだけで、直せません。",
-                        "<b>枠ごとの上限（A宿・B宿・外宿・A日・B日・外日）</b>の列は、ふだんは出しません（入れる枠はグループで決めます）。各枠の上限を先生ごとに個別に決めたいときは、表の下の紫のスイッチで出します。値が入っている先生がいると、自動で出して黄色で知らせます。",
+                        "<b>枠ごとの上限（A宿・B宿・外宿・A日・B日・外日）</b>の列は、ふだんは出しません（入れる枠はグループで決めます）。空欄のときは、1つの枠はできれば月2回までにします。各枠の上限を先生ごとに個別に決めたいときは、表の下の紫のスイッチで出します。値が入っている先生がいると、自動で出して黄色で知らせます。",
                         "グループ内でほかの先生と違う設定（休日上限・勤務間隔・枠ごとの上限）があると、表の下に黄色の欄で知らせます。わざとならそのままで大丈夫です。"])
             + _ug_step(4, "当直の枠は足りそう？（目安）", "", ["赤い棒（足りない枠）がないかを確認します。条件を直すと、すぐに変わります。"])
             + _ug_band("📊 年間の当直回数", tag="任意")
@@ -8176,7 +8246,7 @@ with staff_box_cond:
 | 月上限 | 日直と宿直を合わせた月間の上限です。 |
 | 休日上限 | 土日祝日と「休日にする」にした日に担当する、日直と宿直の合計上限です。 |
 | 宿直上限・日直上限 | A・B・外来を合わせた宿直（日直）の月間の上限です。空欄なら制限しません。 |
-| 各枠の上限（A宿上限〜外日上限） | A宿直など、それぞれの枠を担当する月間の上限です。表では「A宿上限」「外日上限」のように短く表示します。 |
+| 各枠の上限（A宿上限〜外日上限） | A宿直など、それぞれの枠を担当する月間の上限です。空欄なら、できれば2回まで（入れないと枠が空くときだけ3回以上も入れます）。表では「A宿上限」「外日上限」のように短く表示します。 |
 
 1つの枠を1回と数えます。確定当直で同じ日に日直と宿直を担当する場合は2回です。
 月下限は、月上限以下に設定してください。
@@ -8638,7 +8708,7 @@ with staff_box_dl:
 
     # ダウンロードするExcelも、画面と同じく「先生の名前 → 備考 → その他」の順にそろえる（読み込みは列名で行うので、古い並びのファイルもそのまま使える）
     _first = ["先生の名前"] + [c for c in staff_df.columns if str(c).startswith("備考")]
-    current_xlsx = staff_xlsx_with_groups(staff_df[_first + [c for c in staff_df.columns if c not in _first and not str(c).startswith("_")]],
+    current_xlsx = staff_xlsx_with_groups(keep_blank_slot_caps(staff_df)[_first + [c for c in staff_df.columns if c not in _first and not str(c).startswith("_")]],
                                           [c for c in staff_df.columns if c not in NUMERIC_DEFAULTS and c not in GROUP_CAP_COLUMNS and c != DAY_GAP_COLUMN],
                                           st.session_state.get("group_rules_current"))
     st.download_button(
@@ -8745,7 +8815,7 @@ work_snapshot = {
     "next_special": bool(next_month_special_holiday),
     "multi": [[f"{d}日", s, int(c)] for (d, s), c in multi_slots_dict.items()],
     "fixed_csv": edited_fixed_df.to_csv(index=False),
-    "staff_csv": staff_df.to_csv(index=False),
+    "staff_csv": keep_blank_slot_caps(staff_df).to_csv(index=False),   # 枠ごとの上限の空欄は空欄のまま保存する
     "priority": {k: int(v) for k, v in shortage_priority.items()},
     "comments": {n: list(v) for n, v in imported_comments(year, month).items()},
     "alerts": {k: int(st.session_state.get(f"alert_{k}", v) or 0) for k, v in MATRIX_COUNT_ALERTS.items()},
