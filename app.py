@@ -3698,6 +3698,12 @@ def staff_table(df, editable, show_ng=False, max_height=300, ng_width=None, comm
             st.stop()
         if isinstance(out, pd.DataFrame):
             out = out.drop(columns=[STAFF_COMMENT_COLUMN, STAFF_ANNUAL_COLUMN], errors="ignore")   # 見るだけの列は、医師条件のデータには入れない
+        # 表で枠ごとの上限を空欄にした（または入れた）ら、その内容を今の表として残して描き直す
+        # （列を出す・隠す判断は表を出す前に行うので、描き直さないと、空欄にしても列が出たまま・スイッチも押せないままになる）
+        if isinstance(out, pd.DataFrame) and bool(slot_cap_values(out)) != bool(cap_values):
+            year, month = st.session_state.get("staff_table_ym") or (None, None)
+            _staff_apply_new_table(out.reset_index(), year, month, None)
+            st.rerun()
         slot_cap_switch(df.drop(columns=[STAFF_COMMENT_COLUMN, STAFF_ANNUAL_COLUMN], errors="ignore"), locked=bool(cap_values))
     else:
         cols = ["先生の名前"] + [c for c in df.columns if str(c).startswith("備考")] \
