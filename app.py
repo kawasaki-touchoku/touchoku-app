@@ -2494,6 +2494,8 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
     objective_terms += group_avoid_terms(doctors, days, daily_active_shifts, shifts, staff_df)
     # 枠ごとの上限が空欄の枠は、できれば2回まで（1つの枠に偏らないように）
     objective_terms += soft_cap_terms(model, doctors, days, daily_active_shifts, shifts, soft_caps)
+    # 回数の勾配：枠に余裕があるとき、グループごとに回数を多め・少なめにする（対象外のグループは入れない）
+    objective_terms += group_level_terms(model, doctors, worked_all, staff_df)
     # 多め希望（病棟/外来・宿直/日直・平日/休日）：希望の種類に寄せる（月の回数は増やさない）
     objective_terms += doc_pref_terms(model, doctors, days, daily_active_shifts, shifts, staff_df, is_holiday, required_count,
                                       lambda doc: min_shifts_total[doc], total_cap)
@@ -5715,6 +5717,8 @@ def _period_generate_core(P, staff_df, custom_holidays, multi_slots_dict, fixed_
     objective_terms += group_avoid_terms(doctors, days, daily_active_shifts, shifts, staff_df)
     # 枠ごとの上限が空欄の枠は、できれば2回まで（1つの枠に偏らないように）
     objective_terms += soft_cap_terms(model, doctors, days, daily_active_shifts, shifts, soft_caps)
+    # 回数の勾配：枠に余裕があるとき、グループごとに回数を多め・少なめにする（対象外のグループは入れない）
+    objective_terms += group_level_terms(model, doctors, worked_all, staff_df)
     # 多め希望（病棟/外来・宿直/日直・平日/休日）：希望の種類に寄せる（月の回数は増やさない）
     objective_terms += doc_pref_terms(model, doctors, days, daily_active_shifts, shifts, staff_df, is_holiday, required_count,
                                       lambda doc: min_shifts_total[doc], total_cap)
@@ -6119,9 +6123,18 @@ DOC_GROUP_MEMO = "メモ"   # グループの設定の、いちばん右のメ�
 DOC_GROUP_AVOID_COLUMN = "_できれば入れない枠"   # 計算用の列（表には出さない）
 DOC_GROUP_AVOID_PENALTY = 3000   # △の枠に1回入れるごとの減点（人が足りない枠を空けておく減点より小さくして、足りないときは入れる）
 DOC_GROUP_SHEET = "グループの設定"   # 医師条件のExcelの2枚目のシート
+# 回数の勾配：枠に余裕があるとき、グループごとに当直の回数を多め・少なめにする（対象外のグループは差をつける計算に入れない）
+DOC_GROUP_LEVEL = "回数（余裕があるとき）"   # グループの設定の列
+DOC_GROUP_LEVEL_OFF = "対象外"
+DOC_GROUP_LEVEL_PCT = {"⬆⬆ 多め": 125, "⬆ やや多め": 112, "ふつう": 100, "⬇ やや少なめ": 88, "⬇⬇ 少なめ": 75}   # 「ふつう」を100としたときの回数の割合
+DOC_GROUP_LEVELS = list(DOC_GROUP_LEVEL_PCT) + [DOC_GROUP_LEVEL_OFF]
+DOC_GROUP_LEVEL_COLUMN = "_回数の勾配"   # 計算用の列（表には出さない）。割合（％）、対象外は空欄
+DOC_GROUP_LEVEL_PENALTY = 1000   # 目安の回数から1回ずれるごとの減点（空き枠・月下限・枠の偏り・△より弱い）
 # 最初に並べる6つのグループ（名前, A日直・A宿直・B日直・B宿直・外来日直・外来宿直 の順の◯△×）。年次下位の外来宿直は△
 DOC_GROUP_DEFAULT = [("年次上位", "◯◯××◯×"), ("年次中位", "◯◯△◯◯×"), ("年次下位", "△△◯◯◯△"), ("レジ", "××◯◯◯◯"),
                      ("外来日直のみ", "××××◯×"), ("日直のみ", "◯×◯×◯×")]
+# 最初のグループの「回数（余裕があるとき）」。ここにないグループは対象外
+DOC_GROUP_LEVEL_DEFAULT = {"年次上位": "⬇⬇ 少なめ", "年次中位": "⬇ やや少なめ", "年次下位": "ふつう", "レジ": "⬆⬆ 多め"}
 
 
 def doc_group_slots():
@@ -6140,7 +6153,18 @@ def doc_group_next_name(used):
 def default_group_rules():
     """最初のグループの設定（年次上位・年次中位・年次下位・レジ・外来日直のみ・日直のみ）。{グループ名: {枠: ◯△×, "メモ": 文字}}"""
     slots = doc_group_slots()
-    return {name: {**{s: marks[j] for j, s in enumerate(slots)}, DOC_GROUP_MEMO: ""} for name, marks in DOC_GROUP_DEFAULT}
+    return {name: {**{s: marks[j] for j, s in enumerate(slots)}, DOC_GROUP_LEVEL: DOC_GROUP_LEVEL_DEFAULT.get(name, DOC_GROUP_LEVEL_OFF),
+                   DOC_GROUP_MEMO: ""}
+            for name, marks in DOC_GROUP_DEFAULT}
+
+
+def doc_group_level_of(value):
+    """「回数（余裕があるとき）」のマスを、決まった値（⬆⬆ 多め〜⬇⬇ 少なめ・対象外）にする。矢印なしの「多め」なども受け付ける。空欄は対象外。"""
+    v = clean_text(value)
+    if v in DOC_GROUP_LEVELS:
+        return v
+    plain = {re.sub(r"[⬆⬇\s]", "", k): k for k in DOC_GROUP_LEVELS}
+    return plain.get(re.sub(r"[⬆⬇↑↓\s]", "", v), DOC_GROUP_LEVEL_OFF)
 
 
 def normalize_group_rules(rules):
@@ -6161,7 +6185,10 @@ def normalize_group_rules(rules):
             v = clean_text(row.get(s, "")).replace("○", "◯").replace("〇", "◯").replace("✕", "×").replace("x", "×").replace("X", "×")
             marks[s] = v if v in DOC_GROUP_MARKS else "◯"
         memo = clean_text(row.get(DOC_GROUP_MEMO, ""))
-        out[g] = {**marks, DOC_GROUP_MEMO: "" if memo.lower() in ("nan", "none") else memo}
+        # この列ができる前の途中保存・Excel（列そのものがない）は、最初のグループと同じ名前なら最初の値にする
+        level = doc_group_level_of(row[DOC_GROUP_LEVEL]) if DOC_GROUP_LEVEL in row else DOC_GROUP_LEVEL_DEFAULT.get(g, DOC_GROUP_LEVEL_OFF)
+        out[g] = {**marks, DOC_GROUP_LEVEL: level,
+                  DOC_GROUP_MEMO: "" if memo.lower() in ("nan", "none") else memo}
     return out
 
 
@@ -6310,19 +6337,63 @@ def soft_cap_terms(model, doctors, days, daily_active_shifts, shifts, soft_caps)
     return terms
 
 
+def group_level_terms(model, doctors, worked_all, staff_df):
+    """
+    回数の勾配：グループの「回数（余裕があるとき）」が対象外でない先生の回数を、割合（ふつう＝100）に近づける。
+    みんなに共通の「ふつうの人の回数」（0.1回きざみ）を計算で選び、先生ごとの目安＝割合×ふつうの回数（四捨五入して、月下限〜月上限に収める）
+    からのずれ（回）を減点する。目安を整数の回数にしておくと、計算が速い。
+    枠を埋めること・月下限〜月上限などの決まりが先なので、効くのは枠に余裕があるときだけ。同じ段階の先生は、なるべく同じ回数になる。
+    """
+    pct, bounds = {}, {}
+    if DOC_GROUP_LEVEL_COLUMN in staff_df.columns:
+        for _, row in staff_df.iterrows():
+            v = clean_text(row.get(DOC_GROUP_LEVEL_COLUMN, ""))
+            if v and v.lower() not in ("nan", "none"):
+                name = clean_text(row["先生の名前"])
+                pct[name] = int(float(v))
+                lo = int(float(clean_text(row.get("月下限", 0)) or 0))
+                hi = int(float(clean_text(row.get("月上限", 0)) or 0))
+                bounds[name] = (min(lo, hi), hi)
+    docs = [d for d in doctors if d in pct and d in worked_all]
+    if len(docs) < 2:
+        return []
+    caps = {d: (min(bounds[d][0], min(bounds[d][1], len(worked_all[d]))), min(bounds[d][1], len(worked_all[d]))) for d in docs}
+    most = max(hi for _, hi in caps.values())
+
+    def targets(sc):
+        """ふつうの人の回数が sc（0.1回単位）のときの、先生ごとの目安の回数（四捨五入して、月下限〜月上限に収める）。"""
+        return tuple(min(caps[d][1], max(caps[d][0], int(pct[d] * sc / 1000 + 0.5))) for d in docs)
+    # 候補（0.1回きざみ）のうち、目安の組み合わせが同じになるものは1つにまとめる（計算を軽くする）
+    choices = list(dict.fromkeys(targets(sc) for sc in range(0, 10 * most * 2 + 1)))
+    pick = [model.NewBoolVar(f"group_level_choice_{k}") for k in range(len(choices))]   # どれか1つを選ぶ
+    model.AddExactlyOne(pick)
+    terms = []
+    for j, d in enumerate(docs):
+        table = [c[j] for c in choices]
+        target = sum(t * z for t, z in zip(table, pick))
+        dev = model.NewIntVar(0, len(worked_all[d]) + max(table), f"group_level_dev_{d}")
+        model.Add(dev >= sum(worked_all[d]) - target)
+        model.Add(dev >= target - sum(worked_all[d]))
+        terms.append(-DOC_GROUP_LEVEL_PENALTY * dev)
+    return terms
+
+
 def apply_group_rules(staff_df, rules):
     """
     計算に使う医師条件を作る（画面の表・保存する医師条件は変えない）。
     ・×の枠：その枠の上限を0にする（確定当直は、今までどおり上限より優先）
     ・△の枠：「できれば入れない枠」の列に入れる（計算で、入れるたびに減点する）
     ・もうないグループ（消したグループ）の先生は、グループなしとして扱う
+    ・回数（余裕があるとき）：「回数の勾配」の列に割合（％）を入れる（対象外は空欄）
     """
     df = staff_df.copy()
     rules = normalize_group_rules(rules)
-    avoid = []
+    avoid, levels = [], []
     for i, row in df.iterrows():
         g = doc_group_of(row.get(DOC_GROUP_COLUMN, ""))
-        marks = {s: m for s, m in rules.get(g, {}).items() if s != DOC_GROUP_MEMO}
+        marks = {s: m for s, m in rules.get(g, {}).items() if s in doc_group_slots()}
+        lv = doc_group_level_of(rules.get(g, {}).get(DOC_GROUP_LEVEL, "")) if g in rules else DOC_GROUP_LEVEL_OFF
+        levels.append(DOC_GROUP_LEVEL_PCT.get(lv, ""))
         for s, mark in marks.items():
             if mark == "×" and s + "上限" in df.columns:
                 df.at[i, s + "上限"] = 0
@@ -6330,6 +6401,7 @@ def apply_group_rules(staff_df, rules):
                     df.at[i, SLOT_CAP_SOFT_COLUMN] = ",".join(x for x in clean_text(df.at[i, SLOT_CAP_SOFT_COLUMN]).split(",") if x and x != s)
         avoid.append(",".join(s for s, mark in marks.items() if mark == "△"))
     df[DOC_GROUP_AVOID_COLUMN] = avoid
+    df[DOC_GROUP_LEVEL_COLUMN] = levels   # 回数の勾配（％。対象外・グループなしは空欄）
     return df
 
 
@@ -6437,19 +6509,21 @@ def group_rules_xlsx_sheet(wb, rules):
     ws = wb.create_sheet(DOC_GROUP_SHEET)
     rules = normalize_group_rules(rules)
     slots = doc_group_slots()
-    ws.append(["グループ名"] + slots + [DOC_GROUP_MEMO])
+    ws.append(["グループ名"] + slots + [DOC_GROUP_LEVEL, DOC_GROUP_MEMO])
     for c in ws[1]:
         c.font, c.fill, c.alignment = Font(bold=True), PatternFill("solid", fgColor="DFE6EF"), Alignment(horizontal="center")
     for g, row in rules.items():
-        ws.append([g] + [row[s] for s in slots] + [row.get(DOC_GROUP_MEMO, "")])
-        for i in range(2, len(slots) + 2):
+        ws.append([g] + [row[s] for s in slots] + [row.get(DOC_GROUP_LEVEL, DOC_GROUP_LEVEL_OFF), row.get(DOC_GROUP_MEMO, "")])
+        for i in range(2, len(slots) + 3):
             ws.cell(ws.max_row, i).alignment = Alignment(horizontal="center")
     ws.append([])
     ws.append(["◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない"])
+    ws.append([f"{DOC_GROUP_LEVEL}：" + "／".join(DOC_GROUP_LEVELS) + "（枠に余裕があるとき、グループごとに回数を多め・少なめにします）"])
     ws.column_dimensions["A"].width = 16
     for i in range(2, len(slots) + 2):
         ws.column_dimensions[chr(64 + i)].width = 10
-    ws.column_dimensions[chr(64 + len(slots) + 2)].width = 30
+    ws.column_dimensions[chr(64 + len(slots) + 2)].width = 20
+    ws.column_dimensions[chr(64 + len(slots) + 3)].width = 30
 
 
 def group_rules_from_xlsx(data):
@@ -6512,8 +6586,8 @@ def group_rules_ui(restored_state, year, month, staff_is_template=False):
             set_group_rules_base(saved)
     slots = doc_group_slots()
     base = st.session_state["group_rules_base"]
-    view = pd.DataFrame([[b["_id"], b["name"]] + [b[s] for s in slots] + [b.get(DOC_GROUP_MEMO, "")] for b in base],
-                        columns=["_id", "グループ名"] + slots + [DOC_GROUP_MEMO])
+    view = pd.DataFrame([[b["_id"], b["name"]] + [b[s] for s in slots] + [b.get(DOC_GROUP_LEVEL, DOC_GROUP_LEVEL_OFF), b.get(DOC_GROUP_MEMO, "")] for b in base],
+                        columns=["_id", "グループ名"] + slots + [DOC_GROUP_LEVEL, DOC_GROUP_MEMO])
     with st.container(key="group_rules_box", border=True):
         st.markdown("<div style='font-weight:800;color:#24405f;font-size:1.02rem'>👥 グループの設定（任意）</div>", unsafe_allow_html=True)
         st.caption("同じ扱いにしたい先生をグループにまとめ、グループごとに入れる枠を決めます。**グループ名はマスをダブルクリックして変えられます**"
@@ -6526,11 +6600,18 @@ def group_rules_ui(restored_state, year, month, staff_is_template=False):
                                                            width=header_fit_width(s, 80),   # 見出しが切れない幅
                                                            help="◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない")
                        for s in slots})
+        config[DOC_GROUP_LEVEL] = st.column_config.SelectboxColumn(
+            DOC_GROUP_LEVEL, options=DOC_GROUP_LEVELS, required=True, default=DOC_GROUP_LEVEL_OFF, width=150,
+            help="枠に余裕があるとき、グループごとに当直の回数を多め・少なめにします（足りない月は全員で埋めるので差はつきません）。"
+                 "月下限〜月上限は必ず守ります。同じ段階のグループの先生は、なるべく同じ回数にします。"
+                 "対象外のグループは、差をつける計算に入れません（今までどおり）。")
         config[DOC_GROUP_MEMO] = st.column_config.TextColumn(DOC_GROUP_MEMO, width=240, help="自由に書けるメモです（計算には使いません）。")
         cur = st.data_editor(view, hide_index=True, use_container_width=False, num_rows="dynamic", column_config=config,
-                             column_order=["グループ名"] + slots + [DOC_GROUP_MEMO],   # 見えない番号（_id）は出さない
+                             column_order=["グループ名"] + slots + [DOC_GROUP_LEVEL, DOC_GROUP_MEMO],   # 見えない番号（_id）は出さない
                              key=f"group_rules_editor_{st.session_state.get('group_rules_gen', 0)}")
         st.caption("◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない（確定当直は、今までどおり入ります）")
+        st.caption(f"{DOC_GROUP_LEVEL}：枠に余裕があるとき、グループごとに回数を ⬆⬆ 多め〜⬇⬇ 少なめ にします（ふつうに比べて 多め 約1.25倍・やや多め 約1.1倍・"
+                   "やや少なめ 約0.9倍・少なめ 約0.75倍）。月下限〜月上限は必ず守ります。対象外のグループは差をつけません。")
 
     old_name = {b["_id"]: b["name"] for b in base}
     all_names = set(old_name.values())
@@ -6558,6 +6639,7 @@ def group_rules_ui(restored_state, year, month, staff_is_template=False):
         if old and name != old:
             renames[old] = name
         row = {s: r.get(s) for s in slots}
+        row[DOC_GROUP_LEVEL] = r.get(DOC_GROUP_LEVEL)
         row[DOC_GROUP_MEMO] = r.get(DOC_GROUP_MEMO)
         rows.append((name, row))
         ids.append(rid)
@@ -7421,10 +7503,11 @@ def staff_view_page():
         st.info("この保存では、グループは設定されていません。")
     if rules:
         slots = doc_group_slots()
-        gdf = pd.DataFrame([[g] + [r[s] for s in slots] + [r.get(DOC_GROUP_MEMO, "")] for g, r in rules.items()],
-                           columns=["グループ名"] + slots + [DOC_GROUP_MEMO])
+        gdf = pd.DataFrame([[g] + [r[s] for s in slots] + [r.get(DOC_GROUP_LEVEL, DOC_GROUP_LEVEL_OFF), r.get(DOC_GROUP_MEMO, "")] for g, r in rules.items()],
+                           columns=["グループ名"] + slots + [DOC_GROUP_LEVEL, DOC_GROUP_MEMO])
         gcfg = {"グループ名": st.column_config.TextColumn("グループ名", width=120)}
         gcfg.update({s: st.column_config.TextColumn(s, width=header_fit_width(s, 0)) for s in slots})
+        gcfg[DOC_GROUP_LEVEL] = st.column_config.TextColumn(DOC_GROUP_LEVEL, width=150)
         gcfg[DOC_GROUP_MEMO] = st.column_config.TextColumn(DOC_GROUP_MEMO, width=240)
         st.dataframe(gdf, hide_index=True, use_container_width=False, column_config=gcfg)
         st.caption("◯ 入れる　△ できれば入れない（人が足りないときだけ入れる）　× 入れない（確定当直は、今までどおり入ります）")
@@ -7589,7 +7672,8 @@ def manual_page():
             + _ug_step(3, "医師条件を調整する", "",
                        ["当直案の枠ができるだけ埋まるように、この表で回数・上限・勤務間隔・希望日などを直します（①の表は見るだけ。直すのは③の表）。",
                         "表は横にスクロールできます。表の上の<b>「🗺 この表の列」</b>で、右にどの列があるかを確認できます。列名にカーソルを合わせると、その列の説明が出ます。",
-                        "<b>グループ</b>：表の上の「👥 グループの設定」で、グループごとに入れる枠（◯入れる・△できれば入れない・×入れない）を決め、表の「グループ」の列で先生のグループを選びます。",
+                        "<b>グループ</b>：表の上の「👥 グループの設定」で、グループごとに入れる枠（◯入れる・△できれば入れない・×入れない）を決め、表の「グループ」の列で先生のグループを選びます。"
+                        "「回数（余裕があるとき）」で、枠に余裕がある月に、グループごとに回数を多め・少なめにできます（対象外のグループは差をつけません）。",
                         "<b>多め希望</b>：「病棟/外来 多め」「宿直/日直 多め」「平日/休日 多め」で、できれば多めに入れたい種類を選べます（月の回数は増えず、種類の割合を寄せるだけ）。",
                         "灰色の列（💬 先生からのコメント・📊 年間（1か月あたり））は見るだけで、直せません。",
                         "<b>枠ごとの上限（A宿・B宿・外宿・A日・B日・外日）</b>の列は、ふだんは出しません（入れる枠はグループで決めます）。空欄のときは、1つの枠はできれば月2回までにします。各枠の上限を先生ごとに個別に決めたいときは、表の下の紫のスイッチで出します。値が入っている先生がいると、自動で出して黄色で知らせます。",
