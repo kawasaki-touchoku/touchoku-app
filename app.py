@@ -7510,10 +7510,9 @@ def staff_view_page():
             df[c] = df[c].map(lambda v: "" if clean_text(v).lower() in ("nan", "none", "<na>") else clean_text(v))
     # NG日の列は、いちばん長い先生のNG日が入る幅にする（ほかの列は列名が見える最小限）
     _ng_len = max([len(clean_text(v)) for v in df.get(NG_COLUMN, pd.Series(dtype=str)).tolist()] + [10])
-    staff_table(df, editable=False, show_ng=True, max_height=900, ng_width=min(900, 8 * _ng_len + 30))
     # グループの設定（見るだけ）：グループごとに担当する枠（◯△×）とメモ
     rules = normalize_group_rules(data.get("group_rules")) if data.get("group_rules") is not None else {}
-    st.markdown("<div style='font-weight:800;color:#24405f;font-size:1.02rem;margin-top:14px'>👥 グループの設定（見るだけ）</div>",
+    st.markdown("<div style='font-weight:800;color:#24405f;font-size:1.02rem;margin-top:6px'>👥 グループの設定（見るだけ）</div>",
                 unsafe_allow_html=True)
     if data.get("group_rules") is None:
         st.info("この保存には、グループの設定が入っていません（グループの設定を使い始める前に保存したものです）。")
@@ -7529,6 +7528,9 @@ def staff_view_page():
         gcfg[DOC_GROUP_MEMO] = st.column_config.TextColumn(DOC_GROUP_MEMO, width=240)
         st.dataframe(gdf, hide_index=True, use_container_width=False, column_config=gcfg)
         st.caption("◯：担当する　△：できるだけ担当しない（ほかの先生で埋まらないときだけ担当する）　×：担当しない（ただし、確定当直で決めた分は×でも担当します）")
+    # 医師条件（見るだけ）：グループの設定の下。高さは当直作成版の③の表と同じにして、ほかの先生は表の中をスクロールして見る
+    st.markdown("<div style='font-weight:800;color:#24405f;font-size:1.02rem;margin-top:14px'>📋 医師条件</div>", unsafe_allow_html=True)
+    staff_table(df, editable=False, show_ng=True, max_height=300, ng_width=min(900, 8 * _ng_len + 30))
     # 年間の当直回数（見るだけ）：途中保存に入っている回数（先生ごと・月ごとの回数と、集計だけのファイルの回数）を、その保存の集計の区切りで合計する
     annual = data.get("annual") or {}
     a_pieces, a_sums = list(annual.get("pieces") or []), list(annual.get("summaries") or [])
