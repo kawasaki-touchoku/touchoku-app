@@ -1595,7 +1595,7 @@ def posting_xlsx(df_result, year, month, title, roster=None, created=None):
     ws.print_options.horizontalCentered = True
     ws.page_margins.left = ws.page_margins.right = 0.4
     ws.page_margins.top = ws.page_margins.bottom = 0.5
-    # 年間集計用の見えないシート（当直のない先生も「在籍」として数えるため、先生の一覧も入れる）
+    # 年間集計用の見えないシート（日付と平日/休日。先生の一覧も入れるが、在籍月数は当直表に名前がある月だけで数える）
     ds = wb.create_sheet(POSTING_DATA_SHEET)
     ds["A1"] = "このシートは、アプリの年間集計で使います。消したり書きかえたりしないでください。"
     ds["A2"], ds["B2"] = "作成日時", created or remote_now()
@@ -7004,7 +7004,7 @@ def annual_totals(pieces, months, exclude=None, summaries=()):
     """
     months の月の分を、先生ごとに合計する。
     集計だけのファイル（summaries）の期間に入る月は、そのファイルの回数を使い、掲示用Excelの分は使わない（二重に数えないため）。
-    戻り値：{先生: {"m": 在籍月数（日数の割合で数える）, "c": [当直合計, 宿直, 日直, 休日, 病棟, 外来, 平日]}}
+    戻り値：{先生: {"m": 在籍月数（当直表に名前がある月を、日数の割合で数える）, "c": [当直合計, 宿直, 日直, 休日, 病棟, 外来, 平日]}}
     以前の途中保存（回数が4つだけ）の月がある先生は、病棟・外来が分からないので None にする。
     exclude=(開始日, 終了日) を渡すと、その期間と重なる分は数えない（これから作る月の分）。
     """
@@ -7028,7 +7028,9 @@ def annual_totals(pieces, months, exclude=None, summaries=()):
             continue
         y, m = int(p["month"][:4]), int(p["month"][5:])
         frac = int(p.get("ndays", 0)) / _REAL_MONTHRANGE(y, m)[1]
-        for name in list(dict.fromkeys(list(p.get("roster", [])) + list(p.get("counts", {}).keys()))):
+        # 在籍月数は、当直表に名前がある（その月に1回以上当直がある）月だけ数える
+        # （医師条件の表にいるだけの先生＝入職前・退職後などで当直表に名前がない月は数えない）
+        for name in [n for n, v in p.get("counts", {}).items() if v and int(v[0] or 0) > 0]:
             o = out.setdefault(name, {"m": 0.0, "c": [0] * len(ANNUAL_KINDS)})
             o["m"] += frac
             v = list(p.get("counts", {}).get(name, [0] * len(ANNUAL_KINDS)))
@@ -7408,7 +7410,7 @@ def annual_section(year, month, target_start, target_end, frac, restored_state, 
     annual_publish_rates(rows)   # 医師条件の表の「📊 年間（1か月あたり）」の列に使う
     st.markdown(f"**先生ごとの回数（{span}）**　<span style='font-size:.8rem;opacity:.7'>回数の右の（ ）内は1か月あたり。表の中でスクロールできます</span>", unsafe_allow_html=True)
     st.markdown(annual_table_html(rows), unsafe_allow_html=True)
-    st.caption(f"在籍月数：読み込んだ月のうち、その先生の名前がのっている月の数です（日数の割合で数えます。集計だけのファイルの月は、そのファイルの在籍月数）。"
+    st.caption(f"在籍月数：読み込んだ月のうち、その先生の名前が当直表にある月の数です（日数の割合で数えます。集計だけのファイルの月は、そのファイルの在籍月数）。当直が0回の月は入りません。"
                f"平均（1か月あたり{avg:.1f}回）とくらべます。「―」は分からない回数です。")
     st.download_button("📥 集計をExcelでダウンロード", annual_totals_xlsx(rows, f"年間の当直回数（{span}）"),
                        file_name=f"年間の当直回数_{span}.xlsx", key="annual_xlsx",
@@ -7548,7 +7550,7 @@ def staff_view_page():
             st.markdown(f"<div style='font-weight:800;color:#24405f;font-size:1.02rem;margin-top:14px'>📊 年間の当直回数（{span}・見るだけ）</div>"
                         "<span style='font-size:.8rem;opacity:.7'>回数の右の（ ）内は1か月あたり。表の中でスクロールできます</span>", unsafe_allow_html=True)
             st.markdown(annual_table_html(rows), unsafe_allow_html=True)
-            st.caption(f"在籍月数：その先生の名前がのっている月の数です（日数の割合で数えます）。平均（1か月あたり{avg:.1f}回）とくらべます。"
+            st.caption(f"在籍月数：その先生の名前が当直表にある月の数です（日数の割合で数えます。当直が0回の月は入りません）。平均（1か月あたり{avg:.1f}回）とくらべます。"
                        "「―」は分からない回数です。途中保存したときの集計なので、作成中の当直案の分は入っていません。")
             shown_annual = True
     if not shown_annual:
@@ -7797,7 +7799,7 @@ def manual_page():
             "<dt>先生側の休日・別途決定の表示が違う</dt><dd>管理用パスワードを入れて、「締め切り日・休日設定を更新」を押してください。</dd>"
             "<dt>先生から「URLが無効」と言われた</dt><dd>URLを作り直していないか確認してください。案内書類をなくした場合は「URLを作り直す」で新しい案内書類を印刷します。</dd>"
             "<dt>医師条件の表の右の方の列が見えない</dt><dd>表は横にスクロールできます。表の上の「🗺 この表の列」で、右にどの列があるかを確認できます。</dd>"
-            "<dt>年間の当直回数で、在籍月数が少なく出る先生がいる</dt><dd>見えないシート「集計用」がない掲示用Excel（シートを消したものや、少し前のアプリで作ったもの）では、その月に当直がなかった先生を在籍に数えられません。アプリでもう一度ダウンロードした掲示用Excelを使うと、正しく数えられます。</dd>"
+            "<dt>年間の当直回数の在籍月数が、思ったより少ない</dt><dd>在籍月数は、その先生の名前が当直表にある月だけを数えます。休みなどで当直が0回だった月は入らないので、その先生の「1か月あたり」は少し高めに出ます。</dd>"
             "<dt>確定当直に掲示用Excelを読み込んだら、作る月の分まで入った</dt><dd>作る月（または期間）の掲示用Excelを読み込んでいないか確認してください。確定当直に入れるのは、ふつうは前月の掲示用Excelです。</dd>"
             "<dt>アプリが起動しない・エラーが出る</dt><dd>表示されたエラーの内容を控えて、管理担当者に連絡してください。</dd></dl>")
 
