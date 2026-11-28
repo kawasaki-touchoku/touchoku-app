@@ -7169,7 +7169,10 @@ ANNUAL_TABLE_CSS = (
     ".an-t th{background:#eef1f5;font-weight:600}.an-t td:first-child,.an-t th:first-child{text-align:left}"
     ".an-box{max-height:420px;overflow:auto;border:1px solid rgba(128,144,160,.35);border-radius:8px;margin:2px 0 6px}"
     ".an-box thead{position:sticky;top:0;z-index:2}.an-box .an-t{border-collapse:separate;border-spacing:0}"
-    ".an-t .pm{display:inline;font-size:.74rem;opacity:.6;margin-left:3px}.an-t .lo{color:#1f6fbf;font-weight:700}.an-t .hi{color:#c0392b;font-weight:700}"
+    ".an-t .pm{display:inline-block;margin-left:5px;font-size:.72rem;font-weight:500;color:#4a5a70;background:#e6ebf2;border-radius:999px;padding:0 6px}"
+    ".an-t tbody tr:nth-child(even) td{background:#eef3fb}.an-t tbody tr:nth-child(even) .pm{background:#dbe4f1}"   # 1行おきにうすい青
+    ".an-t tbody tr:hover td{background:#fff3e0}.an-t tbody tr:hover .pm{background:#fde2bf}"   # カーソルを合わせた行はオレンジ（医師条件の表と同じ）
+    ".an-t .lo{color:#1f6fbf;font-weight:700}.an-t .hi{color:#c0392b;font-weight:700}"
     ".an-t tr.gone td{opacity:.45}.an-t .l{text-align:left}"
     ".an-m{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0}.an-m div{border-radius:8px;padding:4px 0;width:66px;text-align:center;font-size:.8rem;border:1px solid rgba(128,144,160,.35)}"
     ".an-m .ok{background:#e9f6ee;border-color:#9fd3b0;color:#1d6b3a;font-weight:700}.an-m .sv{background:#eaf0f7;border-color:#b7c7dc;color:#24405f;font-weight:700}"
@@ -7180,13 +7183,15 @@ ANNUAL_TABLE_CSS = (
 def annual_cell(v, m, bold=False):
     if v is None:   # 以前の途中保存で、内訳が分からない
         return "―"
-    pm = f"({v / m:.1f})" if m > 0 else "(―)"   # （ ）内は1か月あたり。1人1段に収めるため横に並べる
-    return (f"<b>{v}回</b><span class='pm'><b>{pm}</b></span>" if bold else f"{v}回<span class='pm'>{pm}</span>")
+    pm = f"月{v / m:.1f}" if m > 0 else "月―"   # 小さな札の中に1か月あたりの回数。1人1段に収めるため横に並べる
+    return (f"<b>{v}回</b><span class='pm'>{pm}</span>" if bold else f"{v}回<span class='pm'>{pm}</span>")
 
 
 def annual_diff_html(diff):
     if diff is None:
         return "<td class='l'>―</td>"
+    if abs(diff) < 0.05:   # 「-0.0」「+0.0」と出さない
+        return "<td class='l'>±0.0回/月</td>"
     return f"<td class='l'>{diff:+.1f}回/月</td>"   # 差の数字だけを出す（多い・少ないの評価や色分けはしない）
 
 
@@ -7408,7 +7413,7 @@ def annual_section(year, month, target_start, target_end, frac, restored_state, 
     span = f"{got[0][:4]}年{int(got[0][5:])}月〜{got[-1][:4]}年{int(got[-1][5:])}月" if got else ""
     rows, avg = annual_rows(tot, staff_names)
     annual_publish_rates(rows)   # 医師条件の表の「📊 年間（1か月あたり）」の列に使う
-    st.markdown(f"**先生ごとの回数（{span}）**　<span style='font-size:.8rem;opacity:.7'>回数の右の（ ）内は1か月あたり。表の中でスクロールできます</span>", unsafe_allow_html=True)
+    st.markdown(f"**先生ごとの回数（{span}）**　<span style='font-size:.8rem;opacity:.7'>回数の右の札（月1.6など）は、1か月あたりの回数です（在籍月数で割った回数）。表の中でスクロールできます</span>", unsafe_allow_html=True)
     st.markdown(annual_table_html(rows), unsafe_allow_html=True)
     st.caption(f"在籍月数：読み込んだ月のうち、その先生の名前が当直表にある月の数です（日数の割合で数えます。集計だけのファイルの月は、そのファイルの在籍月数）。当直が0回の月は入りません。"
                f"平均（1か月あたり{avg:.1f}回）とくらべます。「―」は分からない回数です。")
@@ -7461,7 +7466,7 @@ def annual_result_view(df_result, year, month, staff_names, created, now_word="�
         body += f"<tr><td>{html_escape(r['name'])}</td><td>{now_counts.get(r['name'], [0])[0]}回</td>{annual_body_cells(r)}</tr>"
     head = annual_head_html(["先生", f"{now_word}の当直"], "（年間）")
     st.subheader(f"📊 年間の回数（{now_word}込み）")
-    st.caption("回数の右の（ ）内は1か月あたり。この当直案を入れた場合の、年間の回数です（表の中でスクロールできます）。")
+    st.caption("回数の右の札（月1.6など）は1か月あたりの回数です。この当直案を入れた場合の、年間の回数です（表の中でスクロールできます）。")
     st.markdown(ANNUAL_TABLE_CSS + f"<div class='an-box'><table class='an-t'><thead>{head}</thead><tbody>{body}</tbody></table></div>", unsafe_allow_html=True)
 
 
@@ -7548,7 +7553,7 @@ def staff_view_page():
             names = [clean_text(n) for n in df["先生の名前"].tolist() if clean_text(n)]
             rows, avg = annual_rows(tot, names)
             st.markdown(f"<div style='font-weight:800;color:#24405f;font-size:1.02rem;margin-top:14px'>📊 年間の当直回数（{span}・見るだけ）</div>"
-                        "<span style='font-size:.8rem;opacity:.7'>回数の右の（ ）内は1か月あたり。表の中でスクロールできます</span>", unsafe_allow_html=True)
+                        "<span style='font-size:.8rem;opacity:.7'>回数の右の札（月1.6など）は、1か月あたりの回数です（在籍月数で割った回数）。表の中でスクロールできます</span>", unsafe_allow_html=True)
             st.markdown(annual_table_html(rows), unsafe_allow_html=True)
             st.caption(f"在籍月数：その先生の名前が当直表にある月の数です（日数の割合で数えます。当直が0回の月は入りません）。平均（1か月あたり{avg:.1f}回）とくらべます。"
                        "「―」は分からない回数です。途中保存したときの集計なので、作成中の当直案の分は入っていません。")
@@ -7704,7 +7709,7 @@ def manual_page():
             + _ug_band("📊 年間の当直回数", tag="任意")
             + _ug_step(None, "年間の当直回数を見る", "",
                        ["これまでの月の掲示用Excelを、まとめて読み込みます。当直表が見つからない月は、右の「📋 集計だけのファイル」に、ひな形で期間と先生ごとの回数を書いて読み込みます。",
-                        "先生ごとの回数（病棟・外来、宿直・日直、平日・休日、合計）が出ます。回数の右の（ ）内は1か月あたりです。",
+                        "先生ごとの回数（病棟・外来、宿直・日直、平日・休日、合計）が出ます。回数の右の札（月1.6など）は、1か月あたりの回数です。",
                         "集計は見るだけで、当直案の計算には使いません。偏りが気になる先生は、③の表の「📊 年間（1か月あたり）」の列を見ながら、多め希望で調整します。"], optional=True)
             + _ug_band("🎯 当直案の作成・確認")
             + _ug_step(None, "不足時の優先順位を決める", "", ["人数が足りない月に、どの枠から埋めるかを決めます。"], optional=True)
@@ -7774,7 +7779,7 @@ def manual_page():
               "<li>見えないシート「集計用」は年間の集計に使うので、消さないでください。</li></ul>"
               "<div class='warn'><b>手直しした掲示用Excelは、毎月手元に残してください。</b>翌月の確定当直（方法2）と、「📊 年間の当直回数」の集計に、そのまま読み込めます。</div></div>"
             + _ug_band("📊 年間の回数（今月込み）", tag="年間の当直回数を読み込んでいるときだけ")
-            + "<div class='part'><ul><li>この当直案を入れた場合の、先生ごとの年間の回数と、平均との差（1か月あたり）です。回数の右の（ ）内は1か月あたりです。</li></ul></div>")
+            + "<div class='part'><ul><li>この当直案を入れた場合の、先生ごとの年間の回数と、平均との差（1か月あたり）です。回数の右の札（月1.6など）は、1か月あたりの回数です。</li></ul></div>")
     if t_period:
         _ug("<div class='lead'>年末年始など、月をまたいで通しで当直を決めたいときに使います。今月の1日から、翌月の指定した日までを1つの当直案として作ります（例：12/1〜1/5）。</div>"
             + _ug_step(None, "期間指定版を開く", "通常版の、作る月を選ぶ欄の下の紫の枠",
